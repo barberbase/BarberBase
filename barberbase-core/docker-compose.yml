@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: barberbase-postgres
+    environment:
+      POSTGRES_USER: bb_user
+      POSTGRES_PASSWORD: bb_password
+      POSTGRES_DB: barberbase
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bb_user -d barberbase"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c work_mem=8MB
+      -c max_connections=50
+      -c lock_timeout=1s
+      -c statement_timeout=5s
+      -c idle_in_transaction_session_timeout=10s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: barberbase-api
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://bb_user:bb_password@postgres:5432/barberbase?sslmode=disable
+      JWT_SECRET: super-secret-jwt-signing-key-for-staff-tokens-must-be-long-and-random
+      HMAC_SECRET: super-secret-hmac-signing-key-for-customer-magic-links-must-be-long
+      AES_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef" # exactly 32 bytes
+      ENVIRONMENT: development
+      GOMEMLIMIT: 250MiB
+      BHEJNA_API_KEY: "platform-bhejna-key-mode-a"
+      BHEJNA_FROM_PHONE: "+912212345678"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
