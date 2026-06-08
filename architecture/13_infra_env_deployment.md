@@ -188,6 +188,7 @@ barberbase-core/
 ├── internal/
 │   ├── api/
 │   │   ├── generated.go           ← oapi-codegen output. NEVER edit.
+│   │   ├── server.go              ← Server struct with dependencies (Pool, Bhejna, Config) defined here so all handler files in this package can add methods on *Server
 │   │   ├── handlers_public.go
 │   │   ├── handlers_staff.go
 │   │   ├── handlers_admin.go

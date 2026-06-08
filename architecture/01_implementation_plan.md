@@ -83,8 +83,8 @@ exactly once per layer.
 **C0.1 — oapi-codegen + generated.go · build #1 · [AG]**
 Depends: —
 Read: `13_infra_env_deployment.md` (deps, dir tree), `02_architecture_constraints.md`, `openapi.yaml`
-Write: `api/openapi.yaml` (copy of frozen contract), `internal/api/generated.go` (codegen output), codegen config, `cmd/server/main.go` (skeleton)
-Accept: `generated.go` builds; every `operationId` in `openapi.yaml` has a server interface method; `generated.go` is committed and marked never-edit.
+Write: api/openapi.yaml (copy of frozen contract), internal/api/generated.go (codegen output), codegen config, internal/api/server.go (Server struct), cmd/server/main.go (skeleton)
+Accept: `generated.go` builds; every `operationId` in `openapi.yaml` has a server interface method; `generated.go` is committed and marked never-edit; Server struct defined in internal/api/server.go with fields Pool *pgxpool.Pool, Bhejna bhejna.Client, Config *config.Config; cmd/server/main.go instantiates api.Server{}, never defines its own server type.
 Test: `go build ./...` green; CI guard fails the build if `generated.go` is hand-edited (diff against fresh codegen).
 
 **C0.2 — pgxpool + transaction wrapper · build #2 · [CL→AG]**

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"barberbase-core/internal/api"
+	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/config"
 	"barberbase-core/internal/repository"
 
@@ -19,11 +20,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// ApiServer implements the generated api.ServerInterface.
-// It embeds api.Unimplemented to return 501 Not Implemented by default for all endpoints.
-type ApiServer struct {
-	api.Unimplemented
-}
+// Server is declared in package api.
 
 func main() {
 	log.Println("Starting BarberBase API Server...")
@@ -72,7 +69,12 @@ func main() {
 	})
 
 	// 5. Register oapi-codegen generated handler
-	apiServer := &ApiServer{}
+	bhejnaClient := bhejna.NewClient(pool, cfg.AESEncryptionKey, cfg.BhejnaAPIKey, cfg.BhejnaFromPhone)
+	apiServer := &api.Server{
+		Pool:   pool,
+		Bhejna: bhejnaClient,
+		Config: cfg,
+	}
 	apiHandler := api.Handler(apiServer)
 	r.Mount("/v1", apiHandler)
 
