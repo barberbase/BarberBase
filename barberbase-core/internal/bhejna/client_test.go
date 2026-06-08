@@ -128,7 +128,7 @@ func TestBhejnaClient_SendText_ModeB(t *testing.T) {
 	ctx := context.Background()
 
 	aesKey := []byte("0123456789abcdef0123456789abcdef") // 32 bytes
-	encryptedKey, err := encryptAESGCM("mode-b-secret-key", aesKey)
+	encryptedKey, err := EncryptAESGCM("mode-b-secret-key", aesKey)
 	if err != nil {
 		t.Fatalf("Failed to encrypt Mode B API key: %v", err)
 	}

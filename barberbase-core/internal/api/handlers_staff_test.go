@@ -3,7 +3,11 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -54,8 +58,8 @@ func setupTestServer(t *testing.T) (*Server, *pgxpool.Pool, uuid.UUID, uuid.UUID
 	if err != nil {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
-
 	// Clean tables
+	_, _ = pool.Exec(ctx, "DELETE FROM webhook_events")
 	_, _ = pool.Exec(ctx, "DELETE FROM staff_otps")
 	_, _ = pool.Exec(ctx, "DELETE FROM staff_members")
 	_, _ = pool.Exec(ctx, "DELETE FROM locations")
@@ -320,3 +324,304 @@ func TestVerifyStaffOTP_RefreshTokenTTL30Days(t *testing.T) {
 		t.Fatalf("Expected refresh token TTL to be 30 days (skew <= 10s), got %v (diff: %v)", duration, diff)
 	}
 }
+
+// ===========================================================================
+// WEBHOOK INGRESS INTEGRATION TESTS
+// ===========================================================================
+
+type failingMockBhejna struct {
+	t *testing.T
+}
+
+func (f failingMockBhejna) SendText(ctx context.Context, tenantID, locationID uuid.UUID, req bhejna.SendTextReq) (*bhejna.SendResult, error) {
+	f.t.Fatal("Downstream processing (SendText) was called synchronously on the request path!")
+	return nil, nil
+}
+
+func (f failingMockBhejna) SendTemplate(ctx context.Context, tenantID, locationID uuid.UUID, req bhejna.SendTemplateReq) (*bhejna.SendResult, error) {
+	f.t.Fatal("Downstream processing (SendTemplate) was called synchronously on the request path!")
+	return nil, nil
+}
+
+func computeHMACSignature(body []byte, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	return BhejnaSignaturePrefix + hex.EncodeToString(mac.Sum(nil))
+}
+
+func TestReceiveBhejnaWebhook_ModeA_Success(t *testing.T) {
+	s, pool, _, _, _, _ := setupTestServer(t)
+	defer pool.Close()
+
+	secret := "super-secret-platform-key-for-webhooks-12345"
+	os.Setenv("BHEJNA_WEBHOOK_SECRET", secret)
+	defer os.Unsetenv("BHEJNA_WEBHOOK_SECRET")
+
+	eventID := uuid.New().String()
+	payload := map[string]interface{}{
+		"bhejna_event_id": eventID,
+		"event_type":      "message.received",
+		"channel":         "whatsapp",
+		"received_at":     time.Now().Format(time.RFC3339),
+		"business_phone_number": "912212345678",
+		"sender": map[string]interface{}{
+			"phone_number": "919876543210",
+		},
+		"message": map[string]interface{}{
+			"type": "text",
+			"body": "JOIN test-salon JN8K4P",
+		},
+	}
+	bodyBytes, _ := json.Marshal(payload)
+	signature := computeHMACSignature(bodyBytes, secret)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/bhejna", bytes.NewReader(bodyBytes))
+	req.Header.Set(BhejnaSignatureHeader, signature)
+	rec := httptest.NewRecorder()
+
+	s.ReceiveBhejnaWebhook(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK, got %d. Response: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify database insert
+	ctx := context.Background()
+	var exists bool
+	var dbStatus string
+	var dbLocationID *uuid.UUID
+	err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM webhook_events WHERE external_event_id = $1), status, location_id FROM webhook_events WHERE external_event_id = $1 GROUP BY status, location_id", eventID).Scan(&exists, &dbStatus, &dbLocationID)
+	if err != nil {
+		t.Fatalf("Failed to query webhook_events: %v", err)
+	}
+	if !exists {
+		t.Fatal("Webhook event was not inserted into database")
+	}
+	if dbStatus != "pending" {
+		t.Errorf("Expected status 'pending', got %s", dbStatus)
+	}
+	if dbLocationID != nil {
+		t.Errorf("Expected location_id to be nil, got %v", dbLocationID)
+	}
+}
+
+func TestReceiveBhejnaWebhook_ModeA_InvalidSignature(t *testing.T) {
+	s, pool, _, _, _, _ := setupTestServer(t)
+	defer pool.Close()
+
+	secret := "super-secret-platform-key-for-webhooks-12345"
+	os.Setenv("BHEJNA_WEBHOOK_SECRET", secret)
+	defer os.Unsetenv("BHEJNA_WEBHOOK_SECRET")
+
+	eventID := uuid.New().String()
+	payload := map[string]interface{}{
+		"bhejna_event_id": eventID,
+		"event_type":      "message.received",
+	}
+	bodyBytes, _ := json.Marshal(payload)
+	signature := computeHMACSignature(bodyBytes, "wrong-secret-value")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/bhejna", bytes.NewReader(bodyBytes))
+	req.Header.Set(BhejnaSignatureHeader, signature)
+	rec := httptest.NewRecorder()
+
+	s.ReceiveBhejnaWebhook(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 Unauthorized, got %d. Response: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify no database insert
+	ctx := context.Background()
+	var exists bool
+	err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM webhook_events WHERE external_event_id = $1)", eventID).Scan(&exists)
+	if err != nil {
+		t.Fatalf("Failed to query webhook_events: %v", err)
+	}
+	if exists {
+		t.Fatal("Webhook event should NOT have been inserted into database")
+	}
+}
+
+func TestReceiveBhejnaWebhookModeB_Success(t *testing.T) {
+	s, pool, tenantID, locationID, _, _ := setupTestServer(t)
+	defer pool.Close()
+
+	ctx := context.Background()
+	testSecret := "my-awesome-shop-mode-b-webhook-secret-9999"
+
+	// Encrypt the secret
+	encryptedSecret, err := bhejna.EncryptAESGCM(testSecret, s.Config.AESEncryptionKey)
+	if err != nil {
+		t.Fatalf("Failed to encrypt webhook secret: %v", err)
+	}
+
+	// Update location to own_number and set encrypted secret
+	_, err = pool.Exec(ctx, `
+		UPDATE locations 
+		SET whatsapp_mode = 'own_number', bhejna_webhook_secret_encrypted = $1 
+		WHERE id = $2
+	`, encryptedSecret, locationID)
+	if err != nil {
+		t.Fatalf("Failed to update location to Mode B: %v", err)
+	}
+
+	eventID := uuid.New().String()
+	payload := map[string]interface{}{
+		"bhejna_event_id": eventID,
+		"event_type":      "message.received",
+		"channel":         "whatsapp",
+		"received_at":     time.Now().Format(time.RFC3339),
+		"business_phone_number": "912212345678",
+		"sender": map[string]interface{}{
+			"phone_number": "919876543210",
+		},
+	}
+	bodyBytes, _ := json.Marshal(payload)
+	signature := computeHMACSignature(bodyBytes, testSecret)
+
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/webhooks/bhejna/loc/%s", locationID.String()), bytes.NewReader(bodyBytes))
+	req.Header.Set(BhejnaSignatureHeader, signature)
+	rec := httptest.NewRecorder()
+
+	s.ReceiveBhejnaWebhookModeB(rec, req, locationID)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK, got %d. Response: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify database insert with tenant_id and location_id
+	var exists bool
+	var dbStatus string
+	var dbLocationID uuid.UUID
+	var dbTenantID uuid.UUID
+	err = pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM webhook_events WHERE external_event_id = $1), status, tenant_id, location_id FROM webhook_events WHERE external_event_id = $1 GROUP BY status, tenant_id, location_id", eventID).Scan(&exists, &dbStatus, &dbTenantID, &dbLocationID)
+	if err != nil {
+		t.Fatalf("Failed to query webhook_events: %v", err)
+	}
+	if !exists {
+		t.Fatal("Webhook event was not inserted into database")
+	}
+	if dbStatus != "pending" {
+		t.Errorf("Expected status 'pending', got %s", dbStatus)
+	}
+	if dbLocationID != locationID {
+		t.Errorf("Expected location_id %v, got %v", locationID, dbLocationID)
+	}
+	if dbTenantID != tenantID {
+		t.Errorf("Expected tenant_id %v, got %v", tenantID, dbTenantID)
+	}
+}
+
+func TestReceiveBhejnaWebhookModeB_ConfigErrors(t *testing.T) {
+	s, pool, _, locationID, _, _ := setupTestServer(t)
+	defer pool.Close()
+
+	ctx := context.Background()
+	eventID := uuid.New().String()
+	payload := map[string]interface{}{
+		"bhejna_event_id": eventID,
+		"event_type":      "message.received",
+	}
+	bodyBytes, _ := json.Marshal(payload)
+	signature := computeHMACSignature(bodyBytes, "some-secret")
+
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/webhooks/bhejna/loc/%s", locationID.String()), bytes.NewReader(bodyBytes))
+	req.Header.Set(BhejnaSignatureHeader, signature)
+	rec := httptest.NewRecorder()
+
+	s.ReceiveBhejnaWebhookModeB(rec, req, locationID)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("Expected 404 Not Found for location in shared mode, got %d. Response: %s", rec.Code, rec.Body.String())
+	}
+
+	randomLocID := uuid.New()
+	req2 := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/webhooks/bhejna/loc/%s", randomLocID.String()), bytes.NewReader(bodyBytes))
+	req2.Header.Set(BhejnaSignatureHeader, signature)
+	rec2 := httptest.NewRecorder()
+
+	s.ReceiveBhejnaWebhookModeB(rec2, req2, randomLocID)
+
+	if rec2.Code != http.StatusNotFound {
+		t.Fatalf("Expected 404 Not Found for non-existent location, got %d. Response: %s", rec2.Code, rec2.Body.String())
+	}
+
+	_, err := pool.Exec(ctx, "UPDATE locations SET is_active = false WHERE id = $1", locationID)
+	if err != nil {
+		t.Fatalf("Failed to soft-delete location: %v", err)
+	}
+
+	req3 := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/webhooks/bhejna/loc/%s", locationID.String()), bytes.NewReader(bodyBytes))
+	req3.Header.Set(BhejnaSignatureHeader, signature)
+	rec3 := httptest.NewRecorder()
+
+	s.ReceiveBhejnaWebhookModeB(rec3, req3, locationID)
+	if rec3.Code != http.StatusNotFound {
+		t.Fatalf("Expected 404 Not Found for soft-deleted location, got %d. Response: %s", rec3.Code, rec3.Body.String())
+	}
+}
+
+func TestReceiveBhejnaWebhook_InvalidJSON_ValidSignature(t *testing.T) {
+	s, pool, _, _, _, _ := setupTestServer(t)
+	defer pool.Close()
+
+	secret := "super-secret-platform-key-for-webhooks-12345"
+	os.Setenv("BHEJNA_WEBHOOK_SECRET", secret)
+	defer os.Unsetenv("BHEJNA_WEBHOOK_SECRET")
+
+	bodyBytes := []byte("this is not valid JSON string!!!")
+	signature := computeHMACSignature(bodyBytes, secret)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/bhejna", bytes.NewReader(bodyBytes))
+	req.Header.Set(BhejnaSignatureHeader, signature)
+	rec := httptest.NewRecorder()
+
+	s.ReceiveBhejnaWebhook(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for invalid JSON but valid signature, got %d. Response: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestReceiveBhejnaWebhook_Latency_And_NoDownstream(t *testing.T) {
+	s, pool, _, _, _, _ := setupTestServer(t)
+	defer pool.Close()
+
+	secret := "super-secret-platform-key-for-webhooks-12345"
+	os.Setenv("BHEJNA_WEBHOOK_SECRET", secret)
+	defer os.Unsetenv("BHEJNA_WEBHOOK_SECRET")
+
+	s.Bhejna = failingMockBhejna{t: t}
+
+	eventID := uuid.New().String()
+	payload := map[string]interface{}{
+		"bhejna_event_id": eventID,
+		"event_type":      "message.received",
+		"channel":         "whatsapp",
+		"received_at":     time.Now().Format(time.RFC3339),
+		"business_phone_number": "912212345678",
+		"sender": map[string]interface{}{
+			"phone_number": "919876543210",
+		},
+	}
+	bodyBytes, _ := json.Marshal(payload)
+	signature := computeHMACSignature(bodyBytes, secret)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/bhejna", bytes.NewReader(bodyBytes))
+	req.Header.Set(BhejnaSignatureHeader, signature)
+	rec := httptest.NewRecorder()
+
+	start := time.Now()
+	s.ReceiveBhejnaWebhook(rec, req)
+	elapsed := time.Since(start)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK, got %d. Response: %s", rec.Code, rec.Body.String())
+	}
+
+	if elapsed >= 50*time.Millisecond {
+		t.Errorf("Expected handler response time < 50ms, took %s", elapsed)
+	}
+}
+

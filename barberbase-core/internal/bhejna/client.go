@@ -121,7 +121,7 @@ func (c *bhejnaClient) resolveCredentials(ctx context.Context, tenantID, locatio
 		if !apiKeyEncrypted.Valid || apiKeyEncrypted.String == "" {
 			return "", "", BhejnaError{Retriable: false, Code: "credential_decrypt_failed"}
 		}
-		decryptedKey, decryptErr := decryptAESGCM(apiKeyEncrypted.String, c.aesKey)
+		decryptedKey, decryptErr := DecryptAESGCM(apiKeyEncrypted.String, c.aesKey)
 		if decryptErr != nil {
 			return "", "", BhejnaError{Retriable: false, Code: "credential_decrypt_failed"}
 		}
@@ -274,7 +274,7 @@ func (c *bhejnaClient) SendTemplate(ctx context.Context, tenantID, locationID uu
 }
 
 // AES-256-GCM Helper Decryption Function
-func decryptAESGCM(ciphertextStr string, key []byte) (string, error) {
+func DecryptAESGCM(ciphertextStr string, key []byte) (string, error) {
 	ciphertext, err := base64.StdEncoding.DecodeString(ciphertextStr)
 	if err != nil {
 		return "", err
@@ -304,8 +304,8 @@ func decryptAESGCM(ciphertextStr string, key []byte) (string, error) {
 	return string(plaintext), nil
 }
 
-// encryptAESGCM is helper function for tests and encryption connect onboarding
-func encryptAESGCM(plaintext string, key []byte) (string, error) {
+// EncryptAESGCM is helper function for tests and encryption connect onboarding
+func EncryptAESGCM(plaintext string, key []byte) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
