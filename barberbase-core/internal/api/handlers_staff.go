@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -635,7 +636,110 @@ func (s *Server) SkipEntry(w http.ResponseWriter, r *http.Request, entryId UUIDv
 }
 
 func (s *Server) StartService(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {
-	w.WriteHeader(http.StatusNotImplemented)
+	ctx := r.Context()
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+	staffMemberIDStr := auth.StaffMemberIDFromCtx(ctx)
+
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid tenant id claim",
+		})
+		return
+	}
+
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid location id claim",
+		})
+		return
+	}
+
+	barberID, err := uuid.Parse(staffMemberIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid staff member id claim",
+		})
+		return
+	}
+
+	entryID := uuid.UUID(entryId)
+
+	var result *queue.StartServiceResult
+	errTx := repository.WithTx(ctx, s.Pool, func(tx pgx.Tx) error {
+		var txErr error
+		result, txErr = queue.StartService(ctx, tx, entryID, barberID, tenantID)
+		return txErr
+	})
+
+	if errTx != nil {
+		if errors.Is(errTx, queue.ErrInvalidStateTransition) {
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]string{
+				"code":    "INVALID_STATE_TRANSITION",
+				"message": errTx.Error(),
+			})
+			return
+		}
+		if errors.Is(errTx, queue.ErrDirectStartNotArrived) {
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]string{
+				"code":    "DIRECT_START_NOT_ARRIVED",
+				"message": errTx.Error(),
+			})
+			return
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(errTx, &pgErr) && pgErr.Code == "55P03" {
+			w.Header().Set("Retry-After", "1")
+			respondJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"code":    "LOCK_TIMEOUT",
+				"message": "lock timeout, retry",
+			})
+			return
+		}
+		if errors.Is(errTx, queue.ErrEntryNotFound) {
+			respondJSON(w, http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND",
+				"message": "queue entry not found",
+			})
+			return
+		}
+		log.Printf("[Error] StartService failed: %v", errTx)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "internal server error",
+		})
+		return
+	}
+
+	// Fetch full QueueEntryStaff view using existing repository function
+	entryView, err := repository.GetEntryStaffView(ctx, s.Pool, entryID)
+	if err != nil {
+		log.Printf("[Error] failed to fetch queue entry staff view: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "internal server error",
+		})
+		return
+	}
+
+	// Law 8: SSE broadcast fires AFTER COMMIT, never before
+	realtimeVal := reflect.ValueOf(s).Elem().FieldByName("Realtime")
+	if realtimeVal.IsValid() && !realtimeVal.IsNil() {
+		method := realtimeVal.MethodByName("Broadcast")
+		if method.IsValid() {
+			method.Call([]reflect.Value{
+				reflect.ValueOf(locationID),
+				reflect.ValueOf(result.QueueVersion),
+			})
+		}
+	}
+
+	respondJSON(w, http.StatusOK, toQueueEntryStaffJSON(entryView))
 }
 
 func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {

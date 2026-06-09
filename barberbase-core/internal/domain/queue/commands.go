@@ -659,3 +659,121 @@ func CallNext(ctx context.Context, pool *pgxpool.Pool, params CallNextParams) (C
 	}, nil
 }
 
+// ErrEntryNotFound is returned when a queue entry is not found.
+var ErrEntryNotFound = errors.New("queue entry not found")
+
+// StartServiceResult is the minimal data returned from the StartService command.
+// The handler uses a separate repository read to build the full QueueEntryStaff response.
+type StartServiceResult struct {
+	EntryID          uuid.UUID
+	SessionID        uuid.UUID
+	QueueVersion     int
+	State            string // will be "in_progress"
+	CalledAt         *time.Time
+	StartedAt        *time.Time
+	AssignedBarberID *uuid.UUID
+}
+
+// StartService transitions a queue entry to in_progress.
+// Accepts a pgx.Tx — caller is responsible for BEGIN/COMMIT/ROLLBACK via WithTx.
+// barberID is the calling staff member's ID (from JWT).
+// tenantID is from JWT context (Law 11 — never request body).
+func StartService(ctx context.Context, tx pgx.Tx, entryID, barberID, tenantID uuid.UUID) (*StartServiceResult, error) {
+	// Step 1 — Lock queue_session FOR UPDATE (Law 1, mandatory first):
+	var sessionID uuid.UUID
+	var queueVersion int
+	err := tx.QueryRow(ctx, `
+		SELECT qs.id, qs.queue_version
+		FROM queue_sessions qs
+		JOIN queue_entries qe ON qe.queue_session_id = qs.id
+		WHERE qe.id = $1
+		  AND qs.tenant_id = $2
+		FOR UPDATE OF qs`, entryID, tenantID).Scan(&sessionID, &queueVersion)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrEntryNotFound
+		}
+		return nil, err
+	}
+
+	// Step 2 — Lock queue_entry FOR UPDATE:
+	var entry struct {
+		ID               uuid.UUID
+		State            string
+		PresenceState    string
+		AssignedBarberID *uuid.UUID
+	}
+	err = tx.QueryRow(ctx, `
+		SELECT id, state, presence_state, assigned_barber_id
+		FROM queue_entries
+		WHERE id = $1
+		FOR UPDATE`, entryID).Scan(&entry.ID, &entry.State, &entry.PresenceState, &entry.AssignedBarberID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrEntryNotFound
+		}
+		return nil, err
+	}
+
+	// Step 3 — Validate transition (call ValidateStart):
+	directStart, err := ValidateStart(entry.State, entry.PresenceState)
+	if err != nil {
+		return nil, err // Return err unchanged — handler maps ErrDirectStartNotArrived and ErrInvalidStateTransition → 422
+	}
+
+	// Step 4 — Apply mutation:
+	var res StartServiceResult
+	res.SessionID = sessionID
+
+	if !directStart {
+		// Normal path (directStart=false, state was called):
+		err = tx.QueryRow(ctx, `
+			UPDATE queue_entries
+			SET state         = 'in_progress',
+			    started_at    = NOW(),
+			    stale_warning = NULL
+			WHERE id = $1
+			RETURNING id, state, started_at, called_at, assigned_barber_id`,
+			entryID).Scan(&res.EntryID, &res.State, &res.StartedAt, &res.CalledAt, &res.AssignedBarberID)
+	} else {
+		// Direct start path (directStart=true, state was waiting):
+		err = tx.QueryRow(ctx, `
+			UPDATE queue_entries
+			SET state              = 'in_progress',
+			    called_at          = NOW(),
+			    started_at         = NOW(),
+			    assigned_barber_id = $2,
+			    stale_warning      = NULL
+			WHERE id = $1
+			RETURNING id, state, called_at, started_at, assigned_barber_id`,
+			entryID, barberID).Scan(&res.EntryID, &res.State, &res.CalledAt, &res.StartedAt, &res.AssignedBarberID)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 5 — Update staff status:
+	_, err = tx.Exec(ctx, `
+		UPDATE staff_members
+		SET status = 'cutting'
+		WHERE id = $1
+		  AND tenant_id = $2
+		  AND is_active = true`, barberID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 6 — Increment queue_version:
+	err = tx.QueryRow(ctx, `
+		UPDATE queue_sessions
+		SET queue_version = queue_version + 1
+		WHERE id = $1
+		RETURNING queue_version`, sessionID).Scan(&res.QueueVersion)
+	if err != nil {
+		return nil, err
+	}
+
+	return &res, nil
+}
+
+
