@@ -784,3 +784,190 @@ func TestArrivalConfirmation_Integration(t *testing.T) {
 		}
 	})
 }
+
+func TestC33_ResolveBookingOptions_AllWalkIn(t *testing.T) {
+	cleanDatabase(t, os.Getenv("DATABASE_URL"))
+	t.Cleanup(func() { cleanDatabase(t, os.Getenv("DATABASE_URL")) })
+	s, pool, tenantID, locationID, _, _ := setupTestServer(t)
+	defer pool.Close()
+
+	variantID := seedServiceVariant(t, pool, tenantID, locationID, "WalkIn Only", 30, 300, true)
+	_, err := pool.Exec(context.Background(), "UPDATE service_variants SET allow_walk_in = true, allow_appointment = false, requires_appointment = false WHERE id = $1", variantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for d := 0; d < 7; d++ {
+		_, err = pool.Exec(context.Background(), `INSERT INTO location_hours (id, tenant_id, location_id, day_of_week, is_open, opens_at, closes_at) VALUES (gen_random_uuid(), $1, $2, $3, true, '00:00:00', '23:59:59')`, tenantID, locationID, d)
+		if err != nil { t.Fatal(err) }
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reqBody := map[string]interface{}{
+		"variant_ids": []string{variantID.String()},
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/public/locations/%s/booking-options", locationID), bytes.NewReader(bodyBytes))
+	rec := httptest.NewRecorder()
+	s.ResolveBookingOptions(rec, req, UUIDv7(locationID))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d. Body: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	
+	emIf, ok := resp["allowed_entry_methods"].([]interface{})
+	if !ok {
+		t.Fatalf("expected allowed_entry_methods list, got %v. body: %s", resp["allowed_entry_methods"], rec.Body.String())
+	}
+	em := emIf
+	if len(em) != 1 || em[0].(string) != "walk_in" {
+		t.Errorf("Expected only walk_in, got %v", em)
+	}
+}
+
+func TestC33_ResolveBookingOptions_RequiresAppointment(t *testing.T) {
+	cleanDatabase(t, os.Getenv("DATABASE_URL"))
+	t.Cleanup(func() { cleanDatabase(t, os.Getenv("DATABASE_URL")) })
+	s, pool, tenantID, locationID, _, _ := setupTestServer(t)
+	defer pool.Close()
+
+	variantID := seedServiceVariant(t, pool, tenantID, locationID, "Appt Only", 30, 300, true)
+	_, err := pool.Exec(context.Background(), "UPDATE service_variants SET allow_walk_in = true, allow_appointment = true, requires_appointment = true WHERE id = $1", variantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for d := 0; d < 7; d++ {
+		_, err = pool.Exec(context.Background(), `INSERT INTO location_hours (id, tenant_id, location_id, day_of_week, is_open, opens_at, closes_at) VALUES (gen_random_uuid(), $1, $2, $3, true, '00:00:00', '23:59:59')`, tenantID, locationID, d)
+		if err != nil { t.Fatal(err) }
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reqBody := map[string]interface{}{
+		"variant_ids": []string{variantID.String()},
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/public/locations/%s/booking-options", locationID), bytes.NewReader(bodyBytes))
+	rec := httptest.NewRecorder()
+	s.ResolveBookingOptions(rec, req, UUIDv7(locationID))
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	em := resp["allowed_entry_methods"].([]interface{})
+	if len(em) != 1 || em[0].(string) != "appointment" {
+		t.Errorf("Expected only appointment, got %v", em)
+	}
+}
+
+func TestC33_ResolveBookingOptions_QueueFull(t *testing.T) {
+	cleanDatabase(t, os.Getenv("DATABASE_URL"))
+	t.Cleanup(func() { cleanDatabase(t, os.Getenv("DATABASE_URL")) })
+	s, pool, tenantID, locationID, _, _ := setupTestServer(t)
+	defer pool.Close()
+
+	variantID := seedServiceVariant(t, pool, tenantID, locationID, "Standard", 30, 300, true)
+	_, err := pool.Exec(context.Background(), "UPDATE service_variants SET allow_walk_in = true, allow_appointment = true, requires_appointment = false WHERE id = $1", variantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = pool.Exec(context.Background(), "UPDATE locations SET max_total_queue_size = 0 WHERE id = $1", locationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for d := 0; d < 7; d++ {
+		_, err = pool.Exec(context.Background(), `INSERT INTO location_hours (id, tenant_id, location_id, day_of_week, is_open, opens_at, closes_at) VALUES (gen_random_uuid(), $1, $2, $3, true, '00:00:00', '23:59:59')`, tenantID, locationID, d)
+		if err != nil { t.Fatal(err) }
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reqBody := map[string]interface{}{
+		"variant_ids": []string{variantID.String()},
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/public/locations/%s/booking-options", locationID), bytes.NewReader(bodyBytes))
+	rec := httptest.NewRecorder()
+	s.ResolveBookingOptions(rec, req, UUIDv7(locationID))
+
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	em := resp["allowed_entry_methods"].([]interface{})
+	if len(em) != 1 || em[0].(string) != "appointment" {
+		t.Errorf("Expected only appointment (walk_in removed due to full queue), got %v", em)
+	}
+}
+
+func TestC33_CreateCheckinIntent_WritesOneRowNoQueue(t *testing.T) {
+	cleanDatabase(t, os.Getenv("DATABASE_URL"))
+	t.Cleanup(func() { cleanDatabase(t, os.Getenv("DATABASE_URL")) })
+	s, pool, tenantID, locationID, _, _ := setupTestServer(t)
+	defer pool.Close()
+
+	variantID := seedServiceVariant(t, pool, tenantID, locationID, "Standard", 30, 300, true)
+	_, err := pool.Exec(context.Background(), "UPDATE service_variants SET allow_walk_in = true, allow_appointment = true, requires_appointment = false WHERE id = $1", variantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for d := 0; d < 7; d++ {
+		_, err = pool.Exec(context.Background(), `INSERT INTO location_hours (id, tenant_id, location_id, day_of_week, is_open, opens_at, closes_at) VALUES (gen_random_uuid(), $1, $2, $3, true, '00:00:00', '23:59:59')`, tenantID, locationID, d)
+		if err != nil { t.Fatal(err) }
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reqBody := map[string]interface{}{
+		"variant_ids": []string{variantID.String()},
+		"customer_name": "John Doe",
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/public/locations/%s/checkin-intent", locationID), bytes.NewReader(bodyBytes))
+	rec := httptest.NewRecorder()
+	s.CreateCheckinIntent(rec, req, UUIDv7(locationID))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d. Body: %s", rec.Code, rec.Body.String())
+	}
+
+	var intentCount int
+	pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM checkin_intents").Scan(&intentCount)
+	if intentCount != 1 {
+		t.Errorf("Expected 1 intent, got %d", intentCount)
+	}
+
+	var entryCount int
+	pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM queue_entries").Scan(&entryCount)
+	if entryCount != 0 {
+		t.Errorf("Expected 0 queue entries, got %d", entryCount)
+	}
+}
+
+func TestC33_IntentPast23h(t *testing.T) {
+	cleanDatabase(t, os.Getenv("DATABASE_URL"))
+	t.Cleanup(func() { cleanDatabase(t, os.Getenv("DATABASE_URL")) })
+	_, pool, tenantID, locationID, _, _ := setupTestServer(t)
+	defer pool.Close()
+
+	// Insert expired intent
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO checkin_intents (id, tenant_id, location_id, token_code, channel, status, source_ip, expires_at, shop_status_at_creation)
+		VALUES ($1, $2, $3, 'ABCDEF', 'whatsapp', 'created', '127.0.0.1', NOW() - INTERVAL '25 hours', 'open')
+	`, uuid.New(), tenantID, locationID)
+	if err != nil {
+		t.Fatalf("Failed to insert expired intent: %v", err)
+	}
+
+	var count int
+	err = pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM checkin_intents WHERE token_code = 'ABCDEF' AND status = 'created' AND expires_at > NOW()").Scan(&count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("Expected 0 active intents when filtering by expires_at > NOW(), got %d", count)
+	}
+}

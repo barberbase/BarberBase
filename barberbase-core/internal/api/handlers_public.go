@@ -6,18 +6,64 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/time/rate"
 
 	"barberbase-core/internal/auth"
 	"barberbase-core/internal/domain/presence"
 	"barberbase-core/internal/domain/queue"
 	"barberbase-core/internal/repository"
+	"barberbase-core/internal/webhook"
 )
+
+// package-level — one limiter per remote IP, 5 requests per minute
+var checkinIntentLimiters sync.Map // key: IP string → *rate.Limiter
+
+func getCheckinIntentLimiter(ip string) *rate.Limiter {
+	v, _ := checkinIntentLimiters.LoadOrStore(
+		ip,
+		rate.NewLimiter(rate.Every(12*time.Second), 5), // 5 tokens, 1 token per 12s = 5/min
+	)
+	return v.(*rate.Limiter)
+}
+
+// computeShopStatus derives the effective shop status from override + hours.
+// Priority: active override > scheduled hours.
+// Returns one of: "open", "closing_soon", "temporarily_closed", "closed".
+func computeShopStatus(
+	override *repository.LocationOverrideRow,
+	hours    *repository.LocationHoursRow,
+	now      time.Time,
+) string {
+	if override != nil {
+		return override.Status
+	}
+	if hours == nil || !hours.IsOpen {
+		return "closed"
+	}
+	if hours.OpensAt != nil {
+		op := *hours.OpensAt
+		opDate := time.Date(now.Year(), now.Month(), now.Day(), op.Hour(), op.Minute(), op.Second(), 0, now.Location())
+		if now.Before(opDate) {
+			return "closed"
+		}
+	}
+	if hours.ClosesAt != nil {
+		ca := *hours.ClosesAt
+		caDate := time.Date(now.Year(), now.Month(), now.Day(), ca.Hour(), ca.Minute(), ca.Second(), 0, now.Location())
+		if now.After(caDate) {
+			return "closed"
+		}
+	}
+	return "open"
+}
 
 // JoinQueue handles POST /v1/queue/join
 func (s *Server) JoinQueue(w http.ResponseWriter, r *http.Request) {
@@ -502,4 +548,493 @@ func (s *Server) CancelMyEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locationSlug string) {
+	ctx := r.Context()
+	location, err := repository.GetLocationBySlug(ctx, s.Pool, locationSlug)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+	if location == nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "location_not_found"})
+		return
+	}
+
+	tz, err := time.LoadLocation(location.Timezone)
+	if err != nil {
+		tz, _ = time.LoadLocation("Asia/Kolkata")
+	}
+	now := time.Now().In(tz)
+	dayOfWeek := int(now.Weekday())
+
+	hours, err := repository.GetLocationHoursForDay(ctx, s.Pool, location.ID, dayOfWeek)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	override, err := repository.GetActiveLocationOverride(ctx, s.Pool, location.ID)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	shopStatus := computeShopStatus(override, hours, now)
+	businessDate := now.Format("2006-01-02")
+
+	stats, err := repository.GetQueueStats(ctx, s.Pool, location.ID, businessDate)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	queueOpen := shopStatus == "open" && stats.SessionExists && (stats.SessionStatus == "active" || stats.SessionStatus == "ending")
+
+	var tempClosureEndsAt *time.Time
+	if shopStatus == "temporarily_closed" && override != nil {
+		tempClosureEndsAt = override.ExpiresAt
+	}
+
+	response := map[string]interface{}{
+		"id":                     location.ID,
+		"name":                   location.Name,
+		"slug":                   location.Slug,
+		"shop_status":            shopStatus,
+		"queue_open":             queueOpen,
+		"queue_length":           stats.QueueLength,
+		"estimated_wait_minutes": stats.EstimatedWaitMinutes,
+	}
+
+	if hours != nil {
+		response["business_hours_today"] = map[string]interface{}{
+			"opens_at":      hours.OpensAt,
+			"closes_at":     hours.ClosesAt,
+			"is_open_today": hours.IsOpen,
+		}
+	} else {
+		response["business_hours_today"] = map[string]interface{}{
+			"is_open_today": false,
+		}
+	}
+
+	if tempClosureEndsAt != nil {
+		response["temporary_closure_ends_at"] = tempClosureEndsAt
+	}
+
+	respondJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) GetServiceCatalog(w http.ResponseWriter, r *http.Request, locationId UUIDv7, params GetServiceCatalogParams) {
+	ctx := r.Context()
+	location, err := repository.GetLocationByID(ctx, s.Pool, locationId.String())
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+	if location == nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "location_not_found"})
+		return
+	}
+
+	gender := "all"
+	if params.Gender != nil {
+		gender = string(*params.Gender)
+		if gender != "men" && gender != "women" && gender != "unisex" && gender != "all" {
+			gender = "all"
+		}
+	}
+
+	catID := ""
+	if params.CategoryId != nil {
+		catID = params.CategoryId.String()
+	}
+
+	catalog, err := repository.GetServiceCatalog(ctx, s.Pool, location.ID, gender, catID)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"location_id":  location.ID,
+		"display_mode": location.ServiceDisplayMode,
+		"categories":   catalog,
+	})
+}
+
+func (s *Server) SearchServiceVariants(w http.ResponseWriter, r *http.Request, locationId UUIDv7, params SearchServiceVariantsParams) {
+	ctx := r.Context()
+	location, err := repository.GetLocationByID(ctx, s.Pool, locationId.String())
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+	if location == nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "location_not_found"})
+		return
+	}
+
+	q := params.Q
+	if len(q) < 2 || len(q) > 100 {
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid_query"})
+		return
+	}
+
+	results, err := repository.SearchServiceVariants(ctx, s.Pool, location.ID, q)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"results": results,
+	})
+}
+
+func (s *Server) ResolveBookingOptions(w http.ResponseWriter, r *http.Request, locationId UUIDv7) {
+	ctx := r.Context()
+	location, err := repository.GetLocationByID(ctx, s.Pool, locationId.String())
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+	if location == nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "location_not_found"})
+		return
+	}
+
+	var req struct {
+		VariantIds []string `json:"variant_ids"`
+		PartySize  *int     `json:"party_size"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request_body"})
+		return
+	}
+	if len(req.VariantIds) == 0 {
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "missing_variants"})
+		return
+	}
+	partySize := 1
+	if req.PartySize != nil && *req.PartySize > 0 {
+		partySize = *req.PartySize
+	}
+
+	rows, err := repository.GetVariantsByIDs(ctx, s.Pool, location.ID, req.VariantIds)
+	if err != nil {
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid_variants"})
+		return
+	}
+
+	variants := make([]queue.VariantForResolver, len(rows))
+	for i, r := range rows {
+		variants[i] = queue.VariantForResolver{
+			ID: r.ID, DurationMinutes: r.DurationMinutes, PricePaise: r.PricePaise,
+			AllowWalkIn: r.AllowWalkIn, AllowAppointment: r.AllowAppointment,
+			RequiresAppointment: r.RequiresAppointment,
+		}
+	}
+
+	tz, err := time.LoadLocation(location.Timezone)
+	if err != nil {
+		tz, _ = time.LoadLocation("Asia/Kolkata")
+	}
+	now := time.Now().In(tz)
+	dayOfWeek := int(now.Weekday())
+	businessDate := now.Format("2006-01-02")
+
+	stats, err := repository.GetQueueStats(ctx, s.Pool, location.ID, businessDate)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	hours, err := repository.GetLocationHoursForDay(ctx, s.Pool, location.ID, dayOfWeek)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	override, err := repository.GetActiveLocationOverride(ctx, s.Pool, location.ID)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	shopStatus := computeShopStatus(override, hours, now)
+	var closesAt *time.Time
+	isOpenToday := false
+	if hours != nil {
+		isOpenToday = hours.IsOpen
+		if hours.ClosesAt != nil {
+			ca := *hours.ClosesAt
+			caDate := time.Date(now.Year(), now.Month(), now.Day(), ca.Hour(), ca.Minute(), ca.Second(), 0, tz)
+			closesAt = &caDate
+		}
+	}
+
+	res := queue.ResolveBookingOptions(queue.BookingResolverInput{
+		Variants:             variants,
+		PartySize:            partySize,
+		MaxTotalQueueSize:    location.MaxTotalQueueSize,
+		AllowOvertimeMinutes: location.AllowOvertimeMinutes,
+		OperationMode:        location.OperationMode,
+		ShopStatus:           shopStatus,
+		ClosesAt:             closesAt,
+		IsOpenToday:          isOpenToday,
+		CurrentTime:          now,
+		QueueLength:          stats.QueueLength,
+		EstimatedWaitMinutes: stats.EstimatedWaitMinutes,
+	})
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"total_duration_minutes": res.TotalDurationMinutes,
+		"total_price_paise":      res.TotalPricePaise,
+		"allowed_entry_methods":  res.AllowedEntryMethods,
+		"blocked_reason":         res.BlockedReason,
+		"queue_length":           res.QueueLength,
+		"estimated_wait_minutes": res.EstimatedWaitMinutes,
+	})
+}
+
+func extractIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return ip
+}
+
+func (s *Server) CreateCheckinIntent(w http.ResponseWriter, r *http.Request, locationId UUIDv7) {
+	ctx := r.Context()
+	remoteIP := extractIP(r)
+	limiter := getCheckinIntentLimiter(remoteIP)
+	if !limiter.Allow() {
+		respondJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate_limit_exceeded"})
+		return
+	}
+
+	location, err := repository.GetLocationWithTenantSlug(ctx, s.Pool, locationId.String())
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+	if location == nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "location_not_found"})
+		return
+	}
+
+	var req struct {
+		VariantIds   []string `json:"variant_ids"`
+		PartySize    *int     `json:"party_size"`
+		CustomerName *string  `json:"customer_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request_body"})
+		return
+	}
+	if len(req.VariantIds) == 0 {
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "missing_variants"})
+		return
+	}
+	partySize := 1
+	if req.PartySize != nil && *req.PartySize > 0 {
+		partySize = *req.PartySize
+	}
+
+	rows, err := repository.GetVariantsByIDs(ctx, s.Pool, location.ID, req.VariantIds)
+	if err != nil {
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid_variants"})
+		return
+	}
+
+	variants := make([]queue.VariantForResolver, len(rows))
+	for i, r := range rows {
+		variants[i] = queue.VariantForResolver{
+			ID: r.ID, DurationMinutes: r.DurationMinutes, PricePaise: r.PricePaise,
+			AllowWalkIn: r.AllowWalkIn, AllowAppointment: r.AllowAppointment,
+			RequiresAppointment: r.RequiresAppointment,
+		}
+	}
+
+	tz, err := time.LoadLocation(location.Timezone)
+	if err != nil {
+		tz, _ = time.LoadLocation("Asia/Kolkata")
+	}
+	now := time.Now().In(tz)
+	dayOfWeek := int(now.Weekday())
+	businessDate := now.Format("2006-01-02")
+
+	stats, err := repository.GetQueueStats(ctx, s.Pool, location.ID, businessDate)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	hours, err := repository.GetLocationHoursForDay(ctx, s.Pool, location.ID, dayOfWeek)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	override, err := repository.GetActiveLocationOverride(ctx, s.Pool, location.ID)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	shopStatus := computeShopStatus(override, hours, now)
+	var closesAt *time.Time
+	isOpenToday := false
+	if hours != nil {
+		isOpenToday = hours.IsOpen
+		if hours.ClosesAt != nil {
+			ca := *hours.ClosesAt
+			caDate := time.Date(now.Year(), now.Month(), now.Day(), ca.Hour(), ca.Minute(), ca.Second(), 0, tz)
+			closesAt = &caDate
+		}
+	}
+
+	res := queue.ResolveBookingOptions(queue.BookingResolverInput{
+		Variants:             variants,
+		PartySize:            partySize,
+		MaxTotalQueueSize:    location.MaxTotalQueueSize,
+		AllowOvertimeMinutes: location.AllowOvertimeMinutes,
+		OperationMode:        location.OperationMode,
+		ShopStatus:           shopStatus,
+		ClosesAt:             closesAt,
+		IsOpenToday:          isOpenToday,
+		CurrentTime:          now,
+		QueueLength:          stats.QueueLength,
+		EstimatedWaitMinutes: stats.EstimatedWaitMinutes,
+	})
+
+	canWalkIn := false
+	for _, em := range res.AllowedEntryMethods {
+		if em == "walk_in" {
+			canWalkIn = true
+			break
+		}
+	}
+	if !canWalkIn {
+		reason := "walk_in_unavailable"
+		if res.BlockedReason != nil {
+			reason = *res.BlockedReason
+		}
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]string{
+			"error":          "walk_in_unavailable",
+			"blocked_reason": reason,
+		})
+		return
+	}
+
+	variantIDsJSON, _ := json.Marshal(req.VariantIds)
+	var tokenCode string
+	var insertedID string
+	var expiresAt time.Time
+
+	for attempt := 0; attempt < 3; attempt++ {
+		tc, err := webhook.GenerateTokenCode()
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+			return
+		}
+
+		queryInsert := `
+			INSERT INTO checkin_intents (
+				tenant_id, location_id, token_code, channel,
+				shop_status_at_creation, variant_ids, party_size,
+				customer_name, status, source_ip, expires_at
+			) VALUES (
+				$1, $2, $3, 'whatsapp',
+				$4, $5, $6,
+				$7, 'created', $8::inet, NOW() + INTERVAL '23 hours'
+			) RETURNING id, expires_at
+		`
+		err = s.Pool.QueryRow(ctx, queryInsert,
+			location.TenantID, location.ID, tc,
+			shopStatus, variantIDsJSON, partySize,
+			req.CustomerName, remoteIP,
+		).Scan(&insertedID, &expiresAt)
+
+		if err != nil {
+			if strings.Contains(err.Error(), "unique constraint") {
+				continue // retry
+			}
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+			return
+		}
+
+		tokenCode = tc
+		break
+	}
+
+	if tokenCode == "" {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	fromPhone := s.Config.BhejnaFromPhone
+	if location.WhatsAppMode == "own_number" && location.BusinessWhatsAppNumber != nil {
+		fromPhone = *location.BusinessWhatsAppNumber
+	}
+
+	tenantSlugUpper := strings.ToUpper(location.TenantSlug)
+	text := "JOIN " + tenantSlugUpper + " " + tokenCode
+	deepLink := "https://wa.me/" + fromPhone + "?text=" + url.QueryEscape(text)
+
+	respondJSON(w, http.StatusCreated, map[string]interface{}{
+		"intent_id":  insertedID,
+		"token_code": tokenCode,
+		"deep_link":  deepLink,
+		"expires_at": expiresAt.Format(time.RFC3339),
+	})
+}
+
+func (s *Server) GetAppointmentSlots(w http.ResponseWriter, r *http.Request, locationId UUIDv7, params GetAppointmentSlotsParams) {
+	ctx := r.Context()
+	location, err := repository.GetLocationByID(ctx, s.Pool, locationId.String())
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+	if location == nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "location_not_found"})
+		return
+	}
+
+	dateStr := ""
+	dateStr = params.Date.Time.Format("2006-01-02")
+
+	var variantIDs []string
+	if params.VariantIds != nil {
+		for _, vid := range params.VariantIds {
+			variantIDs = append(variantIDs, vid.String())
+		}
+	}
+
+	rows, err := repository.GetVariantsByIDs(ctx, s.Pool, location.ID, variantIDs)
+	if err != nil {
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid_variants"})
+		return
+	}
+
+	totalDuration := 0
+	for _, r := range rows {
+		totalDuration += r.DurationMinutes
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"date":                   dateStr,
+		"total_duration_minutes": totalDuration,
+		"slots":                  []interface{}{},
+	})
 }

@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -424,4 +425,24 @@ func generateMagicLinkToken(customerID, locationID, visitID uuid.UUID, expiresAt
 	tokenHash := hex.EncodeToString(hashBytes[:])
 
 	return token, tokenHash
+}
+
+// GenerateTokenCode returns a random 6-character uppercase alphanumeric code.
+// Used by createCheckinIntent to populate checkin_intents.token_code.
+// Entropy: crypto/rand. Modulo bias on 256-byte values over 36-char alphabet is
+// acceptable for a short-lived 23h display token (bias ≈ 0.5%).
+//
+// The caller is responsible for retry on unique constraint violation (INSERT conflict).
+// Max 3 retries recommended; 5xx on persistent collision (astronomically unlikely).
+func GenerateTokenCode() (string, error) {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("GenerateTokenCode: entropy failure: %w", err)
+	}
+	result := make([]byte, 6)
+	for i, v := range b {
+		result[i] = alphabet[int(v)%len(alphabet)]
+	}
+	return string(result), nil
 }
