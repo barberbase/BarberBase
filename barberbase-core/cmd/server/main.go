@@ -15,6 +15,7 @@ import (
 	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/config"
 	"barberbase-core/internal/domain/presence"
+	"barberbase-core/internal/outbox"
 	"barberbase-core/internal/realtime"
 	"barberbase-core/internal/repository"
 
@@ -73,6 +74,7 @@ func main() {
 
 	// 5. Register oapi-codegen generated handler
 	bhejnaClient := bhejna.NewClient(pool, cfg.AESEncryptionKey, cfg.BhejnaAPIKey, cfg.BhejnaFromPhone)
+	go outbox.NewWorker(pool, bhejnaClient).Run(ctx)
 	
 	mgr := realtime.NewManager()
 	mgr.StartHeartbeats(ctx)
