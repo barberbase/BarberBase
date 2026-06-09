@@ -14,6 +14,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
+
+	"barberbase-core/internal/domain/presence"
 )
 
 func cleanDatabase(t *testing.T, dbURL string) {
@@ -458,4 +461,326 @@ func TestJoinQueue_QueueFull(t *testing.T) {
 	if resp.Code != "queue_full" {
 		t.Errorf("Expected code 'queue_full', got '%s'", resp.Code)
 	}
+}
+
+func seedVisitAndEntryForTest(t *testing.T, pool *pgxpool.Pool, tenantID, locationID uuid.UUID, sessionID uuid.UUID, token string) (uuid.UUID, uuid.UUID) {
+	ctx := context.Background()
+	visitID := uuid.New()
+	entryID := uuid.New()
+
+	expiresAt := time.Now().Add(23 * time.Hour)
+	_, err := pool.Exec(ctx, `
+		INSERT INTO visits (id, tenant_id, location_id, entry_type, status, party_size, total_duration_minutes, magic_link_token_hash, magic_link_expires_at)
+		VALUES ($1, $2, $3, 'walk_in', 'active', 1, 30, $4, $5)`, visitID, tenantID, locationID, token, expiresAt)
+	if err != nil {
+		t.Fatalf("failed to seed visit: %v", err)
+	}
+
+	var count int
+	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM queue_entries WHERE queue_session_id = $1", sessionID).Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to count queue entries: %v", err)
+	}
+	tokenNumber := count + 1
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO queue_entries (id, visit_id, queue_session_id, token_number, state, presence_state, is_dispatchable)
+		VALUES ($1, $2, $3, $4, 'waiting', 'remote', true)`, entryID, visitID, sessionID, tokenNumber)
+	if err != nil {
+		t.Fatalf("failed to seed queue entry: %v", err)
+	}
+
+	return entryID, visitID
+}
+
+func TestArrivalConfirmation_Integration(t *testing.T) {
+	cleanDatabase(t, os.Getenv("DATABASE_URL"))
+	t.Cleanup(func() {
+		cleanDatabase(t, os.Getenv("DATABASE_URL"))
+	})
+
+	s, pool, tenantID, locationID, _, _ := setupTestServer(t)
+	defer pool.Close()
+	s.Arrival = presence.NewService(pool, func(locID uuid.UUID, version int64) {})
+
+	ctx := context.Background()
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+
+	pinHash, _ := bcrypt.GenerateFromPassword([]byte("1234"), 10)
+	_, err := pool.Exec(ctx, `
+		UPDATE locations 
+		SET arrival_pin_hash = $1, 
+			arrival_pin_plain = '1234',
+			gps_latitude = 12.971598,
+			gps_longitude = 77.594562,
+			arrival_radius_metres = 100
+		WHERE id = $2`, string(pinHash), locationID)
+	if err != nil {
+		t.Fatalf("failed to update location config: %v", err)
+	}
+
+	t.Run("PIN Verification - Wrong PIN 5 times then 429", func(t *testing.T) {
+		token := "pin-test-token"
+		entryID, _ := seedVisitAndEntryForTest(t, pool, tenantID, locationID, sessionID, token)
+
+		for i := 0; i < 5; i++ {
+			body := map[string]interface{}{
+				"method": "pin",
+				"pin":    "9999",
+			}
+			bodyBytes, _ := json.Marshal(body)
+			req := httptest.NewRequest(http.MethodPost, "/v1/queue/confirm-arrival", bytes.NewReader(bodyBytes))
+			req.Header.Set("X-Session-Token", token)
+			rec := httptest.NewRecorder()
+			s.ConfirmArrival(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("Expected 400 Bad Request, got %d. Body: %s", rec.Code, rec.Body.String())
+			}
+			var resp struct {
+				Code              string `json:"code"`
+				AttemptsRemaining int    `json:"attempts_remaining"`
+			}
+			_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+			if resp.Code != "WRONG_PIN" {
+				t.Errorf("Expected code WRONG_PIN, got %s", resp.Code)
+			}
+			expectedRemaining := 5 - (i + 1)
+			if resp.AttemptsRemaining != expectedRemaining {
+				t.Errorf("Expected attempts_remaining %d, got %d", expectedRemaining, resp.AttemptsRemaining)
+			}
+		}
+
+		body := map[string]interface{}{
+			"method": "pin",
+			"pin":    "1234",
+		}
+		bodyBytes, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/v1/queue/confirm-arrival", bytes.NewReader(bodyBytes))
+		req.Header.Set("X-Session-Token", token)
+		rec := httptest.NewRecorder()
+		s.ConfirmArrival(rec, req)
+
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("Expected 429 Too Many Requests, got %d. Body: %s", rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			Code              string `json:"code"`
+			AttemptsRemaining int    `json:"attempts_remaining"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+		if resp.Code != "RATE_LIMITED" {
+			t.Errorf("Expected code RATE_LIMITED, got %s", resp.Code)
+		}
+		if resp.AttemptsRemaining != 0 {
+			t.Errorf("Expected attempts_remaining 0, got %d", resp.AttemptsRemaining)
+		}
+
+		var presenceState string
+		_ = pool.QueryRow(ctx, "SELECT presence_state FROM queue_entries WHERE id = $1", entryID).Scan(&presenceState)
+		if presenceState != "remote" {
+			t.Errorf("Expected presence_state remote, got %s", presenceState)
+		}
+	})
+
+	t.Run("PIN Verification - Correct PIN success", func(t *testing.T) {
+		token := "pin-success-token"
+		entryID, _ := seedVisitAndEntryForTest(t, pool, tenantID, locationID, sessionID, token)
+
+		body := map[string]interface{}{
+			"method": "pin",
+			"pin":    "1234",
+		}
+		bodyBytes, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/v1/queue/confirm-arrival", bytes.NewReader(bodyBytes))
+		req.Header.Set("X-Session-Token", token)
+		rec := httptest.NewRecorder()
+		s.ConfirmArrival(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected 200 OK, got %d. Body: %s", rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			PresenceState string `json:"presence_state"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+		if resp.PresenceState != "arrived" {
+			t.Errorf("Expected presence_state arrived, got %s", resp.PresenceState)
+		}
+
+		var dbPresence string
+		var dbIsDispatchable bool
+		_ = pool.QueryRow(ctx, "SELECT presence_state, is_dispatchable FROM queue_entries WHERE id = $1", entryID).Scan(&dbPresence, &dbIsDispatchable)
+		if dbPresence != "arrived" {
+			t.Errorf("Expected DB presence arrived, got %s", dbPresence)
+		}
+		if !dbIsDispatchable {
+			t.Errorf("Expected DB is_dispatchable true, got false")
+		}
+	})
+
+	t.Run("GPS Verification - Low Accuracy (>150m) Rejected", func(t *testing.T) {
+		token := "gps-acc-token"
+		_, _ = seedVisitAndEntryForTest(t, pool, tenantID, locationID, sessionID, token)
+
+		body := map[string]interface{}{
+			"method":          "geolocation",
+			"latitude":        12.971598,
+			"longitude":       77.594562,
+			"accuracy_metres": 200,
+		}
+		bodyBytes, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/v1/queue/confirm-arrival", bytes.NewReader(bodyBytes))
+		req.Header.Set("X-Session-Token", token)
+		rec := httptest.NewRecorder()
+		s.ConfirmArrival(rec, req)
+
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("Expected 422, got %d. Body: %s", rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+		if resp.Code != "GPS_ACCURACY_TOO_LOW" {
+			t.Errorf("Expected GPS_ACCURACY_TOO_LOW, got %s", resp.Code)
+		}
+
+		var attemptCount int
+		_ = pool.QueryRow(ctx, "SELECT COUNT(*) FROM arrival_attempts WHERE method = 'geolocation'").Scan(&attemptCount)
+		if attemptCount != 0 {
+			t.Errorf("Expected 0 geolocation attempts logged, got %d", attemptCount)
+		}
+	})
+
+	t.Run("GPS Verification - Just Outside Radius (radius + 1m)", func(t *testing.T) {
+		token := "gps-out-token"
+		_, _ = seedVisitAndEntryForTest(t, pool, tenantID, locationID, sessionID, token)
+
+		body := map[string]interface{}{
+			"method":          "geolocation",
+			"latitude":        12.971598 + 0.00091,
+			"longitude":       77.594562,
+			"accuracy_metres": 10,
+		}
+		bodyBytes, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/v1/queue/confirm-arrival", bytes.NewReader(bodyBytes))
+		req.Header.Set("X-Session-Token", token)
+		rec := httptest.NewRecorder()
+		s.ConfirmArrival(rec, req)
+
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("Expected 422, got %d. Body: %s", rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+		if resp.Code != "GPS_OUT_OF_RANGE" {
+			t.Errorf("Expected GPS_OUT_OF_RANGE, got %s", resp.Code)
+		}
+
+		var attemptCount int
+		_ = pool.QueryRow(ctx, "SELECT COUNT(*) FROM arrival_attempts WHERE method = 'geolocation' AND success = false").Scan(&attemptCount)
+		if attemptCount != 1 {
+			t.Errorf("Expected 1 failed geolocation attempt logged, got %d", attemptCount)
+		}
+	})
+
+	t.Run("GPS Verification - Just Inside Radius (radius - 1m)", func(t *testing.T) {
+		token := "gps-in-token"
+		entryID, _ := seedVisitAndEntryForTest(t, pool, tenantID, locationID, sessionID, token)
+
+		body := map[string]interface{}{
+			"method":          "geolocation",
+			"latitude":        12.971598 + 0.00081,
+			"longitude":       77.594562,
+			"accuracy_metres": 10,
+		}
+		bodyBytes, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/v1/queue/confirm-arrival", bytes.NewReader(bodyBytes))
+		req.Header.Set("X-Session-Token", token)
+		rec := httptest.NewRecorder()
+		s.ConfirmArrival(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected 200, got %d. Body: %s", rec.Code, rec.Body.String())
+		}
+
+		var dbPresence string
+		_ = pool.QueryRow(ctx, "SELECT presence_state FROM queue_entries WHERE id = $1", entryID).Scan(&dbPresence)
+		if dbPresence != "arrived" {
+			t.Errorf("Expected DB presence arrived, got %s", dbPresence)
+		}
+	})
+
+	t.Run("Staff override - CustomerSession token fails", func(t *testing.T) {
+		token := "staff-fail-token"
+		entryID, _ := seedVisitAndEntryForTest(t, pool, tenantID, locationID, sessionID, token)
+
+		req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/staff/queue/entries/%s/confirm-arrival", entryID), nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		s.StaffConfirmArrival(rec, req, UUIDv7(entryID))
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("Expected 401 Unauthorized, got %d. Body: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("CancelMyEntry - Cancel waiting entry succeeds", func(t *testing.T) {
+		token := "cancel-wait-token"
+		entryID, _ := seedVisitAndEntryForTest(t, pool, tenantID, locationID, sessionID, token)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/queue/cancel", nil)
+		req.Header.Set("X-Session-Token", token)
+		rec := httptest.NewRecorder()
+		s.CancelMyEntry(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected 200, got %d. Body: %s", rec.Code, rec.Body.String())
+		}
+
+		var state string
+		var isDispatchable bool
+		_ = pool.QueryRow(ctx, "SELECT state, is_dispatchable FROM queue_entries WHERE id = $1", entryID).Scan(&state, &isDispatchable)
+		if state != "cancelled" {
+			t.Errorf("Expected state cancelled, got %s", state)
+		}
+		if isDispatchable {
+			t.Errorf("Expected is_dispatchable false, got true")
+		}
+	})
+
+	t.Run("CancelMyEntry - Cancel in_progress entry fails", func(t *testing.T) {
+		token := "cancel-prog-token"
+		entryID, _ := seedVisitAndEntryForTest(t, pool, tenantID, locationID, sessionID, token)
+
+		_, _ = pool.Exec(ctx, "UPDATE queue_entries SET state = 'in_progress' WHERE id = $1", entryID)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/queue/cancel", nil)
+		req.Header.Set("X-Session-Token", token)
+		rec := httptest.NewRecorder()
+		s.CancelMyEntry(rec, req)
+
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("Expected 422, got %d. Body: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("ConfirmOnTheWay - Transition when arrived fails", func(t *testing.T) {
+		token := "otw-arr-token"
+		entryID, _ := seedVisitAndEntryForTest(t, pool, tenantID, locationID, sessionID, token)
+
+		_, _ = pool.Exec(ctx, "UPDATE queue_entries SET presence_state = 'arrived' WHERE id = $1", entryID)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/queue/on-the-way", nil)
+		req.Header.Set("X-Session-Token", token)
+		rec := httptest.NewRecorder()
+		s.ConfirmOnTheWay(rec, req)
+
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("Expected 422, got %d. Body: %s", rec.Code, rec.Body.String())
+		}
+	})
 }

@@ -8,16 +8,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"reflect"
 	"syscall"
 	"time"
 
 	"barberbase-core/internal/api"
 	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/config"
+	"barberbase-core/internal/domain/presence"
 	"barberbase-core/internal/repository"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 )
 
 // Server is declared in package api.
@@ -75,6 +78,21 @@ func main() {
 		Bhejna: bhejnaClient,
 		Config: cfg,
 	}
+
+	broadcast := func(locationID uuid.UUID, version int64) {
+		realtimeVal := reflect.ValueOf(apiServer).Elem().FieldByName("Realtime")
+		if realtimeVal.IsValid() && !realtimeVal.IsNil() {
+			method := realtimeVal.MethodByName("Broadcast")
+			if method.IsValid() {
+				method.Call([]reflect.Value{
+					reflect.ValueOf(locationID),
+					reflect.ValueOf(version),
+				})
+			}
+		}
+	}
+	apiServer.Arrival = presence.NewService(pool, broadcast)
+
 	apiHandler := api.Handler(apiServer)
 	r.Mount("/v1", apiHandler)
 

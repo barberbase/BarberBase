@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"barberbase-core/internal/auth"
+	"barberbase-core/internal/domain/presence"
 	"barberbase-core/internal/domain/queue"
 	"barberbase-core/internal/repository"
 )
@@ -299,4 +303,203 @@ func (s *Server) getPublicQueueEntryByID(ctx context.Context, entryID uuid.UUID)
 		ShopName:             &shopName,
 		LocationName:         &locationName,
 	}, nil
+}
+
+func (s *Server) resolveCustomerSession(ctx context.Context, r *http.Request) (uuid.UUID, uuid.UUID, uuid.UUID, error) {
+	var tenantID, locationID, visitID uuid.UUID
+	var hasTenant, hasLocation, hasVisit bool
+
+	if tVal := ctx.Value(auth.CtxTenantID); tVal != nil {
+		if id, err := uuid.Parse(tVal.(string)); err == nil {
+			tenantID = id
+			hasTenant = true
+		}
+	}
+	if lVal := ctx.Value(auth.CtxLocationID); lVal != nil {
+		if id, err := uuid.Parse(lVal.(string)); err == nil {
+			locationID = id
+			hasLocation = true
+		}
+	}
+	if vVal := ctx.Value("visit_id"); vVal != nil {
+		if id, err := uuid.Parse(vVal.(string)); err == nil {
+			visitID = id
+			hasVisit = true
+		}
+	}
+
+	if hasTenant && hasLocation && hasVisit {
+		return tenantID, locationID, visitID, nil
+	}
+
+	token := r.Header.Get("X-Session-Token")
+	if token == "" {
+		token = r.URL.Query().Get("t")
+	}
+	if token == "" {
+		return uuid.Nil, uuid.Nil, uuid.Nil, errors.New("missing session token")
+	}
+
+	query := `
+		SELECT tenant_id, location_id, id 
+		FROM visits 
+		WHERE magic_link_token_hash = $1 
+		  AND magic_link_expires_at > NOW()`
+	err := s.Pool.QueryRow(ctx, query, token).Scan(&tenantID, &locationID, &visitID)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, uuid.Nil, errors.New("invalid or expired session token")
+	}
+
+	return tenantID, locationID, visitID, nil
+}
+
+func (s *Server) ConfirmArrival(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tenantID, locationID, visitID, err := s.resolveCustomerSession(ctx, r)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	var req ConfirmArrivalJSONBody
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"code":    "INVALID_REQUEST",
+			"message": "failed to decode request body",
+		})
+		return
+	}
+
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
+
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			ip = strings.TrimSpace(parts[0])
+		}
+	}
+
+	params := presence.ConfirmArrivalParams{
+		TenantID:   tenantID,
+		LocationID: locationID,
+		VisitID:    visitID,
+		Method:     string(req.Method),
+		IPAddress:  ip,
+	}
+
+	if req.Pin != nil {
+		params.PIN = *req.Pin
+	}
+	if req.Latitude != nil {
+		params.Latitude = *req.Latitude
+	}
+	if req.Longitude != nil {
+		params.Longitude = *req.Longitude
+	}
+	if req.AccuracyMetres != nil {
+		params.AccuracyMetres = float64(*req.AccuracyMetres)
+	}
+	if req.NfcToken != nil {
+		params.NFCToken = *req.NfcToken
+	}
+
+	result, errConfirm := s.Arrival.ConfirmArrival(ctx, params)
+	if errConfirm != nil {
+		var arrErr *presence.ArrivalErr
+		if errors.As(errConfirm, &arrErr) {
+			resp := map[string]interface{}{
+				"code":    arrErr.Code,
+				"message": arrErr.Message,
+			}
+			if arrErr.AttemptsRemaining >= 0 {
+				resp["attempts_remaining"] = arrErr.AttemptsRemaining
+			}
+			respondJSON(w, arrErr.HTTPStatus, resp)
+			return
+		}
+
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": errConfirm.Error(),
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{
+		"presence_state": result.PresenceState,
+		"message":        result.Message,
+	})
+}
+
+func (s *Server) ConfirmOnTheWay(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tenantID, locationID, visitID, err := s.resolveCustomerSession(ctx, r)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	presenceState, errConfirm := s.Arrival.ConfirmOnTheWay(ctx, tenantID, locationID, visitID)
+	if errConfirm != nil {
+		var arrErr *presence.ArrivalErr
+		if errors.As(errConfirm, &arrErr) {
+			respondJSON(w, arrErr.HTTPStatus, map[string]string{
+				"code":    arrErr.Code,
+				"message": arrErr.Message,
+			})
+			return
+		}
+
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": errConfirm.Error(),
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{
+		"presence_state": presenceState,
+		"message":        "Great! Head over to Star Salon when ready.",
+	})
+}
+
+func (s *Server) CancelMyEntry(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tenantID, locationID, visitID, err := s.resolveCustomerSession(ctx, r)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	errConfirm := s.Arrival.CancelMyEntry(ctx, tenantID, locationID, visitID)
+	if errConfirm != nil {
+		var arrErr *presence.ArrivalErr
+		if errors.As(errConfirm, &arrErr) {
+			respondJSON(w, arrErr.HTTPStatus, map[string]string{
+				"code":    arrErr.Code,
+				"message": arrErr.Message,
+			})
+			return
+		}
+
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": errConfirm.Error(),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }

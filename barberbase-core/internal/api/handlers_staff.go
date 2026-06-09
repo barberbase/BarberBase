@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"barberbase-core/internal/auth"
 	"barberbase-core/internal/bhejna"
+	"barberbase-core/internal/domain/presence"
 	"barberbase-core/internal/domain/queue"
 	"barberbase-core/internal/repository"
 
@@ -615,10 +616,6 @@ func (s *Server) CompleteService(w http.ResponseWriter, r *http.Request, entryId
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-func (s *Server) StaffConfirmArrival(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
 func (s *Server) MarkNoShow(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
@@ -752,4 +749,50 @@ func (s *Server) GetStaffShopStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) SetShopStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
+}
+
+func (s *Server) StaffConfirmArrival(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {
+	ctx := r.Context()
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid tenant id claim",
+		})
+		return
+	}
+
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid location id claim",
+		})
+		return
+	}
+
+	entryID := uuid.UUID(entryId)
+
+	errConfirm := s.Arrival.StaffConfirmArrival(ctx, entryID, tenantID, locationID)
+	if errConfirm != nil {
+		var arrErr *presence.ArrivalErr
+		if errors.As(errConfirm, &arrErr) {
+			respondJSON(w, arrErr.HTTPStatus, map[string]string{
+				"code":    arrErr.Code,
+				"message": arrErr.Message,
+			})
+			return
+		}
+
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": errConfirm.Error(),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
