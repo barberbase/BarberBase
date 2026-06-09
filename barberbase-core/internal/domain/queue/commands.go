@@ -32,6 +32,50 @@ func NewCommands(pool *pgxpool.Pool) *Commands {
 	return &Commands{pool: pool}
 }
 
+// CheckoutProductItem is a product sold at checkout.
+type CheckoutProductItem struct {
+	ProductID uuid.UUID
+	Quantity  int
+}
+
+// CheckoutPaymentLine is one leg of a split payment.
+type CheckoutPaymentLine struct {
+	Method              string  // "cash"|"upi"|"card"|"unpaid"|"complimentary"
+	AmountPaise         int
+	ProviderReferenceID *string // UPI transaction ID; nil for cash/card
+}
+
+// CheckoutParams is the validated input to CompleteVisitAndCheckout.
+type CheckoutParams struct {
+	EntryID             uuid.UUID
+	TenantID            uuid.UUID // from JWT context
+	LocationID          uuid.UUID // from JWT context
+	CallerStaffID       uuid.UUID // from JWT context; used as finalized_by, collected_by
+	BusinessDate        time.Time // today in Asia/Kolkata; computed at handler layer
+	DiscountAmountPaise int
+	DiscountReason      *string
+	Products            []CheckoutProductItem
+	Payments            []CheckoutPaymentLine
+}
+
+// CheckoutResult is returned on success.
+type CheckoutResult struct {
+	VisitID           uuid.UUID
+	SubtotalPaise     int
+	DiscountPaise     int
+	TotalPaise        int
+	PaymentStatus     string // "paid"|"unpaid"|"complimentary"
+	FeedbackScheduled bool
+	NewQueueVersion   int
+}
+
+var (
+	ErrInvalidTransition = errors.New("entry not in in_progress state")
+	ErrPaymentMismatch   = errors.New("payment sum does not equal total")
+	ErrInvalidDiscount   = errors.New("discount exceeds subtotal or is negative")
+	ErrProductNotFound   = errors.New("one or more products not found or inactive")
+)
+
 // lockSession is the single enforced entry point for the upsert-then-lock pattern.
 // Every queue mutation method calls this first inside its transaction.
 // Package-private; not exposed outside the queue domain package.
@@ -776,4 +820,199 @@ func StartService(ctx context.Context, tx pgx.Tx, entryID, barberID, tenantID uu
 	return &res, nil
 }
 
+func CompleteVisitAndCheckout(ctx context.Context, pool *pgxpool.Pool, params CheckoutParams) (CheckoutResult, error) {
+	var res CheckoutResult
+	err := repository.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		// Step 1: Lock queue_session FOR UPDATE
+		sessionID, _, err := repository.LockSessionForCheckout(ctx, tx, params.LocationID, params.BusinessDate.Format("2006-01-02"))
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrSessionNotFound
+			}
+			return fmt.Errorf("lock session: %w", err)
+		}
 
+		// Step 2: Lock queue_entry FOR UPDATE; validate state
+		entry, err := repository.LockEntryForCheckout(ctx, tx, params.EntryID, params.TenantID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrEntryNotFound
+			}
+			return fmt.Errorf("lock entry: %w", err)
+		}
+		if entry.State != "in_progress" {
+			return ErrInvalidTransition
+		}
+
+		// Step 3: Lock visit FOR UPDATE
+		err = repository.LockVisitForCheckout(ctx, tx, entry.VisitID, params.TenantID)
+		if err != nil {
+			return fmt.Errorf("lock visit: %w", err)
+		}
+
+		// Step 4: Fetch visit_services
+		services, err := repository.GetVisitServicesForCheckout(ctx, tx, entry.VisitID)
+		if err != nil {
+			return fmt.Errorf("get visit services: %w", err)
+		}
+
+		// Step 5: Fetch product data
+		productIDs := make([]uuid.UUID, 0, len(params.Products))
+		for _, p := range params.Products {
+			productIDs = append(productIDs, p.ProductID)
+		}
+		productMap, err := repository.GetProductsForCheckout(ctx, tx, productIDs, params.TenantID)
+		if err != nil {
+			return fmt.Errorf("get products: %w", err)
+		}
+		for _, reqProd := range params.Products {
+			if _, ok := productMap[reqProd.ProductID]; !ok {
+				return ErrProductNotFound
+			}
+		}
+
+		// Step 6: Compute totals
+		var servicesTotalPaise int
+		for _, s := range services {
+			servicesTotalPaise += s.UnitAmountPaise
+		}
+		var productsTotalPaise int
+		for _, p := range params.Products {
+			productsTotalPaise += productMap[p.ProductID].PricePaise * p.Quantity
+		}
+		subtotalPaise := servicesTotalPaise + productsTotalPaise
+		totalPaise := subtotalPaise - params.DiscountAmountPaise
+
+		if params.DiscountAmountPaise < 0 || params.DiscountAmountPaise > subtotalPaise {
+			return ErrInvalidDiscount
+		}
+
+		var paymentsTotal int
+		var unpaidCount, complimentaryCount int
+		for _, p := range params.Payments {
+			paymentsTotal += p.AmountPaise
+			if p.Method == "unpaid" {
+				unpaidCount++
+			} else if p.Method == "complimentary" {
+				complimentaryCount++
+			}
+		}
+		if paymentsTotal != totalPaise {
+			return ErrPaymentMismatch
+		}
+
+		paymentStatus := "paid"
+		if len(params.Payments) > 0 && complimentaryCount == len(params.Payments) {
+			paymentStatus = "complimentary"
+		} else if unpaidCount > 0 {
+			paymentStatus = "unpaid"
+		}
+
+		res.SubtotalPaise = subtotalPaise
+		res.DiscountPaise = params.DiscountAmountPaise
+		res.TotalPaise = totalPaise
+		res.PaymentStatus = paymentStatus
+		res.VisitID = entry.VisitID
+
+		// Step 7: INSERT visit_charges
+		chargeID, err := repository.InsertVisitCharge(ctx, tx, params.TenantID, params.LocationID, entry.VisitID, subtotalPaise, params.DiscountAmountPaise, totalPaise, params.DiscountReason, params.CallerStaffID)
+		if err != nil {
+			return fmt.Errorf("insert charge: %w", err)
+		}
+
+		// Step 8 & 9: INSERT visit_charge_line_items
+		var lineItemRows [][]any
+		for _, s := range services {
+			var staffID *uuid.UUID = entry.AssignedBarberID
+			lineItemRows = append(lineItemRows, []any{params.TenantID, chargeID, "service", s.ServiceVariantID, nil, s.VariantNameSnapshot, 1, s.UnitAmountPaise, s.UnitAmountPaise, staffID})
+		}
+		for _, p := range params.Products {
+			var staffID *uuid.UUID = entry.AssignedBarberID
+			prod := productMap[p.ProductID]
+			unitPrice := prod.PricePaise
+			totalPrice := unitPrice * p.Quantity
+			lineItemRows = append(lineItemRows, []any{params.TenantID, chargeID, "product", nil, p.ProductID, prod.Name, p.Quantity, unitPrice, totalPrice, staffID})
+		}
+		if len(lineItemRows) > 0 {
+			if err := repository.InsertVisitChargeLineItems(ctx, tx, params.TenantID, chargeID, lineItemRows); err != nil {
+				return fmt.Errorf("insert line items: %w", err)
+			}
+		}
+
+		// Step 10: INSERT visit_payments
+		var paymentRows [][]any
+		for _, p := range params.Payments {
+			paymentRows = append(paymentRows, []any{params.TenantID, params.LocationID, chargeID, p.Method, p.AmountPaise, p.ProviderReferenceID, params.CallerStaffID, time.Now()})
+		}
+		if len(paymentRows) > 0 {
+			if err := repository.InsertVisitPayments(ctx, tx, params.TenantID, params.LocationID, chargeID, params.CallerStaffID, paymentRows); err != nil {
+				return fmt.Errorf("insert payments: %w", err)
+			}
+		}
+
+		// Step 11: UPDATE queue_entries
+		if err := repository.MarkEntryCompleted(ctx, tx, params.EntryID, params.TenantID); err != nil {
+			return fmt.Errorf("mark entry completed: %w", err)
+		}
+
+		// Step 12: UPDATE visits
+		if err := repository.MarkVisitCompleted(ctx, tx, entry.VisitID, params.TenantID); err != nil {
+			return fmt.Errorf("mark visit completed: %w", err)
+		}
+
+		// Step 13: UPDATE customers
+		if entry.CustomerID != nil {
+			if err := repository.UpdateCustomerMetrics(ctx, tx, *entry.CustomerID, params.TenantID, totalPaise); err != nil {
+				return fmt.Errorf("update customer: %w", err)
+			}
+		}
+
+		// Step 14: UPDATE staff_members
+		if entry.AssignedBarberID != nil {
+			if err := repository.UpdateStaffIdle(ctx, tx, *entry.AssignedBarberID, params.TenantID); err != nil {
+				return fmt.Errorf("update staff idle: %w", err)
+			}
+		}
+
+		// Step 15: INSERT outbox_events
+		if entry.CustomerID != nil {
+			var assignedBarber interface{}
+			if entry.AssignedBarberID != nil {
+				assignedBarber = entry.AssignedBarberID.String()
+			}
+			payloadMap := map[string]interface{}{
+				"visit_id":           entry.VisitID.String(),
+				"customer_id":        entry.CustomerID.String(),
+				"location_id":        params.LocationID.String(),
+				"tenant_id":          params.TenantID.String(),
+				"assigned_barber_id": assignedBarber,
+			}
+			payloadBytes, err := json.Marshal(payloadMap)
+			if err == nil {
+				if err := repository.InsertFeedbackOutboxEvent(ctx, tx, params.TenantID, payloadBytes); err != nil {
+					return fmt.Errorf("insert outbox event: %w", err)
+				}
+				res.FeedbackScheduled = true
+			}
+		}
+
+		// Step 16: Increment queue_version
+		newVersion, err := repository.IncrementQueueVersion(ctx, tx, sessionID)
+		if err != nil {
+			return fmt.Errorf("increment queue version: %w", err)
+		}
+		res.NewQueueVersion = newVersion
+
+		return nil
+	})
+
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+			return res, ErrLockTimeout
+		}
+		return res, err
+	}
+
+	return res, nil
+}

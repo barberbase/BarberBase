@@ -618,7 +618,166 @@ func toQueueEntryStaffJSON(row *repository.QueueEntryStaffRow) QueueEntryStaff {
 }
 
 func (s *Server) CompleteService(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {
-	w.WriteHeader(http.StatusNotImplemented)
+	ctx := r.Context()
+
+	// Extract claims
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+	staffMemberIDStr := auth.StaffMemberIDFromCtx(ctx)
+
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid tenant id claim",
+		})
+		return
+	}
+
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid location id claim",
+		})
+		return
+	}
+
+	staffMemberID, err := uuid.Parse(staffMemberIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid staff member id claim",
+		})
+		return
+	}
+
+	// Decode body
+	var req CheckoutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"code":    "INVALID_REQUEST",
+			"message": "invalid request body",
+		})
+		return
+	}
+
+	// Validate Entry ID
+	if uuid.UUID(req.QueueEntryId) != uuid.UUID(entryId) {
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]string{
+			"code":    "ID_MISMATCH",
+			"message": "entry id in path does not match body",
+		})
+		return
+	}
+
+	// Compute business date
+	var tz string
+	err = s.Pool.QueryRow(ctx, "SELECT timezone FROM locations WHERE id = $1 AND tenant_id = $2", locationID, tenantID).Scan(&tz)
+	if err != nil {
+		tz = "Asia/Kolkata"
+	}
+	loc, errLoc := time.LoadLocation(tz)
+	if errLoc != nil {
+		loc, _ = time.LoadLocation("Asia/Kolkata")
+	}
+	businessDate := time.Now().In(loc)
+
+	// Map products
+	var domainProducts []queue.CheckoutProductItem
+	if req.ProductLineItems != nil {
+		for _, p := range *req.ProductLineItems {
+			domainProducts = append(domainProducts, queue.CheckoutProductItem{
+				ProductID: uuid.UUID(p.ProductId),
+				Quantity:  p.Quantity,
+			})
+		}
+	}
+
+	// Map payments
+	var domainPayments []queue.CheckoutPaymentLine
+	for _, p := range req.PaymentLines {
+		domainPayments = append(domainPayments, queue.CheckoutPaymentLine{
+			Method:              string(p.Method),
+			AmountPaise:         int(p.AmountPaise),
+			ProviderReferenceID: p.ProviderReferenceId,
+		})
+	}
+
+	// Map discount
+	var discount int
+	if req.DiscountAmountPaise != nil {
+		discount = int(*req.DiscountAmountPaise)
+	}
+
+	params := queue.CheckoutParams{
+		EntryID:             uuid.UUID(entryId),
+		TenantID:            tenantID,
+		LocationID:          locationID,
+		CallerStaffID:       staffMemberID,
+		BusinessDate:        businessDate,
+		DiscountAmountPaise: discount,
+		DiscountReason:      req.DiscountReason,
+		Products:            domainProducts,
+		Payments:            domainPayments,
+	}
+
+	res, err := queue.CompleteVisitAndCheckout(ctx, s.Pool, params)
+	if err != nil {
+		if errors.Is(err, queue.ErrInvalidTransition) ||
+			errors.Is(err, queue.ErrPaymentMismatch) ||
+			errors.Is(err, queue.ErrInvalidDiscount) ||
+			errors.Is(err, queue.ErrProductNotFound) {
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]string{
+				"code":    "VALIDATION_FAILED",
+				"message": err.Error(),
+			})
+			return
+		}
+		if errors.Is(err, queue.ErrEntryNotFound) {
+			respondJSON(w, http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND",
+				"message": err.Error(),
+			})
+			return
+		}
+		log.Printf("[Error] CompleteVisitAndCheckout failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "internal server error",
+		})
+		return
+	}
+
+	if s.Manager != nil {
+		s.Manager.Broadcast(locationID.String(), realtime.SSEEvent{
+			Type:         "queue_changed",
+			LocationID:   locationID.String(),
+			QueueVersion: res.NewQueueVersion,
+		})
+	}
+
+	var subtotal *int
+	if res.SubtotalPaise != 0 {
+		v := res.SubtotalPaise
+		subtotal = &v
+	}
+	var discountAmount *int
+	if res.DiscountPaise != 0 {
+		v := res.DiscountPaise
+		discountAmount = &v
+	}
+
+	resp := CheckoutResponse{
+		VisitId:             UUIDv7(res.VisitID),
+		SubtotalAmountPaise: subtotal,
+		DiscountAmountPaise: discountAmount,
+		TotalAmountPaise:    res.TotalPaise,
+		PaymentStatus:       CheckoutResponsePaymentStatus(res.PaymentStatus),
+		FeedbackScheduled:   res.FeedbackScheduled,
+	}
+
+	respondJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) MarkNoShow(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {
