@@ -8,8 +8,11 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"reflect"
 	"barberbase-core/internal/auth"
 	"barberbase-core/internal/bhejna"
+	"barberbase-core/internal/domain/queue"
+	"barberbase-core/internal/repository"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -462,7 +465,149 @@ func (s *Server) AddWalkIn(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) CallNextCustomer(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
+	ctx := r.Context()
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+	staffMemberIDStr := auth.StaffMemberIDFromCtx(ctx)
+
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid tenant id claim",
+		})
+		return
+	}
+
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid location id claim",
+		})
+		return
+	}
+
+	staffMemberID, err := uuid.Parse(staffMemberIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid staff member id claim",
+		})
+		return
+	}
+
+	// 2. Call queue.CallNext
+	output, err := queue.CallNext(ctx, s.Pool, queue.CallNextParams{
+		TenantID:      tenantID,
+		LocationID:    locationID,
+		StaffMemberID: staffMemberID,
+	})
+
+	// 3. Switch on error
+	if err != nil {
+		var noDispErr queue.ErrNoDispatchable
+		if errors.As(err, &noDispErr) {
+			respondJSON(w, http.StatusNotFound, map[string]any{
+				"error":                "no_dispatchable_customers",
+				"waiting_remote_count": noDispErr.WaitingRemoteCount,
+			})
+			return
+		}
+		if errors.Is(err, queue.ErrSessionNotFound) {
+			respondJSON(w, http.StatusNotFound, map[string]any{
+				"error":                "no_active_session",
+				"waiting_remote_count": 0,
+			})
+			return
+		}
+		if errors.Is(err, queue.ErrLockTimeout) {
+			w.Header().Set("Retry-After", "1")
+			respondJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "lock_timeout_retry",
+			})
+			return
+		}
+		// Generic internal error
+		log.Printf("[Error] CallNext failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "internal",
+		})
+		return
+	}
+
+	// Nil-error path: Broadcast SSE (after transaction commit, Law 8)
+	realtimeVal := reflect.ValueOf(s).Elem().FieldByName("Realtime")
+	if realtimeVal.IsValid() && !realtimeVal.IsNil() {
+		method := realtimeVal.MethodByName("Broadcast")
+		if method.IsValid() {
+			method.Call([]reflect.Value{
+				reflect.ValueOf(locationID),
+				reflect.ValueOf(output.QueueVersion),
+			})
+		}
+	}
+
+	// Return 200 with mapped QueueEntryStaff
+	respondJSON(w, http.StatusOK, toQueueEntryStaffJSON(output.Entry))
+}
+
+func toQueueEntryStaffJSON(row *repository.QueueEntryStaffRow) QueueEntryStaff {
+	if row == nil {
+		return QueueEntryStaff{}
+	}
+
+	var services []struct {
+		DurationMinutes *int    `json:"duration_minutes,omitempty"`
+		Name            *string `json:"name,omitempty"`
+		PricePaise      *Paise  `json:"price_paise,omitempty"`
+	}
+
+	for _, s := range row.Services {
+		d := s.DurationMinutes
+		n := s.Name
+		p := s.PricePaise
+		services = append(services, struct {
+			DurationMinutes *int    `json:"duration_minutes,omitempty"`
+			Name            *string `json:"name,omitempty"`
+			PricePaise      *Paise  `json:"price_paise,omitempty"`
+		}{
+			DurationMinutes: &d,
+			Name:            &n,
+			PricePaise:      &p,
+		})
+	}
+
+	var notes *[]string
+	if len(row.CustomerNotes) > 0 {
+		notesCopy := make([]string, len(row.CustomerNotes))
+		copy(notesCopy, row.CustomerNotes)
+		notes = &notesCopy
+	}
+
+	var res QueueEntryStaff
+	res.Id = row.ID
+	res.TokenNumber = row.TokenNumber
+	res.State = QueueEntryStaffState(row.State)
+	res.PresenceState = QueueEntryStaffPresenceState(row.PresenceState)
+	res.IsDispatchable = row.IsDispatchable
+	res.TotalDurationMinutes = row.TotalDurationMinutes
+	res.PartySize = row.PartySize
+	res.RequestedBarberId = row.RequestedBarberID
+	res.AssignedBarberId = row.AssignedBarberID
+	res.JoinedAt = row.JoinedAt
+	res.CalledAt = row.CalledAt
+	res.StartedAt = row.StartedAt
+	res.StaleWarning = row.StaleWarning
+	res.Services = services
+
+	res.Customer.Id = row.CustomerID
+	res.Customer.Name = row.CustomerName
+	res.Customer.PhoneMasked = row.CustomerPhone
+	res.Customer.VisitCount = row.CustomerVisitCount
+	res.Customer.Notes = notes
+
+	return res
 }
 
 func (s *Server) CompleteService(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {

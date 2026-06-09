@@ -582,3 +582,80 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 	}, nil
 }
 
+type CallNextParams struct {
+	TenantID      uuid.UUID
+	LocationID    uuid.UUID
+	StaffMemberID uuid.UUID
+}
+
+type CallNextOutput struct {
+	Entry        *repository.QueueEntryStaffRow
+	QueueVersion int
+}
+
+type ErrNoDispatchable struct {
+	WaitingRemoteCount int
+}
+
+func (e ErrNoDispatchable) Error() string { return "no dispatchable customers" }
+
+var ErrSessionNotFound = errors.New("no active queue session for today")
+var ErrLockTimeout = errors.New("lock timeout")
+
+func CallNext(ctx context.Context, pool *pgxpool.Pool, params CallNextParams) (CallNextOutput, error) {
+	// 1. Call repo.GetLocationRoutingMode
+	routingMode, timezone, err := repository.GetLocationRoutingMode(ctx, pool, params.LocationID)
+	if err != nil {
+		return CallNextOutput{}, ErrNoDispatchable{0}
+	}
+
+	// 2. Compute businessDate using the location timezone
+	tz, err := time.LoadLocation(timezone)
+	if err != nil {
+		tz = time.UTC
+	}
+	businessDate := time.Now().In(tz).Truncate(24 * time.Hour).Format("2006-01-02")
+
+	// 3. Run repo.CallNextTx inside a transaction
+	var entryID uuid.UUID
+	var newQueueVersion int
+	repoParams := repository.CallNextParams{
+		TenantID:      params.TenantID,
+		LocationID:    params.LocationID,
+		StaffMemberID: params.StaffMemberID,
+	}
+
+	errTx := repository.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		var txErr error
+		_, entryID, _, newQueueVersion, txErr = repository.CallNextTx(ctx, tx, repoParams, routingMode, businessDate)
+		return txErr
+	})
+
+	if errTx != nil {
+		var repoErr repository.ErrRepoNoDispatchable
+		if errors.As(errTx, &repoErr) {
+			return CallNextOutput{}, ErrNoDispatchable{WaitingRemoteCount: repoErr.WaitingRemoteCount}
+		}
+		if errors.Is(errTx, repository.ErrRepoSessionNotFound) {
+			return CallNextOutput{}, ErrSessionNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(errTx, &pgErr) && pgErr.Code == "55P03" {
+			return CallNextOutput{}, ErrLockTimeout
+		}
+		return CallNextOutput{}, errTx
+	}
+
+	// 12. Call repo.GetEntryStaffView
+	row, err := repository.GetEntryStaffView(ctx, pool, entryID)
+	if err != nil {
+		return CallNextOutput{}, fmt.Errorf("get entry staff view: %w", err)
+	}
+
+	// 13. Return CallNextOutput
+	return CallNextOutput{
+		Entry:        row,
+		QueueVersion: newQueueVersion,
+	}, nil
+}
+
