@@ -4,6 +4,7 @@ import (
 	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/config"
 	"barberbase-core/internal/domain/presence"
+	"barberbase-core/internal/realtime"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -17,4 +18,5 @@ type Server struct {
 	Bhejna  bhejna.Client
 	Config  *config.Config
 	Arrival *presence.Service
+	Manager *realtime.Manager // nil-safe; SSE disabled if nil
 }

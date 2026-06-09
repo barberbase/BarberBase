@@ -1,23 +1,31 @@
 package api
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"math/big"
 	"net/http"
-	"reflect"
+	"strconv"
+	"strings"
+	"time"
+
 	"barberbase-core/internal/auth"
 	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/domain/presence"
 	"barberbase-core/internal/domain/queue"
+	"barberbase-core/internal/realtime"
 	"barberbase-core/internal/repository"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -539,15 +547,12 @@ func (s *Server) CallNextCustomer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Nil-error path: Broadcast SSE (after transaction commit, Law 8)
-	realtimeVal := reflect.ValueOf(s).Elem().FieldByName("Realtime")
-	if realtimeVal.IsValid() && !realtimeVal.IsNil() {
-		method := realtimeVal.MethodByName("Broadcast")
-		if method.IsValid() {
-			method.Call([]reflect.Value{
-				reflect.ValueOf(locationID),
-				reflect.ValueOf(output.QueueVersion),
-			})
-		}
+	if s.Manager != nil {
+		s.Manager.Broadcast(locationID.String(), realtime.SSEEvent{
+			Type:         "queue_changed",
+			LocationID:   locationID.String(),
+			QueueVersion: output.QueueVersion,
+		})
 	}
 
 	// Return 200 with mapped QueueEntryStaff
@@ -725,22 +730,400 @@ func (s *Server) StartService(w http.ResponseWriter, r *http.Request, entryId UU
 	}
 
 	// Law 8: SSE broadcast fires AFTER COMMIT, never before
-	realtimeVal := reflect.ValueOf(s).Elem().FieldByName("Realtime")
-	if realtimeVal.IsValid() && !realtimeVal.IsNil() {
-		method := realtimeVal.MethodByName("Broadcast")
-		if method.IsValid() {
-			method.Call([]reflect.Value{
-				reflect.ValueOf(locationID),
-				reflect.ValueOf(result.QueueVersion),
-			})
-		}
+	if s.Manager != nil {
+		s.Manager.Broadcast(locationID.String(), realtime.SSEEvent{
+			Type:         "queue_changed",
+			LocationID:   locationID.String(),
+			QueueVersion: result.QueueVersion,
+		})
 	}
 
 	respondJSON(w, http.StatusOK, toQueueEntryStaffJSON(entryView))
 }
 
+func maskPhone(phone string) string {
+	if len(phone) < 4 {
+		return phone
+	}
+	if len(phone) >= 10 {
+		return phone[:len(phone)-10] + " XXXX XX" + phone[len(phone)-4:]
+	}
+	return strings.Repeat("X", len(phone)-4) + phone[len(phone)-4:]
+}
+
 func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
+	ctx := r.Context()
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid tenant id claim",
+		})
+		return
+	}
+
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid location id claim",
+		})
+		return
+	}
+
+	// 1. Query queue session
+	var sessionID uuid.UUID
+	var queueVersion int
+	var businessDate time.Time
+	var sessionStatus string
+
+	err = s.Pool.QueryRow(ctx, `
+		SELECT id, queue_version, business_date, status
+		FROM queue_sessions
+		WHERE location_id = $1
+		  AND tenant_id = $2
+		  AND business_date = CURRENT_DATE
+		  AND status <> 'archived'`, locationID, tenantID).Scan(&sessionID, &queueVersion, &businessDate, &sessionStatus)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// No active session today: return 200 with empty snapshot
+			var timezone string
+			errTz := s.Pool.QueryRow(ctx, "SELECT timezone FROM locations WHERE id = $1 AND tenant_id = $2", locationID, tenantID).Scan(&timezone)
+			if errTz != nil {
+				timezone = "Asia/Kolkata"
+			}
+			loc, errLoc := time.LoadLocation(timezone)
+			if errLoc != nil {
+				loc = time.UTC
+			}
+			todayTime := time.Now().In(loc)
+
+			respondJSON(w, http.StatusOK, QueueSnapshot{
+				QueueSessionId: uuid.Nil,
+				QueueVersion:   0,
+				BusinessDate:   openapi_types.Date{Time: todayTime},
+				SessionStatus:  "closed",
+				Entries:        []QueueEntryStaff{},
+			})
+			return
+		}
+
+		log.Printf("[Error] GetQueueSnapshot select session failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "internal server error",
+		})
+		return
+	}
+
+	// 2. Query entries
+	rows, err := s.Pool.Query(ctx, `
+		SELECT
+			qe.id,
+			qe.token_number,
+			qe.state,
+			qe.presence_state,
+			qe.is_dispatchable,
+			qe.requested_barber_id,
+			qe.assigned_barber_id,
+			qe.remote_joined_at  AS joined_at,
+			qe.called_at,
+			qe.started_at,
+			qe.stale_warning,
+			v.id        AS visit_id,
+			v.party_size,
+			v.total_duration_minutes,
+			c.id        AS customer_id,
+			c.name      AS customer_name,
+			c.phone_number AS customer_phone
+		FROM queue_entries qe
+		JOIN  visits    v  ON v.id  = qe.visit_id
+		LEFT JOIN customers c ON c.id = qe.customer_id
+							 AND c.merged_into_customer_id IS NULL
+		WHERE qe.queue_session_id = $1
+		  AND qe.state NOT IN ('completed', 'cancelled', 'expired')
+		ORDER BY
+			CASE qe.state
+				WHEN 'in_progress' THEN 1
+				WHEN 'called'      THEN 2
+				ELSE                    3
+			END,
+			qe.priority_group ASC,
+			qe.sort_key       ASC`, sessionID)
+
+	if err != nil {
+		log.Printf("[Error] GetQueueSnapshot select entries failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "internal server error",
+		})
+		return
+	}
+	defer rows.Close()
+
+	type scannedEntry struct {
+		id                uuid.UUID
+		tokenNumber       int
+		state             string
+		presenceState     string
+		isDispatchable    bool
+		requestedBarberID *uuid.UUID
+		assignedBarberID  *uuid.UUID
+		joinedAt          time.Time
+		calledAt          *time.Time
+		startedAt         *time.Time
+		staleWarning      *string
+		visitID           uuid.UUID
+		partySize         int
+		totalDuration     int
+		customerID        *uuid.UUID
+		customerName      *string
+		customerPhone     *string
+	}
+
+	var scannedEntries []scannedEntry
+	var visitIDs []uuid.UUID
+	var customerIDs []uuid.UUID
+
+	for rows.Next() {
+		var se scannedEntry
+		err = rows.Scan(
+			&se.id,
+			&se.tokenNumber,
+			&se.state,
+			&se.presenceState,
+			&se.isDispatchable,
+			&se.requestedBarberID,
+			&se.assignedBarberID,
+			&se.joinedAt,
+			&se.calledAt,
+			&se.startedAt,
+			&se.staleWarning,
+			&se.visitID,
+			&se.partySize,
+			&se.totalDuration,
+			&se.customerID,
+			&se.customerName,
+			&se.customerPhone,
+		)
+		if err != nil {
+			log.Printf("[Error] GetQueueSnapshot scan entry failed: %v", err)
+			respondJSON(w, http.StatusInternalServerError, map[string]string{
+				"code":    "INTERNAL_ERROR",
+				"message": "internal server error",
+			})
+			return
+		}
+		scannedEntries = append(scannedEntries, se)
+		visitIDs = append(visitIDs, se.visitID)
+		if se.customerID != nil {
+			customerIDs = append(customerIDs, *se.customerID)
+		}
+	}
+
+	// 3. Batch fetch services
+	servicesMap := make(map[uuid.UUID][]struct {
+		DurationMinutes *int    `json:"duration_minutes,omitempty"`
+		Name            *string `json:"name,omitempty"`
+		PricePaise      *Paise  `json:"price_paise,omitempty"`
+	})
+
+	if len(visitIDs) > 0 {
+		vsRows, err := s.Pool.Query(ctx, `
+			SELECT
+				vs.visit_id,
+				vs.variant_name_snapshot  AS name,
+				vs.duration_minutes_snapshot AS duration_minutes,
+				vs.price_paise_snapshot   AS price_paise
+			FROM visit_services vs
+			WHERE vs.visit_id = ANY($1)
+			ORDER BY vs.sort_order ASC`, visitIDs)
+		if err != nil {
+			log.Printf("[Error] GetQueueSnapshot select visit services failed: %v", err)
+			respondJSON(w, http.StatusInternalServerError, map[string]string{
+				"code":    "INTERNAL_ERROR",
+				"message": "internal server error",
+			})
+			return
+		}
+		defer vsRows.Close()
+
+		for vsRows.Next() {
+			var visitID uuid.UUID
+			var name string
+			var duration int
+			var price Paise
+			if err := vsRows.Scan(&visitID, &name, &duration, &price); err != nil {
+				log.Printf("[Error] GetQueueSnapshot scan visit service failed: %v", err)
+				respondJSON(w, http.StatusInternalServerError, map[string]string{
+					"code":    "INTERNAL_ERROR",
+					"message": "internal server error",
+				})
+				return
+			}
+			n := name
+			d := duration
+			p := price
+			servicesMap[visitID] = append(servicesMap[visitID], struct {
+				DurationMinutes *int    `json:"duration_minutes,omitempty"`
+				Name            *string `json:"name,omitempty"`
+				PricePaise      *Paise  `json:"price_paise,omitempty"`
+			}{
+				DurationMinutes: &d,
+				Name:            &n,
+				PricePaise:      &p,
+			})
+		}
+	}
+
+	// 4. Batch fetch customer notes
+	notesMap := make(map[uuid.UUID][]string)
+	if len(customerIDs) > 0 {
+		cnRows, err := s.Pool.Query(ctx, `
+			SELECT cn.customer_id, cn.note
+			FROM customer_notes cn
+			WHERE cn.customer_id = ANY($1)
+			  AND cn.deleted_at IS NULL
+			  AND cn.visibility = 'staff'
+			ORDER BY cn.created_at DESC`, customerIDs)
+		if err != nil {
+			log.Printf("[Error] GetQueueSnapshot select customer notes failed: %v", err)
+			respondJSON(w, http.StatusInternalServerError, map[string]string{
+				"code":    "INTERNAL_ERROR",
+				"message": "internal server error",
+			})
+			return
+		}
+		defer cnRows.Close()
+
+		for cnRows.Next() {
+			var custID uuid.UUID
+			var note string
+			if err := cnRows.Scan(&custID, &note); err != nil {
+				log.Printf("[Error] GetQueueSnapshot scan customer note failed: %v", err)
+				respondJSON(w, http.StatusInternalServerError, map[string]string{
+					"code":    "INTERNAL_ERROR",
+					"message": "internal server error",
+				})
+				return
+			}
+			notesMap[custID] = append(notesMap[custID], note)
+		}
+	}
+
+	// 5. Batch fetch per-location visit counts
+	visitCountsMap := make(map[uuid.UUID]int)
+	if len(customerIDs) > 0 {
+		vcRows, err := s.Pool.Query(ctx, `
+			SELECT
+				v2.customer_id,
+				COUNT(*) AS count
+			FROM visits v2
+			WHERE v2.customer_id = ANY($1)
+			  AND v2.location_id = $2
+			  AND v2.status = 'completed'
+			GROUP BY v2.customer_id`, customerIDs, locationID)
+		if err != nil {
+			log.Printf("[Error] GetQueueSnapshot select visit counts failed: %v", err)
+			respondJSON(w, http.StatusInternalServerError, map[string]string{
+				"code":    "INTERNAL_ERROR",
+				"message": "internal server error",
+			})
+			return
+		}
+		defer vcRows.Close()
+
+		for vcRows.Next() {
+			var custID uuid.UUID
+			var count int
+			if err := vcRows.Scan(&custID, &count); err != nil {
+				log.Printf("[Error] GetQueueSnapshot scan visit count failed: %v", err)
+				respondJSON(w, http.StatusInternalServerError, map[string]string{
+					"code":    "INTERNAL_ERROR",
+					"message": "internal server error",
+				})
+				return
+			}
+			visitCountsMap[custID] = count
+		}
+	}
+
+	// 6. Assemble response
+	entries := make([]QueueEntryStaff, 0, len(scannedEntries))
+	for _, se := range scannedEntries {
+		var qes QueueEntryStaff
+		qes.Id = se.id
+		qes.TokenNumber = se.tokenNumber
+		qes.State = QueueEntryStaffState(se.state)
+		qes.PresenceState = QueueEntryStaffPresenceState(se.presenceState)
+		qes.IsDispatchable = se.isDispatchable
+		qes.TotalDurationMinutes = se.totalDuration
+
+		ps := se.partySize
+		qes.PartySize = &ps
+
+		qes.RequestedBarberId = se.requestedBarberID
+		qes.AssignedBarberId = se.assignedBarberID
+		qes.JoinedAt = se.joinedAt
+		qes.CalledAt = se.calledAt
+		qes.StartedAt = se.startedAt
+		qes.StaleWarning = se.staleWarning
+
+		// Services
+		qes.Services = servicesMap[se.visitID]
+		if qes.Services == nil {
+			qes.Services = []struct {
+				DurationMinutes *int    `json:"duration_minutes,omitempty"`
+				Name            *string `json:"name,omitempty"`
+				PricePaise      *Paise  `json:"price_paise,omitempty"`
+			}{}
+		}
+
+		// Customer
+		if se.customerID != nil {
+			qes.Customer.Id = se.customerID
+			qes.Customer.Name = se.customerName
+
+			var phoneMaskedPtr *string
+			if se.customerPhone != nil {
+				m := maskPhone(*se.customerPhone)
+				phoneMaskedPtr = &m
+			}
+			qes.Customer.PhoneMasked = phoneMaskedPtr
+
+			vc := visitCountsMap[*se.customerID]
+			qes.Customer.VisitCount = &vc
+
+			notes := notesMap[*se.customerID]
+			if notes == nil {
+				notes = []string{}
+			}
+			qes.Customer.Notes = &notes
+		} else {
+			// Anonymous customer details
+			qes.Customer.Id = nil
+			qes.Customer.Name = se.customerName
+			qes.Customer.PhoneMasked = nil
+			vc := 0
+			qes.Customer.VisitCount = &vc
+			emptyNotes := []string{}
+			qes.Customer.Notes = &emptyNotes
+		}
+
+		entries = append(entries, qes)
+	}
+
+	respondJSON(w, http.StatusOK, QueueSnapshot{
+		QueueSessionId: sessionID,
+		QueueVersion:   queueVersion,
+		BusinessDate:   openapi_types.Date{Time: businessDate},
+		SessionStatus:  QueueSnapshotSessionStatus(sessionStatus),
+		Entries:        entries,
+	})
 }
 
 func (s *Server) GetStaffShopStatus(w http.ResponseWriter, r *http.Request) {
@@ -795,4 +1178,117 @@ func (s *Server) StaffConfirmArrival(w http.ResponseWriter, r *http.Request, ent
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func verifyCustomerSession(tokenStr string, secret []byte, expectedLocationID string) bool {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 2 {
+		return false
+	}
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return false
+	}
+	macBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+
+	h := hmac.New(sha256.New, secret)
+	h.Write(payloadBytes)
+	expectedMac := h.Sum(nil)
+	if !hmac.Equal(macBytes, expectedMac) {
+		return false
+	}
+
+	payloadStr := string(payloadBytes)
+	fields := strings.Split(payloadStr, ":")
+	if len(fields) != 4 {
+		return false
+	}
+
+	locationID := fields[1]
+	if !strings.EqualFold(locationID, expectedLocationID) {
+		return false
+	}
+
+	expiresUnix, err := strconv.ParseInt(fields[3], 10, 64)
+	if err != nil {
+		return false
+	}
+	if time.Now().Unix() > expiresUnix {
+		return false
+	}
+
+	return true
+}
+
+func (s *Server) SubscribeToQueueStream(
+	w http.ResponseWriter,
+	r *http.Request,
+	locationId UUIDv7,
+	params SubscribeToQueueStreamParams,
+) {
+	token := params.Token
+
+	authSucceeded := false
+
+	// Attempt StaffJWT verification
+	claims, err := auth.ParseAndVerifyToken(token, []byte(s.Config.JWTSecret))
+	if err == nil {
+		if strings.EqualFold(claims.LocationID, locationId.String()) {
+			authSucceeded = true
+		} else {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	// If StaffJWT fails, attempt CustomerSession verification
+	if !authSucceeded {
+		if verifyCustomerSession(token, []byte(s.Config.HMACSecret), locationId.String()) {
+			authSucceeded = true
+		}
+	}
+
+	if !authSucceeded {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Set SSE response headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	// Flush immediately
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return
+	}
+	flusher.Flush()
+
+	// Subscribe
+	ch := s.Manager.Subscribe(locationId.String())
+	defer s.Manager.Unsubscribe(locationId.String(), ch)
+
+	// Event loop
+	for {
+		select {
+		case event, ok := <-ch:
+			if !ok {
+				return
+			}
+			data, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }

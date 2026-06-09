@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"reflect"
 	"syscall"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/config"
 	"barberbase-core/internal/domain/presence"
+	"barberbase-core/internal/realtime"
 	"barberbase-core/internal/repository"
 
 	"github.com/go-chi/chi/v5"
@@ -73,23 +73,23 @@ func main() {
 
 	// 5. Register oapi-codegen generated handler
 	bhejnaClient := bhejna.NewClient(pool, cfg.AESEncryptionKey, cfg.BhejnaAPIKey, cfg.BhejnaFromPhone)
+	
+	mgr := realtime.NewManager()
+	mgr.StartHeartbeats(ctx)
+
 	apiServer := &api.Server{
-		Pool:   pool,
-		Bhejna: bhejnaClient,
-		Config: cfg,
+		Pool:    pool,
+		Bhejna:  bhejnaClient,
+		Config:  cfg,
+		Manager: mgr,
 	}
 
 	broadcast := func(locationID uuid.UUID, version int64) {
-		realtimeVal := reflect.ValueOf(apiServer).Elem().FieldByName("Realtime")
-		if realtimeVal.IsValid() && !realtimeVal.IsNil() {
-			method := realtimeVal.MethodByName("Broadcast")
-			if method.IsValid() {
-				method.Call([]reflect.Value{
-					reflect.ValueOf(locationID),
-					reflect.ValueOf(version),
-				})
-			}
-		}
+		mgr.Broadcast(locationID.String(), realtime.SSEEvent{
+			Type:         "queue_changed",
+			LocationID:   locationID.String(),
+			QueueVersion: int(version),
+		})
 	}
 	apiServer.Arrival = presence.NewService(pool, broadcast)
 
