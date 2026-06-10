@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"barberbase-core/internal/bhejna"
+	"barberbase-core/internal/repository"
 )
 
 // OutboxEvent mirrors the structure in the outbox package.
@@ -78,12 +79,14 @@ func newTerminalError(format string, args ...interface{}) error {
 type Handler struct {
 	pool   *pgxpool.Pool
 	bhejna bhejna.Client
+	repo   *repository.Repository
 }
 
 func NewHandler(pool *pgxpool.Pool, bhejna bhejna.Client) *Handler {
 	return &Handler{
 		pool:   pool,
 		bhejna: bhejna,
+		repo:   &repository.Repository{Pool: pool},
 	}
 }
 
@@ -106,125 +109,53 @@ func (h *Handler) Handle(ctx context.Context, pool *pgxpool.Pool, event *OutboxE
 		return newTerminalError("invalid location id: %v", err)
 	}
 
-	var quotaType string
-	if payload.TemplateCode == "bb_marketing_broadcast" {
-		quotaType = "whatsapp_marketing"
-	} else {
-		quotaType = "whatsapp_transactional"
-	}
+	quotaType := quotaTypeForTemplate(payload.TemplateCode)
 
-	// Quota check transaction
-	tx, err := pool.Begin(ctx)
+	eventID, err := uuid.Parse(event.ID)
 	if err != nil {
-		return err
+		return newTerminalError("invalid event id: %v", err)
 	}
-	defer tx.Rollback(ctx)
 
-	// Step 1: Auto-create period row
-	_, err = tx.Exec(ctx, `
-		INSERT INTO tenant_quota_periods
-			(id, tenant_id, quota_type, period_start, period_end, included_limit)
-		SELECT
-			gen_random_uuid(),
-			$1,
-			$2::VARCHAR,
-			date_trunc('month', NOW())::DATE,
-			(date_trunc('month', NOW()) + INTERVAL '1 month' - INTERVAL '1 day')::DATE,
-			CASE $2::VARCHAR
-				WHEN 'whatsapp_marketing'     THEN t.monthly_marketing_quota
-				WHEN 'whatsapp_transactional' THEN t.monthly_transactional_quota
-			END
-		FROM tenants t
-		WHERE t.id = $1
-		ON CONFLICT (tenant_id, quota_type, period_start) DO NOTHING;
-	`, tenantUUID, quotaType)
+	blocked, err := consumeQuota(ctx, pool, h.repo, tenantUUID, eventID, payload.TemplateCode)
 	if err != nil {
 		return err
 	}
 
-	// Step 2: Lock the period row
-	var periodID string
-	var usedCount int
-	var includedLimit int
-	err = tx.QueryRow(ctx, `
-		SELECT id, used_count, included_limit
-		FROM tenant_quota_periods
-		WHERE tenant_id = $1
-		  AND quota_type = $2::VARCHAR
-		  AND period_start = date_trunc('month', NOW())::DATE
-		FOR UPDATE;
-	`, tenantUUID, quotaType).Scan(&periodID, &usedCount, &includedLimit)
-	if err != nil {
-		return err
-	}
-
-	// Step 3: Check limit & Marketing hard block
-	if quotaType == "whatsapp_marketing" && usedCount >= includedLimit {
-		var custID *uuid.UUID
-		if payload.CustomerID != nil && *payload.CustomerID != "" {
-			if c, err := uuid.Parse(*payload.CustomerID); err == nil {
-				custID = &c
-			}
-		}
-		var srcID *uuid.UUID
-		if payload.SourceID != nil && *payload.SourceID != "" {
-			if s, err := uuid.Parse(*payload.SourceID); err == nil {
-				srcID = &s
-			}
-		}
-
-		_, _ = tx.Exec(ctx, `
-			INSERT INTO notification_events
-				(id, tenant_id, location_id, customer_id, channel, notification_type,
-				 quota_type, recipient_phone, template_code, status,
-				 source_type, source_id, created_at)
-			VALUES
-				(gen_random_uuid(), $1, $2, $3, 'whatsapp', $4,
-				 $5, $6, $7, 'blocked_quota',
-				 $8, $9, NOW())`,
-			tenantUUID, locUUID, custID, payload.NotificationType,
-			quotaType, payload.To, payload.TemplateCode, payload.SourceType, srcID,
-		)
-		if commitErr := tx.Commit(ctx); commitErr != nil {
-			return commitErr
-		}
-		return newTerminalError("marketing quota exhausted: terminal: do not retry")
-	}
-
-	// Transactional warning at 800
-	if quotaType == "whatsapp_transactional" && usedCount >= 800 {
-		log.Printf("outbox: transactional quota warning: tenant=%s used=%d/%d",
-			tenantUUID, usedCount, includedLimit)
-	}
-
-	// Step 4: Ledger insert
-	res, err := tx.Exec(ctx, `
-		INSERT INTO quota_usage_ledger
-			(id, tenant_id, quota_type, quota_period_id, usage_count,
-			 source_type, source_id, idempotency_key, created_at)
-		VALUES
-			(gen_random_uuid(), $1, $2, $3, 1,
-			 'outbox_notification', $4::UUID, $4, NOW())
-		ON CONFLICT (idempotency_key) DO NOTHING;
-	`, tenantUUID, quotaType, periodID, event.ID)
-	if err != nil {
-		return err
-	}
-
-	// Step 5: Increment used_count only if new ledger row
-	if res.RowsAffected() == 1 {
-		_, err = tx.Exec(ctx, `
-			UPDATE tenant_quota_periods
-			SET    used_count = used_count + 1
-			WHERE  id = $1;
-		`, periodID)
+	if blocked {
+		tx, err := pool.Begin(ctx)
 		if err != nil {
 			return err
 		}
-	}
+		defer tx.Rollback(ctx)
 
-	if err := tx.Commit(ctx); err != nil {
-		return err
+		_, err = tx.Exec(ctx, `
+			INSERT INTO notification_events (
+				id, tenant_id, location_id, channel, notification_type,
+				quota_type, recipient_phone, template_code, status,
+				source_type, source_id, created_at
+			) VALUES (
+				gen_random_uuid(), $1, $2, 'whatsapp', 'marketing_broadcast',
+				'whatsapp_marketing', $3, $4, 'blocked_quota',
+				'outbox_event', $5, NOW()
+			)`,
+			tenantUUID, locUUID, payload.To, payload.TemplateCode, eventID,
+		)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(ctx, `
+			UPDATE outbox_events
+			SET status='failed', last_error='quota_exhausted'
+			WHERE id = $1`, eventID)
+		if err != nil {
+			return err
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			return err
+		}
+		return newTerminalError("quota_exhausted")
 	}
 
 	// Bhejna call
@@ -334,4 +265,63 @@ func (h *Handler) writeFailedNotificationEvent(ctx context.Context, tenantID uui
 	`, tenantID, locationID, custID, payload.NotificationType, quotaType,
 		payload.To, payload.TemplateCode, errMsg,
 		payload.SourceType, srcID)
+}
+
+func quotaTypeForTemplate(templateCode string) string {
+	if templateCode == "bb_marketing_broadcast" {
+		return "whatsapp_marketing"
+	}
+	return "whatsapp_transactional"
+}
+
+func consumeQuota(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	repo *repository.Repository,
+	tenantID uuid.UUID,
+	outboxEventID uuid.UUID,
+	templateCode string,
+) (blocked bool, err error) {
+	quotaType := quotaTypeForTemplate(templateCode)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+
+	period, err := repo.UpsertAndLockQuotaPeriod(ctx, tx, tenantID, quotaType)
+	if err != nil {
+		return false, err
+	}
+
+	if quotaType == "whatsapp_marketing" && period.UsedCount >= period.IncludedLimit {
+		if err = tx.Commit(ctx); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	// Transactional warning at 800
+	if quotaType == "whatsapp_transactional" && period.UsedCount >= 800 {
+		log.Printf("outbox: transactional quota warning: tenant=%s used=%d/%d",
+			tenantID, period.UsedCount, period.IncludedLimit)
+	}
+
+	inserted, err := repo.InsertQuotaLedgerIdempotent(ctx, tx, tenantID, quotaType, period.PeriodID, outboxEventID)
+	if err != nil {
+		return false, err
+	}
+
+	if inserted {
+		err = repo.IncrementQuotaPeriodUsed(ctx, tx, period.PeriodID)
+		if err != nil {
+			return false, err
+		}
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return false, err
+	}
+	return false, nil
 }
