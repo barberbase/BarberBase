@@ -451,7 +451,159 @@ func respondUnauthorized(w http.ResponseWriter) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) GetDailyAnalytics(w http.ResponseWriter, r *http.Request, params GetDailyAnalyticsParams) {
-	w.WriteHeader(http.StatusNotImplemented)
+	ctx := r.Context()
+
+	// 1. Extract role from JWT context -> if role is 'barber', return 403.
+	role := auth.RoleFromCtx(ctx)
+	if role == "barber" {
+		respondJSON(w, http.StatusForbidden, map[string]string{
+			"code":    "FORBIDDEN",
+			"message": "barber role is not allowed to access daily analytics",
+		})
+		return
+	}
+
+	// 2. Extract tenant_id and location_id from JWT context (never from query string — Law 11).
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid tenant id claim",
+		})
+		return
+	}
+
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid location id claim",
+		})
+		return
+	}
+
+	// 3. Fetch location timezone
+	var tz string
+	err = s.Pool.QueryRow(ctx, "SELECT timezone FROM locations WHERE id = $1 AND is_active = true", locationID).Scan(&tz)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondJSON(w, http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND",
+				"message": "location not found",
+			})
+			return
+		}
+		log.Printf("[Error] Fetching location timezone failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "internal server error",
+		})
+		return
+	}
+
+	// 4. Parse ?date param if present (format 2006-01-02). Invalid format -> 400. If absent, default to today in location timezone.
+	var businessDate time.Time
+	if dateStr := r.URL.Query().Get("date"); dateStr != "" {
+		parsedDate, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{
+				"code":    "INVALID_REQUEST",
+				"message": "invalid date format, must be YYYY-MM-DD",
+			})
+			return
+		}
+		businessDate = parsedDate
+	} else {
+		loc, errLoc := time.LoadLocation(tz)
+		if errLoc != nil {
+			loc = time.UTC
+		}
+		nowInTz := time.Now().In(loc)
+		businessDate = time.Date(nowInTz.Year(), nowInTz.Month(), nowInTz.Day(), 0, 0, 0, 0, nowInTz.Location())
+	}
+
+	// 5. Call r.Visit.GetDailyAnalytics(ctx, locationID, tenantID, businessDate)
+	rRepo := &repository.VisitRepository{Pool: s.Pool}
+	res, err := rRepo.GetDailyAnalytics(ctx, locationID, tenantID, businessDate)
+	if err != nil {
+		log.Printf("[Error] GetDailyAnalytics failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "internal server error",
+		})
+		return
+	}
+
+	// 6. Map DailyAnalyticsResult to the DailyAnalytics OpenAPI schema
+	var apiBreakdown []struct {
+		AverageServiceMinutes *int `json:"average_service_minutes,omitempty"`
+
+		// BarberId UUID v7 (timestamp-sortable)
+		BarberId   *UUIDv7 `json:"barber_id,omitempty"`
+		BarberName *string `json:"barber_name,omitempty"`
+
+		// RevenuePaise Monetary amount in paise (100 paise = 1 INR)
+		RevenuePaise    *Paise `json:"revenue_paise,omitempty"`
+		VisitsCompleted *int   `json:"visits_completed,omitempty"`
+	}
+
+	for _, ba := range res.BarberBreakdown {
+		barberID := UUIDv7(ba.BarberID)
+		barberName := ba.BarberName
+		revenuePaise := Paise(ba.RevenuePaise)
+		visitsCompleted := ba.VisitsCompleted
+
+		apiBreakdown = append(apiBreakdown, struct {
+			AverageServiceMinutes *int `json:"average_service_minutes,omitempty"`
+
+			// BarberId UUID v7 (timestamp-sortable)
+			BarberId   *UUIDv7 `json:"barber_id,omitempty"`
+			BarberName *string `json:"barber_name,omitempty"`
+
+			// RevenuePaise Monetary amount in paise (100 paise = 1 INR)
+			RevenuePaise    *Paise `json:"revenue_paise,omitempty"`
+			VisitsCompleted *int   `json:"visits_completed,omitempty"`
+		}{
+			AverageServiceMinutes: ba.AverageServiceMinutes,
+			BarberId:              &barberID,
+			BarberName:            &barberName,
+			RevenuePaise:          &revenuePaise,
+			VisitsCompleted:       &visitsCompleted,
+		})
+	}
+
+	if apiBreakdown == nil {
+		apiBreakdown = make([]struct {
+			AverageServiceMinutes *int `json:"average_service_minutes,omitempty"`
+
+			// BarberId UUID v7 (timestamp-sortable)
+			BarberId   *UUIDv7 `json:"barber_id,omitempty"`
+			BarberName *string `json:"barber_name,omitempty"`
+
+			// RevenuePaise Monetary amount in paise (100 paise = 1 INR)
+			RevenuePaise    *Paise `json:"revenue_paise,omitempty"`
+			VisitsCompleted *int   `json:"visits_completed,omitempty"`
+		}, 0)
+	}
+
+	noShowVal := res.NoShowCount
+	cancelledVal := res.CancelledCount
+
+	resp := DailyAnalytics{
+		AverageWaitMinutes: res.AverageWaitMinutes,
+		BarberBreakdown:    apiBreakdown,
+		BusinessDate:       openapi_types.Date{Time: businessDate},
+		CancelledCount:     &cancelledVal,
+		NoShowCount:        &noShowVal,
+		TotalRevenuePaise:  Paise(res.TotalRevenuePaise),
+		TotalVisits:        res.TotalVisits,
+	}
+
+	// 7. Return 200
+	respondJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) GetStaffMembers(w http.ResponseWriter, r *http.Request) {

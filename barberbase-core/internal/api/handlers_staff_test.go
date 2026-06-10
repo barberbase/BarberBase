@@ -625,3 +625,223 @@ func TestReceiveBhejnaWebhook_Latency_And_NoDownstream(t *testing.T) {
 	}
 }
 
+func newStaffRequestWithRole(method, url string, tenantID, locationID, staffID uuid.UUID, role string) *http.Request {
+	req := httptest.NewRequest(method, url, nil)
+	ctx := req.Context()
+	ctx = context.WithValue(ctx, auth.CtxTenantID, tenantID.String())
+	ctx = context.WithValue(ctx, auth.CtxLocationID, locationID.String())
+	ctx = context.WithValue(ctx, auth.CtxStaffMemberID, staffID.String())
+	ctx = context.WithValue(ctx, auth.CtxRole, role)
+	return req.WithContext(ctx)
+}
+
+func TestGetDailyAnalytics(t *testing.T) {
+	s, pool, tenantID, locationID, barberAID, barberBID := setupCallNextTestServer(t)
+	ctx := context.Background()
+
+	// Clean up any remaining charges just in case
+	_, _ = pool.Exec(ctx, "DELETE FROM visit_charges")
+
+	// 1. Test: Barber role JWT -> 403
+	{
+		req := newStaffRequestWithRole(http.MethodGet, "/v1/staff/analytics/daily", tenantID, locationID, barberAID, "barber")
+		rec := httptest.NewRecorder()
+		s.GetDailyAnalytics(rec, req, GetDailyAnalyticsParams{})
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for barber role, got %d", rec.Code)
+		}
+	}
+
+	// 2. Test: Request for a date with no queue_session -> 200, all zeros, empty breakdown
+	{
+		req := newStaffRequestWithRole(http.MethodGet, "/v1/staff/analytics/daily?date=2026-06-10", tenantID, locationID, barberAID, "manager")
+		rec := httptest.NewRecorder()
+		s.GetDailyAnalytics(rec, req, GetDailyAnalyticsParams{})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected 200 OK for no queue_session, got %d. Response: %s", rec.Code, rec.Body.String())
+		}
+		var resp DailyAnalytics
+		err := json.Unmarshal(rec.Body.Bytes(), &resp)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
+		if resp.TotalVisits != 0 {
+			t.Errorf("Expected 0 total visits, got %d", resp.TotalVisits)
+		}
+		if resp.TotalRevenuePaise != 0 {
+			t.Errorf("Expected 0 total revenue, got %d", resp.TotalRevenuePaise)
+		}
+		if resp.AverageWaitMinutes != nil {
+			t.Errorf("Expected nil average wait minutes, got %v", *resp.AverageWaitMinutes)
+		}
+		if resp.NoShowCount == nil || *resp.NoShowCount != 0 {
+			t.Errorf("Expected 0 no show count, got %v", resp.NoShowCount)
+		}
+		if resp.CancelledCount == nil || *resp.CancelledCount != 0 {
+			t.Errorf("Expected 0 cancelled count, got %v", resp.CancelledCount)
+		}
+		if len(resp.BarberBreakdown) != 0 {
+			t.Errorf("Expected empty barber breakdown, got %d entries", len(resp.BarberBreakdown))
+		}
+	}
+
+	// 3. Test: Seed and check totals & breakdown
+	businessDate := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	sessionID := uuid.New()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status, queue_version, last_token_number)
+		VALUES ($1, $2, $3, $4, 'active', 0, 0)`, sessionID, tenantID, locationID, businessDate)
+	if err != nil {
+		t.Fatalf("Failed to seed queue session: %v", err)
+	}
+
+	seedVisitEntryAndCharge := func(visitID uuid.UUID, state string, barberID *uuid.UUID, remoteJoined, called, started, completed time.Time, amountPaise int, chargeStatus string) {
+		customerID := uuid.New()
+		_, err := pool.Exec(ctx, `
+			INSERT INTO customers (id, tenant_id, phone_number, name)
+			VALUES ($1, $2, $3, 'Customer')`, customerID, tenantID, "+91"+uuid.New().String()[:10])
+		if err != nil {
+			t.Fatalf("Failed to seed customer: %v", err)
+		}
+
+		_, err = pool.Exec(ctx, `
+			INSERT INTO visits (id, tenant_id, location_id, customer_id, entry_type, status, party_size, total_duration_minutes)
+			VALUES ($1, $2, $3, $4, 'walk_in', 'active', 1, 30)`, visitID, tenantID, locationID, customerID)
+		if err != nil {
+			t.Fatalf("Failed to seed visit: %v", err)
+		}
+
+		var qCalled, qStarted, qCompleted *time.Time
+		if !called.IsZero() {
+			qCalled = &called
+		}
+		if !started.IsZero() {
+			qStarted = &started
+		}
+		if !completed.IsZero() {
+			qCompleted = &completed
+		}
+		_, err = pool.Exec(ctx, `
+			INSERT INTO queue_entries (id, visit_id, queue_session_id, customer_id, token_number, state, presence_state, is_dispatchable, assigned_barber_id, remote_joined_at, called_at, started_at, completed_at)
+			VALUES ($1, $2, $3, $4, (SELECT COALESCE(MAX(token_number), 0) + 1 FROM queue_entries WHERE queue_session_id = $3), $5, 'arrived', true, $6, $7, $8, $9, $10)`,
+			uuid.New(), visitID, sessionID, customerID, state, barberID, remoteJoined, qCalled, qStarted, qCompleted)
+		if err != nil {
+			t.Fatalf("Failed to seed queue entry: %v", err)
+		}
+
+		if amountPaise > 0 {
+			_, err = pool.Exec(ctx, `
+				INSERT INTO visit_charges (id, tenant_id, location_id, visit_id, total_amount_paise, status)
+				VALUES ($1, $2, $3, $4, $5, $6)`, uuid.New(), tenantID, locationID, visitID, amountPaise, chargeStatus)
+			if err != nil {
+				t.Fatalf("Failed to seed charge: %v", err)
+			}
+		}
+	}
+
+	// Seed completed visits
+	v1ID := uuid.New()
+	tJoined1 := businessDate.Add(10 * time.Minute)
+	tCalled1 := tJoined1.Add(15 * time.Minute)
+	tStarted1 := tCalled1.Add(5 * time.Minute)
+	tCompleted1 := tStarted1.Add(25 * time.Minute)
+	seedVisitEntryAndCharge(v1ID, "completed", &barberAID, tJoined1, tCalled1, tStarted1, tCompleted1, 15000, "finalized")
+
+	v2ID := uuid.New()
+	tJoined2 := businessDate.Add(40 * time.Minute)
+	tCalled2 := tJoined2.Add(25 * time.Minute)
+	tStarted2 := tCalled2.Add(2 * time.Minute)
+	tCompleted2 := tStarted2.Add(35 * time.Minute)
+	seedVisitEntryAndCharge(v2ID, "completed", &barberAID, tJoined2, tCalled2, tStarted2, tCompleted2, 25000, "finalized")
+
+	v3ID := uuid.New()
+	tJoined3 := businessDate.Add(2 * time.Hour)
+	tCalled3 := tJoined3.Add(20 * time.Minute)
+	tStarted3 := tCalled3.Add(1 * time.Minute)
+	tCompleted3 := tStarted3.Add(30 * time.Minute)
+	seedVisitEntryAndCharge(v3ID, "completed", &barberBID, tJoined3, tCalled3, tStarted3, tCompleted3, 30000, "finalized")
+
+	// Seed no_show visit
+	v4ID := uuid.New()
+	seedVisitEntryAndCharge(v4ID, "no_show", &barberAID, businessDate.Add(3*time.Hour), time.Time{}, time.Time{}, time.Time{}, 0, "")
+
+	// Seed cancelled visit
+	v5ID := uuid.New()
+	seedVisitEntryAndCharge(v5ID, "cancelled", &barberBID, businessDate.Add(4*time.Hour), time.Time{}, time.Time{}, time.Time{}, 0, "")
+
+	// Request daily analytics
+	req := newStaffRequestWithRole(http.MethodGet, "/v1/staff/analytics/daily?date=2026-06-10", tenantID, locationID, barberAID, "owner")
+	rec := httptest.NewRecorder()
+	s.GetDailyAnalytics(rec, req, GetDailyAnalyticsParams{})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK, got %d. Response: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp DailyAnalytics
+	err = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if resp.TotalVisits != 3 {
+		t.Errorf("Expected 3 completed visits, got %d", resp.TotalVisits)
+	}
+	if resp.TotalRevenuePaise != 70000 {
+		t.Errorf("Expected 70000 paise revenue, got %d", resp.TotalRevenuePaise)
+	}
+	if resp.AverageWaitMinutes == nil || *resp.AverageWaitMinutes != 20 {
+		if resp.AverageWaitMinutes == nil {
+			t.Errorf("Expected average wait 20, got nil")
+		} else {
+			t.Errorf("Expected average wait 20, got %d", *resp.AverageWaitMinutes)
+		}
+	}
+	if resp.NoShowCount == nil || *resp.NoShowCount != 1 {
+		t.Errorf("Expected 1 no show count, got %v", resp.NoShowCount)
+	}
+	if resp.CancelledCount == nil || *resp.CancelledCount != 1 {
+		t.Errorf("Expected 1 cancelled count, got %v", resp.CancelledCount)
+	}
+
+	if len(resp.BarberBreakdown) != 2 {
+		t.Fatalf("Expected 2 barbers in breakdown, got %d", len(resp.BarberBreakdown))
+	}
+
+	var revenueSum int64
+	for _, ba := range resp.BarberBreakdown {
+		if ba.BarberId == nil || ba.RevenuePaise == nil || ba.VisitsCompleted == nil || ba.AverageServiceMinutes == nil {
+			t.Fatalf("Expected non-nil fields in barber breakdown")
+		}
+		revenueSum += int64(*ba.RevenuePaise)
+
+		if *ba.BarberId == barberAID {
+			if *ba.VisitsCompleted != 2 {
+				t.Errorf("Expected Barber A visits = 2, got %d", *ba.VisitsCompleted)
+			}
+			if *ba.RevenuePaise != 40000 {
+				t.Errorf("Expected Barber A revenue = 40000, got %d", *ba.RevenuePaise)
+			}
+			if *ba.AverageServiceMinutes != 30 {
+				t.Errorf("Expected Barber A avg service = 30, got %d", *ba.AverageServiceMinutes)
+			}
+		} else if *ba.BarberId == barberBID {
+			if *ba.VisitsCompleted != 1 {
+				t.Errorf("Expected Barber B visits = 1, got %d", *ba.VisitsCompleted)
+			}
+			if *ba.RevenuePaise != 30000 {
+				t.Errorf("Expected Barber B revenue = 30000, got %d", *ba.RevenuePaise)
+			}
+			if *ba.AverageServiceMinutes != 30 {
+				t.Errorf("Expected Barber B avg service = 30, got %d", *ba.AverageServiceMinutes)
+			}
+		} else {
+			t.Errorf("Unexpected barber ID %s in breakdown", ba.BarberId.String())
+		}
+	}
+
+	if revenueSum != int64(resp.TotalRevenuePaise) {
+		t.Errorf("Sum of barber revenue (%d) does not match total revenue (%d)", revenueSum, resp.TotalRevenuePaise)
+	}
+}
+
+

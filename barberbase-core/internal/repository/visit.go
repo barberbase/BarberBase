@@ -3,10 +3,12 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type VisitRow struct {
@@ -255,3 +257,160 @@ func IncrementQueueVersion(ctx context.Context, tx pgx.Tx, sessionID uuid.UUID) 
 		RETURNING queue_version`, sessionID).Scan(&version)
 	return version, err
 }
+
+type VisitRepository struct {
+	Pool *pgxpool.Pool
+}
+
+type DailyAnalyticsResult struct {
+	TotalVisits          int
+	TotalRevenuePaise    int64
+	AverageWaitMinutes   *int   // nil if no data
+	NoShowCount          int
+	CancelledCount       int
+	BarberBreakdown      []BarberAnalytics
+}
+
+type BarberAnalytics struct {
+	BarberID               uuid.UUID
+	BarberName             string
+	VisitsCompleted        int
+	RevenuePaise           int64
+	AverageServiceMinutes  *int  // nil if no started/completed data
+}
+
+func (r *VisitRepository) GetDailyAnalytics(
+	ctx context.Context,
+	locationID uuid.UUID,
+	tenantID uuid.UUID,
+	businessDate time.Time,
+) (*DailyAnalyticsResult, error) {
+	conn, err := r.Pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
+
+	_, err = conn.Exec(ctx, "SET statement_timeout = 0")
+	if err != nil {
+		return nil, err
+	}
+
+	// Queue session lookup
+	var sessionID uuid.UUID
+	err = conn.QueryRow(ctx, `
+		SELECT id
+		FROM queue_sessions
+		WHERE location_id = $1
+		  AND business_date = $2::date`, locationID, businessDate).Scan(&sessionID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &DailyAnalyticsResult{
+				BarberBreakdown: []BarberAnalytics{},
+			}, nil
+		}
+		return nil, err
+	}
+
+	// Main analytics query
+	var totalVisits int
+	var totalRevenuePaise int64
+	var averageWaitMinutes *int
+	var noShowCount int
+	var cancelledCount int
+
+	err = conn.QueryRow(ctx, `
+		SELECT
+			COUNT(*) FILTER (WHERE qe.state = 'completed')
+				AS total_visits,
+			COALESCE(
+				SUM(vc.total_amount_paise) FILTER (WHERE vc.status = 'finalized'),
+				0
+			)   AS total_revenue_paise,
+			ROUND(
+				AVG(
+					EXTRACT(EPOCH FROM (qe.called_at - qe.remote_joined_at)) / 60.0
+				) FILTER (
+					WHERE qe.called_at IS NOT NULL
+					  AND qe.remote_joined_at IS NOT NULL
+				)
+			)::INT
+				AS average_wait_minutes,
+			COUNT(*) FILTER (WHERE qe.state = 'no_show')
+				AS no_show_count,
+			COUNT(*) FILTER (WHERE qe.state = 'cancelled')
+				AS cancelled_count
+		FROM queue_entries qe
+		LEFT JOIN visit_charges vc ON vc.visit_id = qe.visit_id
+		WHERE qe.queue_session_id = $1`, sessionID).Scan(
+		&totalVisits,
+		&totalRevenuePaise,
+		&averageWaitMinutes,
+		&noShowCount,
+		&cancelledCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Barber breakdown query
+	rows, err := conn.Query(ctx, `
+		SELECT
+			sm.id,
+			sm.name,
+			COUNT(*) FILTER (WHERE qe.state = 'completed')
+				AS visits_completed,
+			COALESCE(
+				SUM(vc.total_amount_paise) FILTER (WHERE vc.status = 'finalized'),
+				0
+			)   AS revenue_paise,
+			ROUND(
+				AVG(
+					EXTRACT(EPOCH FROM (qe.completed_at - qe.started_at)) / 60.0
+				) FILTER (
+					WHERE qe.completed_at IS NOT NULL
+					  AND qe.started_at IS NOT NULL
+				)
+			)::INT
+				AS average_service_minutes
+		FROM queue_entries qe
+		JOIN staff_members sm ON sm.id = qe.assigned_barber_id
+		LEFT JOIN visit_charges vc ON vc.visit_id = qe.visit_id
+		WHERE qe.queue_session_id = $1
+		  AND qe.assigned_barber_id IS NOT NULL
+		GROUP BY sm.id, sm.name
+		ORDER BY visits_completed DESC`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	barberBreakdown := []BarberAnalytics{}
+	for rows.Next() {
+		var ba BarberAnalytics
+		err = rows.Scan(
+			&ba.BarberID,
+			&ba.BarberName,
+			&ba.VisitsCompleted,
+			&ba.RevenuePaise,
+			&ba.AverageServiceMinutes,
+		)
+		if err != nil {
+			return nil, err
+		}
+		barberBreakdown = append(barberBreakdown, ba)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &DailyAnalyticsResult{
+		TotalVisits:        totalVisits,
+		TotalRevenuePaise:  totalRevenuePaise,
+		AverageWaitMinutes: averageWaitMinutes,
+		NoShowCount:        noShowCount,
+		CancelledCount:     cancelledCount,
+		BarberBreakdown:    barberBreakdown,
+	}, nil
+}
+
