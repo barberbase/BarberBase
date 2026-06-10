@@ -2,8 +2,10 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -235,3 +237,265 @@ func GetVariantsByIDs(ctx context.Context, pool *pgxpool.Pool, locationID string
 	}
 	return variants, nil
 }
+
+// ErrVariantExists is returned when a variant name already exists in this group.
+var ErrVariantExists = errors.New("variant name already exists in this group")
+
+type ServiceVariantRow struct {
+	ID                  string
+	Name                string
+	Description         *string
+	DurationMinutes     int
+	PricePaise          int
+	AllowWalkIn         bool
+	AllowAppointment    bool
+	RequiresAppointment bool
+	IsPopular           bool
+	IsActive            bool
+}
+
+type ServiceGroupRow struct {
+	ID          string
+	Name        string
+	Description *string
+	Variants    []ServiceVariantRow
+}
+
+type ServiceCategoryRow struct {
+	ID        string
+	Name      string
+	Gender    string
+	SortOrder int
+	Groups    []ServiceGroupRow
+}
+
+type CreateServiceVariantParams struct {
+	CategoryName        string
+	CategoryGender      string
+	GroupName           string
+	VariantName         string
+	DurationMinutes     int
+	PricePaise          int
+	AllowWalkIn         bool
+	AllowAppointment    bool
+	RequiresAppointment bool
+	IsPopular           bool
+}
+
+type UpdateServiceVariantParams struct {
+	VariantName     *string
+	DurationMinutes *int
+	PricePaise      *int
+	IsActive        *bool
+	IsPopular       *bool
+}
+
+type ServiceRepository struct {
+	Pool *pgxpool.Pool
+}
+
+func (r *ServiceRepository) ListServicesForAdmin(ctx context.Context, tenantID, locationID string) ([]ServiceCategoryRow, error) {
+	query := `
+		SELECT
+			sc.id         AS cat_id,
+			sc.name       AS cat_name,
+			sc.gender     AS cat_gender,
+			sc.sort_order AS cat_sort,
+			sg.id         AS grp_id,
+			sg.name       AS grp_name,
+			sg.description AS grp_desc,
+			sg.sort_order  AS grp_sort,
+			sv.id          AS var_id,
+			sv.name        AS var_name,
+			sv.description AS var_desc,
+			sv.duration_minutes,
+			sv.price_paise,
+			sv.allow_walk_in,
+			sv.allow_appointment,
+			sv.requires_appointment,
+			sv.is_popular,
+			sv.is_active
+		FROM service_categories sc
+		JOIN service_groups sg
+			ON sg.category_id = sc.id
+		   AND sg.tenant_id   = $1::UUID
+		   AND sg.is_active   = true
+		JOIN service_variants sv
+			ON sv.group_id   = sg.id
+		   AND sv.tenant_id  = $1::UUID
+		   AND sv.is_active  = true
+		WHERE sc.location_id = $2::UUID
+		  AND sc.tenant_id   = $1::UUID
+		  AND sc.is_active   = true
+		ORDER BY sc.sort_order, sc.name, sg.sort_order, sg.name, sv.sort_order, sv.name
+	`
+
+	rows, err := r.Pool.Query(ctx, query, tenantID, locationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var categories []ServiceCategoryRow
+	var catIndex = make(map[string]int)
+	var grpIndex = make(map[string]int)
+
+	for rows.Next() {
+		var catID, catName, catGender string
+		var catSort, grpSort int
+		var grpID, grpName string
+		var grpDesc *string
+		var v ServiceVariantRow
+
+		err := rows.Scan(
+			&catID, &catName, &catGender, &catSort,
+			&grpID, &grpName, &grpDesc, &grpSort,
+			&v.ID, &v.Name, &v.Description, &v.DurationMinutes, &v.PricePaise,
+			&v.AllowWalkIn, &v.AllowAppointment, &v.RequiresAppointment, &v.IsPopular, &v.IsActive,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		cIdx, exists := catIndex[catID]
+		if !exists {
+			cIdx = len(categories)
+			categories = append(categories, ServiceCategoryRow{
+				ID:        catID,
+				Name:      catName,
+				Gender:    catGender,
+				SortOrder: catSort,
+				Groups:    []ServiceGroupRow{},
+			})
+			catIndex[catID] = cIdx
+		}
+
+		gKey := catID + ":" + grpID
+		gIdx, exists := grpIndex[gKey]
+		if !exists {
+			gIdx = len(categories[cIdx].Groups)
+			categories[cIdx].Groups = append(categories[cIdx].Groups, ServiceGroupRow{
+				ID:          grpID,
+				Name:        grpName,
+				Description: grpDesc,
+				Variants:    []ServiceVariantRow{},
+			})
+			grpIndex[gKey] = gIdx
+		}
+
+		categories[cIdx].Groups[gIdx].Variants = append(categories[cIdx].Groups[gIdx].Variants, v)
+	}
+
+	if categories == nil {
+		categories = []ServiceCategoryRow{}
+	}
+
+	return categories, nil
+}
+
+func (r *ServiceRepository) CreateServiceVariant(ctx context.Context, tenantID, locationID string, p CreateServiceVariantParams) (ServiceVariantRow, error) {
+	var variant ServiceVariantRow
+
+	err := WithTx(ctx, r.Pool, func(tx pgx.Tx) error {
+		// Step 1: Upsert category
+		var categoryID string
+		err := tx.QueryRow(ctx, `
+			INSERT INTO service_categories (id, tenant_id, location_id, name, gender)
+			VALUES (gen_random_uuid(), $1::UUID, $2::UUID, $3, $4)
+			ON CONFLICT (location_id, name, gender)
+			DO UPDATE SET is_active = true
+			RETURNING id
+		`, tenantID, locationID, p.CategoryName, p.CategoryGender).Scan(&categoryID)
+		if err != nil {
+			return err
+		}
+
+		// Step 2: Upsert group
+		var groupID string
+		err = tx.QueryRow(ctx, `
+			INSERT INTO service_groups (id, tenant_id, location_id, category_id, name)
+			VALUES (gen_random_uuid(), $1::UUID, $2::UUID, $3::UUID, $4)
+			ON CONFLICT (location_id, category_id, name)
+			DO UPDATE SET is_active = true
+			RETURNING id
+		`, tenantID, locationID, categoryID, p.GroupName).Scan(&groupID)
+		if err != nil {
+			return err
+		}
+
+		// Step 3: Insert variant
+		err = tx.QueryRow(ctx, `
+			INSERT INTO service_variants (
+				id, tenant_id, location_id, group_id,
+				name, duration_minutes, price_paise,
+				allow_walk_in, allow_appointment, requires_appointment, is_popular, is_active
+			) VALUES (
+				gen_random_uuid(), $1::UUID, $2::UUID, $3::UUID,
+				$4, $5, $6,
+				$7, $8, $9, $10, true
+			)
+			RETURNING id, name, description, duration_minutes, price_paise,
+			          allow_walk_in, allow_appointment, requires_appointment, is_popular, is_active
+		`, tenantID, locationID, groupID, p.VariantName, p.DurationMinutes, p.PricePaise,
+			p.AllowWalkIn, p.AllowAppointment, p.RequiresAppointment, p.IsPopular).Scan(
+			&variant.ID, &variant.Name, &variant.Description, &variant.DurationMinutes, &variant.PricePaise,
+			&variant.AllowWalkIn, &variant.AllowAppointment, &variant.RequiresAppointment, &variant.IsPopular, &variant.IsActive,
+		)
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return ErrVariantExists
+			}
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return ServiceVariantRow{}, err
+	}
+
+	return variant, nil
+}
+
+func (r *ServiceRepository) UpdateServiceVariant(ctx context.Context, tenantID, locationID, variantID string, p UpdateServiceVariantParams) (ServiceVariantRow, error) {
+	var variant ServiceVariantRow
+
+	query := `
+		UPDATE service_variants
+		SET
+			name             = COALESCE($3, name),
+			duration_minutes = COALESCE($4, duration_minutes),
+			price_paise      = COALESCE($5, price_paise),
+			is_active        = COALESCE($6, is_active),
+			is_popular       = COALESCE($7, is_popular),
+			updated_at       = NOW()
+		WHERE id          = $2::UUID
+		  AND tenant_id   = $1::UUID
+		  AND location_id = $8::UUID
+		RETURNING id, name, description, duration_minutes, price_paise,
+		          allow_walk_in, allow_appointment, requires_appointment, is_popular, is_active
+	`
+
+	err := r.Pool.QueryRow(ctx, query,
+		tenantID, variantID, p.VariantName, p.DurationMinutes, p.PricePaise,
+		p.IsActive, p.IsPopular, locationID,
+	).Scan(
+		&variant.ID, &variant.Name, &variant.Description, &variant.DurationMinutes, &variant.PricePaise,
+		&variant.AllowWalkIn, &variant.AllowAppointment, &variant.RequiresAppointment, &variant.IsPopular, &variant.IsActive,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ServiceVariantRow{}, pgx.ErrNoRows
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return ServiceVariantRow{}, ErrVariantExists
+		}
+		return ServiceVariantRow{}, err
+	}
+
+	return variant, nil
+}
+
