@@ -1286,11 +1286,143 @@ func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetStaffShopStatus(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
+	ctx := r.Context()
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid tenant id claim",
+		})
+		return
+	}
+
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid location id claim",
+		})
+		return
+	}
+
+	staffStatus, err := repository.GetStaffShopStatus(ctx, s.Pool, tenantID, locationID)
+	if err != nil {
+		log.Printf("[Error] GetStaffShopStatus failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "failed to fetch shop status",
+		})
+		return
+	}
+
+	resp := map[string]interface{}{
+		"shop_status":            staffStatus.ShopStatus,
+		"queue_session_status":   staffStatus.QueueSessionStatus,
+		"manual_override_active": staffStatus.ManualOverrideActive,
+	}
+	if staffStatus.OverrideExpiresAt != nil {
+		resp["override_expires_at"] = staffStatus.OverrideExpiresAt.Format(time.RFC3339)
+	}
+	if staffStatus.ArrivalPin != nil {
+		resp["arrival_pin"] = *staffStatus.ArrivalPin
+	}
+
+	respondJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) SetShopStatus(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
+	ctx := r.Context()
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+	staffMemberIDStr := auth.StaffMemberIDFromCtx(ctx)
+
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid tenant id claim",
+		})
+		return
+	}
+
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid location id claim",
+		})
+		return
+	}
+
+	staffMemberID, err := uuid.Parse(staffMemberIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "invalid staff member id claim",
+		})
+		return
+	}
+
+	var req SetShopStatusJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"code":    "INVALID_REQUEST",
+			"message": "invalid request body",
+		})
+		return
+	}
+
+	var expiresAt *time.Time
+	if req.ExpiresInMinutes != nil {
+		t := time.Now().Add(time.Duration(*req.ExpiresInMinutes) * time.Minute)
+		expiresAt = &t
+	}
+
+	var modalAction *string
+	if req.ModalAction != nil {
+		ma := string(*req.ModalAction)
+		modalAction = &ma
+	}
+
+	params := repository.SetShopStatusParams{
+		TenantID:    tenantID,
+		LocationID:  locationID,
+		SetBy:       staffMemberID,
+		Status:      string(req.Status),
+		ExpiresAt:   expiresAt,
+		Reason:      req.Reason,
+		ModalAction: modalAction,
+	}
+
+	activeCount, err := repository.SetShopStatus(ctx, s.Pool, params)
+	if err != nil {
+		if errors.Is(err, repository.ErrActiveEntriesExist) {
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"code":               "ACTIVE_ENTRIES_EXIST",
+				"message":            "cannot close shop with active entries without modal action",
+				"active_entry_count": activeCount,
+			})
+			return
+		}
+		log.Printf("[Error] SetShopStatus failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "failed to update shop status",
+		})
+		return
+	}
+
+	if s.Manager != nil {
+		s.Manager.Broadcast(locationID.String(), realtime.SSEEvent{
+			Type:       "shop_status_changed",
+			LocationID: locationID.String(),
+		})
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) StaffConfirmArrival(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {
