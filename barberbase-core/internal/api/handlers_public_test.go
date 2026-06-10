@@ -977,13 +977,13 @@ func TestC33_IntentPast23h(t *testing.T) {
 func TestC42_BookAppointment_Idempotency(t *testing.T) {
 	cleanDatabase(t, os.Getenv("DATABASE_URL"))
 	t.Cleanup(func() { cleanDatabase(t, os.Getenv("DATABASE_URL")) })
-	_, pool, tenantID, locationID, _, _ := setupTestServer(t)
+	_, pool, tenantID, locationID, _, _ := setupTestServerWrapped(t)
 	defer pool.Close()
 
 	variantID := seedServiceVariant(t, pool, tenantID, locationID, "Haircut", 30, 300, true)
 
 	for d := 0; d < 7; d++ {
-		_, err := pool.Exec(context.Background(), `INSERT INTO location_business_hours (id, tenant_id, location_id, day_of_week, is_closed) VALUES (gen_random_uuid(), $1, $2, $3, false)`, tenantID, locationID, d)
+		_, err := pool.Exec(context.Background(), `INSERT INTO location_hours (id, tenant_id, location_id, day_of_week, is_open) VALUES (gen_random_uuid(), $1, $2, $3, true)`, tenantID, locationID, d)
 		if err != nil {
 			// ignore if already seeded
 		}
@@ -1098,3 +1098,110 @@ func TestC42_CheckInAppointment_PrioritySort(t *testing.T) {
 		t.Fatalf("Expected appointment entry to be first")
 	}
 }
+
+func TestSubmitFeedback_DoubleSubmit(t *testing.T) {
+	cleanDatabase(t, os.Getenv("DATABASE_URL"))
+	t.Cleanup(func() { cleanDatabase(t, os.Getenv("DATABASE_URL")) })
+	s, pool, tenantID, locationID, _, _ := setupTestServerWrapped(t)
+	defer pool.Close()
+
+	ctx := context.Background()
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+	token := "feedback-test-token"
+	_, visitID := seedVisitAndEntryForTest(t, pool, tenantID, locationID, sessionID, token)
+
+	customerID := uuid.New()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO customers (id, tenant_id, phone_number, name)
+		VALUES ($1, $2, '+919876543210', 'Alice')
+	`, customerID, tenantID)
+	if err != nil {
+		t.Fatalf("Failed to seed customer: %v", err)
+	}
+
+	_, err = pool.Exec(ctx, `
+		UPDATE visits SET customer_id = $1 WHERE id = $2
+	`, customerID, visitID)
+	if err != nil {
+		t.Fatalf("Failed to update visit customer: %v", err)
+	}
+
+	frID := uuid.New()
+	expiresAt := time.Now().Add(23 * time.Hour)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO feedback_requests (id, tenant_id, location_id, visit_id, customer_id, channel, status, scheduled_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, 'web', 'sent', NOW(), $6)
+	`, frID, tenantID, locationID, visitID, customerID, expiresAt)
+	if err != nil {
+		t.Fatalf("Failed to seed feedback request: %v", err)
+	}
+
+	body := map[string]interface{}{
+		"rating":  4,
+		"comment": "Nice cut!",
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/queue/feedback", bytes.NewReader(bodyBytes))
+	req.Header.Set("X-Session-Token", token)
+	rec := httptest.NewRecorder()
+	s.SubmitFeedback(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Expected 201 Created on first submit, got %d. Response: %s", rec.Code, rec.Body.String())
+	}
+
+	// Double submit
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/queue/feedback", bytes.NewReader(bodyBytes))
+	req2.Header.Set("X-Session-Token", token)
+	rec2 := httptest.NewRecorder()
+	s.SubmitFeedback(rec2, req2)
+
+	if rec2.Code != http.StatusConflict {
+		t.Fatalf("Expected 409 Conflict on double submit, got %d. Response: %s", rec2.Code, rec2.Body.String())
+	}
+
+	// Invalid rating (< 1)
+	bodyInvalid := map[string]interface{}{
+		"rating": 6,
+	}
+	bodyBytesInvalid, _ := json.Marshal(bodyInvalid)
+	token2 := "feedback-test-token-2"
+	_, visitID2 := seedVisitAndEntryForTest(t, pool, tenantID, locationID, sessionID, token2)
+	_, _ = pool.Exec(ctx, `UPDATE visits SET customer_id = $1 WHERE id = $2`, customerID, visitID2)
+
+	frID2 := uuid.New()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO feedback_requests (id, tenant_id, location_id, visit_id, customer_id, channel, status, scheduled_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, 'web', 'sent', NOW(), $6)
+	`, frID2, tenantID, locationID, visitID2, customerID, expiresAt)
+	if err != nil {
+		t.Fatalf("Failed to seed feedback request 2: %v", err)
+	}
+
+	reqInvalid := httptest.NewRequest(http.MethodPost, "/v1/queue/feedback", bytes.NewReader(bodyBytesInvalid))
+	reqInvalid.Header.Set("X-Session-Token", token2)
+	recInvalid := httptest.NewRecorder()
+	s.SubmitFeedback(recInvalid, reqInvalid)
+
+	if recInvalid.Code != http.StatusBadRequest {
+		t.Fatalf("Expected 400 Bad Request for rating 6, got %d. Response: %s", recInvalid.Code, recInvalid.Body.String())
+	}
+}
+
+func setupTestServerWrapped(t *testing.T) (*Server, *pgxpool.Pool, uuid.UUID, uuid.UUID, uuid.UUID, string) {
+	s, pool, tenantID, locationID, staffID, phone := setupTestServer(t)
+	_, _ = pool.Exec(context.Background(), `
+		ALTER TABLE customers ADD COLUMN IF NOT EXISTS display_name VARCHAR(100)
+	`)
+	_, _ = pool.Exec(context.Background(), `
+		ALTER TABLE appointments ALTER COLUMN scheduled_start_at TYPE TIMESTAMP;
+		ALTER TABLE appointments ALTER COLUMN scheduled_end_at TYPE TIMESTAMP;
+	`)
+	_, _ = pool.Exec(context.Background(), `
+		CREATE OR REPLACE VIEW location_business_hours AS
+		SELECT id, tenant_id, location_id, day_of_week, NOT is_open AS is_closed
+		FROM location_hours
+	`)
+	return s, pool, tenantID, locationID, staffID, phone
+}
+

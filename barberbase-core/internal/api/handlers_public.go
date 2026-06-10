@@ -1113,3 +1113,140 @@ func (s *Server) CheckInAppointment(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, res)
 }
 
+func (s *Server) SubmitFeedback(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tenantID, locationID, visitID, err := s.resolveCustomerSession(ctx, r)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	var req SubmitFeedbackJSONBody
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"code":    "INVALID_REQUEST",
+			"message": "failed to decode request body",
+		})
+		return
+	}
+
+	if req.Rating < 1 || req.Rating > 5 {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"code":    "INVALID_RATING",
+			"message": "rating must be between 1 and 5",
+		})
+		return
+	}
+
+	var (
+		frID            uuid.UUID
+		frCustomerID    *uuid.UUID
+		frStaffMemberID *uuid.UUID
+		frExpiresAt     *time.Time
+		frStatus        string
+	)
+	queryFR := `
+		SELECT id, customer_id, staff_member_id, expires_at, status
+		FROM feedback_requests
+		WHERE tenant_id = $1 AND visit_id = $2
+		LIMIT 1
+	`
+	err = s.Pool.QueryRow(ctx, queryFR, tenantID, visitID).Scan(&frID, &frCustomerID, &frStaffMemberID, &frExpiresAt, &frStatus)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondJSON(w, http.StatusNotFound, map[string]string{
+				"code":    "FEEDBACK_REQUEST_NOT_FOUND",
+				"message": "feedback request not found",
+			})
+			return
+		}
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	if frStatus == "responded" {
+		respondJSON(w, http.StatusConflict, map[string]string{
+			"code":    "FEEDBACK_ALREADY_SUBMITTED",
+			"message": "feedback has already been submitted for this visit",
+		})
+		return
+	}
+
+	isLate := false
+	if frExpiresAt != nil && time.Now().After(*frExpiresAt) {
+		isLate = true
+	}
+
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": err.Error(),
+		})
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	var responseID uuid.UUID
+	err = tx.QueryRow(ctx, `
+		INSERT INTO feedback_responses (
+			tenant_id, location_id, feedback_request_id, visit_id,
+			customer_id, staff_member_id, rating, comment, source, is_late, received_at
+		) VALUES (
+			$1, $2, $3, $4,
+			$5, $6, $7, $8, 'web', $9, NOW()
+		)
+		ON CONFLICT (tenant_id, feedback_request_id) DO NOTHING
+		RETURNING id
+	`, tenantID, locationID, frID, visitID, frCustomerID, frStaffMemberID, req.Rating, req.Comment, isLate).Scan(&responseID)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
+			respondJSON(w, http.StatusConflict, map[string]string{
+				"code":    "FEEDBACK_ALREADY_SUBMITTED",
+				"message": "feedback has already been submitted for this visit",
+			})
+			return
+		}
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE feedback_requests
+		SET status = 'responded',
+		    updated_at = NOW()
+		WHERE id = $1
+	`, frID)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusCreated, map[string]interface{}{
+		"id": responseID,
+	})
+}
+
+

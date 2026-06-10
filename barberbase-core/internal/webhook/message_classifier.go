@@ -1,13 +1,204 @@
 package webhook
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"barberbase-core/internal/repository"
 )
+
+var ratingButtonRegex = regexp.MustCompile(`^RATING:([1-5]):(.+)$`)
+
+func (p *Processor) classifyRatingButton(ctx context.Context, tenantID uuid.UUID, customerID *uuid.UUID, buttonPayload string) error {
+	matches := ratingButtonRegex.FindStringSubmatch(buttonPayload)
+	if len(matches) != 3 {
+		return nil
+	}
+	ratingVal, err := strconv.Atoi(matches[1])
+	if err != nil || ratingVal < 1 || ratingVal > 5 {
+		return nil
+	}
+	visitIDStr := matches[2]
+	visitID, err := uuid.Parse(visitIDStr)
+	if err != nil {
+		return nil
+	}
+
+	var (
+		frID            uuid.UUID
+		frTenantID      uuid.UUID
+		frLocationID    uuid.UUID
+		frVisitID       uuid.UUID
+		frCustomerID    *uuid.UUID
+		frStaffMemberID *uuid.UUID
+		frExpiresAt     *time.Time
+		frStatus        string
+	)
+
+	query := `
+		SELECT fr.id, fr.tenant_id, fr.location_id, fr.visit_id,
+		       fr.customer_id, fr.staff_member_id, fr.expires_at, fr.status
+		FROM feedback_requests fr
+		WHERE fr.visit_id  = $1
+		  AND fr.tenant_id = $2
+		LIMIT 1
+	`
+	err = p.pool.QueryRow(ctx, query, visitID, tenantID).Scan(
+		&frID, &frTenantID, &frLocationID, &frVisitID,
+		&frCustomerID, &frStaffMemberID, &frExpiresAt, &frStatus,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+
+	if frStatus == "responded" {
+		return nil
+	}
+
+	isLate := false
+	if frExpiresAt != nil && time.Now().After(*frExpiresAt) {
+		isLate = true
+	}
+
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var responseID uuid.UUID
+	err = tx.QueryRow(ctx, `
+		INSERT INTO feedback_responses (
+			tenant_id, location_id, feedback_request_id, visit_id,
+			customer_id, staff_member_id, rating, source, is_late, received_at
+		) VALUES (
+			$1, $2, $3, $4,
+			$5, $6,
+			$7, 'whatsapp', $8, NOW()
+		)
+		ON CONFLICT (tenant_id, feedback_request_id) DO NOTHING
+		RETURNING id
+	`, tenantID, frLocationID, frID, frVisitID, frCustomerID, frStaffMemberID, ratingVal, isLate).Scan(&responseID)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
+			return nil
+		}
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE feedback_requests
+		SET status = 'responded',
+		    updated_at = NOW()
+		WHERE id = $1
+	`, frID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (p *Processor) classifyRatingPlainText(ctx context.Context, tenantID uuid.UUID, customerID *uuid.UUID, body string, msg ClassifiedMessage) error {
+	bodyTrimmed := strings.TrimSpace(body)
+	if len(bodyTrimmed) != 1 || bodyTrimmed[0] < '1' || bodyTrimmed[0] > '5' {
+		return p.handleUnknown(ctx, msg)
+	}
+	ratingVal := int(bodyTrimmed[0] - '0')
+
+	var (
+		frID            uuid.UUID
+		frTenantID      uuid.UUID
+		frLocationID    uuid.UUID
+		frVisitID       uuid.UUID
+		frCustomerID    *uuid.UUID
+		frStaffMemberID *uuid.UUID
+		frExpiresAt     *time.Time
+		frStatus        string
+	)
+
+	query := `
+		SELECT fr.id, fr.tenant_id, fr.location_id, fr.visit_id,
+		       fr.customer_id, fr.staff_member_id, fr.expires_at, fr.status
+		FROM feedback_requests fr
+		WHERE fr.tenant_id = $1
+		  AND fr.customer_id = $2
+		  AND fr.status IN ('scheduled', 'sent')
+		ORDER BY fr.created_at DESC
+		LIMIT 1
+	`
+	err := p.pool.QueryRow(ctx, query, tenantID, customerID).Scan(
+		&frID, &frTenantID, &frLocationID, &frVisitID,
+		&frCustomerID, &frStaffMemberID, &frExpiresAt, &frStatus,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return p.handleUnknown(ctx, msg)
+		}
+		return err
+	}
+
+	if frStatus == "responded" {
+		return nil
+	}
+
+	isLate := false
+	if frExpiresAt != nil && time.Now().After(*frExpiresAt) {
+		isLate = true
+	}
+
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var responseID uuid.UUID
+	err = tx.QueryRow(ctx, `
+		INSERT INTO feedback_responses (
+			tenant_id, location_id, feedback_request_id, visit_id,
+			customer_id, staff_member_id, rating, source, is_late, received_at
+		) VALUES (
+			$1, $2, $3, $4,
+			$5, $6,
+			$7, 'whatsapp', $8, NOW()
+		)
+		ON CONFLICT (tenant_id, feedback_request_id) DO NOTHING
+		RETURNING id
+	`, tenantID, frLocationID, frID, frVisitID, frCustomerID, frStaffMemberID, ratingVal, isLate).Scan(&responseID)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
+			return nil
+		}
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE feedback_requests
+		SET status = 'responded',
+		    updated_at = NOW()
+		WHERE id = $1
+	`, frID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
 
 type MessageAction int
 

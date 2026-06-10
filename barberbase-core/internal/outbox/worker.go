@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"barberbase-core/internal/bhejna"
+	"barberbase-core/internal/config"
 	notification "barberbase-core/internal/outbox/handlers"
 )
 
@@ -34,13 +35,20 @@ type Worker struct {
 
 func NewWorker(pool *pgxpool.Pool, bhejna bhejna.Client) *Worker {
 	n := notification.NewHandler(pool, bhejna)
+	cfg, err := config.Load()
+	if err != nil {
+		cfg = &config.Config{
+			BhejnaFromPhone: "+911234567890",
+		}
+	}
+	fs := notification.NewFeedbackScheduler(pool, cfg)
 	return &Worker{
 		pool: pool,
 		handlers: map[string]OutboxHandler{
 			"notification.send":         n,
 			"appointment.reminder":      n,
 			"weekly_summary.send":       n,
-			"feedback_request.schedule": &stubHandler{}, // C4.4 replaces
+			"feedback_request.schedule": fs,
 			"web_push.send":             &stubHandler{}, // C6.5 replaces
 		},
 	}

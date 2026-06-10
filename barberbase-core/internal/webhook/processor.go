@@ -257,10 +257,10 @@ func (p *Processor) dispatch(ctx context.Context, msg ClassifiedMessage, rawPayl
 		return p.handleCancelApt(ctx, msg)
 
 	case ActionRatingButton:
-		return p.handleRatingButton(ctx, msg)
+		return p.handleRatingButton(ctx, msg, rawPayload)
 
 	case ActionPlainRating:
-		return p.handlePlainRating(ctx, msg)
+		return p.handlePlainRating(ctx, msg, rawPayload)
 
 	case ActionOptOutButton, ActionStop:
 		return p.handleStop(ctx, msg)
@@ -421,171 +421,98 @@ func (p *Processor) handleCancel(ctx context.Context, msg ClassifiedMessage) err
 	return nil
 }
 
-func (p *Processor) handleRatingButton(ctx context.Context, msg ClassifiedMessage) error {
-	visitID, err := uuid.Parse(msg.VisitID)
-	if err != nil {
-		log.Printf("[Debug] ActionRatingButton: invalid visit ID '%s'", msg.VisitID)
-		return nil
-	}
-
-	var (
-		feedbackRequestID uuid.UUID
-		tenantID          uuid.UUID
-		locationID        uuid.UUID
-		vID               uuid.UUID
-		customerID        *uuid.UUID
-	)
-
-	// Resolve tenant_id and location_id from entity UUID chain (feedback_requests)
-	query := `
-		SELECT fr.id, fr.tenant_id, fr.location_id, fr.visit_id, fr.customer_id
-		FROM feedback_requests fr
-		WHERE fr.visit_id = $1
-		  AND fr.status = 'sent'
-		  AND fr.channel = 'whatsapp'
-		LIMIT 1
-	`
-	err = p.pool.QueryRow(ctx, query, visitID).Scan(&feedbackRequestID, &tenantID, &locationID, &vID, &customerID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			log.Printf("[Debug] ActionRatingButton: feedback request not found or not in sent status for visit %s", visitID)
+func (p *Processor) handleRatingButton(ctx context.Context, msg ClassifiedMessage, rawPayload []byte) error {
+	var tenantID uuid.UUID
+	if msg.LocationID != nil {
+		queryLoc := `SELECT tenant_id FROM locations WHERE id = $1 AND is_active = true`
+		err := p.pool.QueryRow(ctx, queryLoc, msg.LocationID).Scan(&tenantID)
+		if err != nil {
+			log.Printf("[Debug] ActionRatingButton: failed to resolve tenant for location %s: %v", msg.LocationID, err)
 			return nil
 		}
-		return fmt.Errorf("failed to query feedback request: %w", err)
+	} else {
+		visitID, err := uuid.Parse(msg.VisitID)
+		if err != nil {
+			log.Printf("[Debug] ActionRatingButton: invalid visit ID '%s'", msg.VisitID)
+			return nil
+		}
+		queryTenant := `SELECT tenant_id FROM feedback_requests WHERE visit_id = $1 LIMIT 1`
+		err = p.pool.QueryRow(ctx, queryTenant, visitID).Scan(&tenantID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				log.Printf("[Debug] ActionRatingButton: feedback request not found for visit %s", visitID)
+				return nil
+			}
+			return fmt.Errorf("failed to query tenant for visit %s: %w", visitID, err)
+		}
 	}
 
-	tx, err := p.pool.Begin(ctx)
+	resolvedCustID, err := repository.ResolveOrCreateCustomer(ctx, p.pool, tenantID, msg.SenderPhone, msg.BSUID, msg.DisplayName)
 	if err != nil {
-		return fmt.Errorf("failed to begin rating tx: %w", err)
+		return fmt.Errorf("failed to resolve customer: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	customerID := &resolvedCustID
 
-	queryInsertResponse := `
-		INSERT INTO feedback_responses (
-			tenant_id, location_id, feedback_request_id, visit_id,
-			customer_id, rating, source
-		) VALUES (
-			$1, $2, $3, $4,
-			$5, $6, 'whatsapp'
-		)
-		ON CONFLICT (tenant_id, feedback_request_id) DO NOTHING
-	`
-	_, err = tx.Exec(ctx, queryInsertResponse, tenantID, locationID, feedbackRequestID, visitID, customerID, msg.Rating)
-	if err != nil {
-		return fmt.Errorf("failed to insert feedback response: %w", err)
+	var raw bhejnaPayload
+	if err := json.Unmarshal(rawPayload, &raw); err != nil {
+		return fmt.Errorf("failed to unmarshal payload: %w", err)
+	}
+	var buttonPayload string
+	if raw.Message != nil {
+		buttonPayload = raw.Message.ButtonPayload
 	}
 
-	queryUpdateRequest := `
-		UPDATE feedback_requests
-		SET status = 'responded',
-		    updated_at = NOW()
-		WHERE id = $1
-	`
-	_, err = tx.Exec(ctx, queryUpdateRequest, feedbackRequestID)
-	if err != nil {
-		return fmt.Errorf("failed to update feedback request status: %w", err)
-	}
-
-	return tx.Commit(ctx)
+	return p.classifyRatingButton(ctx, tenantID, customerID, buttonPayload)
 }
 
-func (p *Processor) handlePlainRating(ctx context.Context, msg ClassifiedMessage) error {
-	var (
-		feedbackRequestID uuid.UUID
-		tenantID          uuid.UUID
-		locationID        uuid.UUID
-		visitID           uuid.UUID
-		customerID        *uuid.UUID
-	)
-
+func (p *Processor) handlePlainRating(ctx context.Context, msg ClassifiedMessage, rawPayload []byte) error {
+	var tenantID uuid.UUID
+	var customerID *uuid.UUID
 	if msg.LocationID != nil {
-		// Mode B (tenant_id known from location)
-		var tID uuid.UUID
-		queryTenant := `SELECT tenant_id FROM locations WHERE id = $1 AND is_active = true`
-		err := p.pool.QueryRow(ctx, queryTenant, msg.LocationID).Scan(&tID)
+		queryLoc := `SELECT tenant_id FROM locations WHERE id = $1 AND is_active = true`
+		err := p.pool.QueryRow(ctx, queryLoc, msg.LocationID).Scan(&tenantID)
 		if err != nil {
 			log.Printf("[Debug] ActionPlainRating: failed to resolve tenant for location %s: %v", msg.LocationID, err)
 			return nil
 		}
-		tenantID = tID
-		locationID = *msg.LocationID
-
-		queryRating := `
-			SELECT fr.id, fr.visit_id, fr.customer_id
-			FROM feedback_requests fr
-			JOIN visits v ON v.id = fr.visit_id
-			JOIN customers c ON c.id = v.customer_id
-			WHERE fr.tenant_id = $1
-			  AND c.phone_number = $2
-			  AND c.merged_into_customer_id IS NULL
-			  AND fr.status = 'sent'
-			ORDER BY fr.sent_at DESC
-			LIMIT 1
-		`
-		err = p.pool.QueryRow(ctx, queryRating, tenantID, msg.SenderPhone).Scan(&feedbackRequestID, &visitID, &customerID)
+		resolvedCustID, err := repository.ResolveOrCreateCustomer(ctx, p.pool, tenantID, msg.SenderPhone, msg.BSUID, msg.DisplayName)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				log.Printf("[Debug] ActionPlainRating (Mode B): feedback request not found for phone %s", msg.SenderPhone)
-				return nil
-			}
-			return fmt.Errorf("failed to query feedback request: %w", err)
+			return fmt.Errorf("failed to resolve customer: %w", err)
 		}
+		customerID = &resolvedCustID
 	} else {
-		// Mode A (tenant_id unknown — cross-tenant lookup)
+		var customerIDVal uuid.UUID
 		queryRating := `
-			SELECT fr.id, fr.tenant_id, fr.location_id, fr.visit_id, fr.customer_id
+			SELECT fr.tenant_id, fr.customer_id
 			FROM feedback_requests fr
-			JOIN visits v ON v.id = fr.visit_id
-			JOIN customers c ON c.id = v.customer_id
+			JOIN customers c ON c.id = fr.customer_id
 			WHERE c.phone_number = $1
 			  AND c.merged_into_customer_id IS NULL
-			  AND fr.status = 'sent'
-			ORDER BY fr.sent_at DESC
+			  AND fr.status IN ('scheduled', 'sent')
+			ORDER BY fr.created_at DESC
 			LIMIT 1
 		`
-		err := p.pool.QueryRow(ctx, queryRating, msg.SenderPhone).Scan(&feedbackRequestID, &tenantID, &locationID, &visitID, &customerID)
+		err := p.pool.QueryRow(ctx, queryRating, msg.SenderPhone).Scan(&tenantID, &customerIDVal)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				log.Printf("[Debug] ActionPlainRating (Mode A): feedback request not found for phone %s", msg.SenderPhone)
-				return nil
+				return p.handleUnknown(ctx, msg)
 			}
 			return fmt.Errorf("failed to query feedback request: %w", err)
 		}
+		customerID = &customerIDVal
 	}
 
-	tx, err := p.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin rating tx: %w", err)
+	var raw bhejnaPayload
+	if err := json.Unmarshal(rawPayload, &raw); err != nil {
+		return fmt.Errorf("failed to unmarshal payload: %w", err)
 	}
-	defer tx.Rollback(ctx)
-
-	queryInsertResponse := `
-		INSERT INTO feedback_responses (
-			tenant_id, location_id, feedback_request_id, visit_id,
-			customer_id, rating, source
-		) VALUES (
-			$1, $2, $3, $4,
-			$5, $6, 'whatsapp'
-		)
-		ON CONFLICT (tenant_id, feedback_request_id) DO NOTHING
-	`
-	_, err = tx.Exec(ctx, queryInsertResponse, tenantID, locationID, feedbackRequestID, visitID, customerID, msg.Rating)
-	if err != nil {
-		return fmt.Errorf("failed to insert feedback response: %w", err)
+	var body string
+	if raw.Message != nil {
+		body = raw.Message.Body
 	}
 
-	queryUpdateRequest := `
-		UPDATE feedback_requests
-		SET status = 'responded',
-		    updated_at = NOW()
-		WHERE id = $1
-	`
-	_, err = tx.Exec(ctx, queryUpdateRequest, feedbackRequestID)
-	if err != nil {
-		return fmt.Errorf("failed to update feedback request status: %w", err)
-	}
-
-	return tx.Commit(ctx)
+	return p.classifyRatingPlainText(ctx, tenantID, customerID, body, msg)
 }
 
 func (p *Processor) handleStop(ctx context.Context, msg ClassifiedMessage) error {

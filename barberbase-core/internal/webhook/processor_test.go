@@ -332,13 +332,291 @@ func TestIntegration_DuplicateDeliveryIdempotency(t *testing.T) {
 		t.Fatalf("Second insert failed: %v", err)
 	}
 
-	// Assert only one row exists in webhook_events
 	var count int
-	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM webhook_events WHERE external_event_id = 'dup_event_1'").Scan(&count)
+	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM webhook_events").Scan(&count)
 	if err != nil {
-		t.Fatalf("Query failed: %v", err)
+		t.Fatalf("Failed to count webhook events: %v", err)
 	}
+
 	if count != 1 {
 		t.Errorf("Expected exactly 1 webhook event row, got %d", count)
 	}
 }
+
+func TestIntegration_RatingButtonIdempotency(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+
+	ctx := context.Background()
+	tenantID := uuid.New()
+	locationID := uuid.New()
+	customerID := uuid.New()
+	visitID := uuid.New()
+	sessionID := uuid.New()
+	requestID := uuid.New()
+
+	// Seed Tenant & Location
+	_, err := pool.Exec(ctx, `
+		INSERT INTO tenants (id, name, slug, owner_phone_number)
+		VALUES ($1, 'Rating Tenant', 'rating-tenant', '+919876543212')
+	`, tenantID)
+	if err != nil {
+		t.Fatalf("Failed to seed tenant: %v", err)
+	}
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO locations (id, tenant_id, name, slug, timezone, is_active)
+		VALUES ($1, $2, 'Rating Location', 'rating-location', 'Asia/Kolkata', true)
+	`, locationID, tenantID)
+	if err != nil {
+		t.Fatalf("Failed to seed location: %v", err)
+	}
+
+	// Seed Customer
+	_, err = pool.Exec(ctx, `
+		INSERT INTO customers (id, tenant_id, phone_number, name)
+		VALUES ($1, $2, '+919876543210', 'Rahul')
+	`, customerID, tenantID)
+	if err != nil {
+		t.Fatalf("Failed to seed customer: %v", err)
+	}
+
+	// Seed Queue Session
+	_, err = pool.Exec(ctx, `
+		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
+		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+	`, sessionID, tenantID, locationID)
+	if err != nil {
+		t.Fatalf("Failed to seed queue session: %v", err)
+	}
+
+	// Seed Visit
+	_, err = pool.Exec(ctx, `
+		INSERT INTO visits (id, tenant_id, location_id, customer_id, entry_type, status, total_duration_minutes)
+		VALUES ($1, $2, $3, $4, 'walk_in', 'active', 30)
+	`, visitID, tenantID, locationID, customerID)
+	if err != nil {
+		t.Fatalf("Failed to seed visit: %v", err)
+	}
+
+	// Seed Feedback Request (status='sent')
+	_, err = pool.Exec(ctx, `
+		INSERT INTO feedback_requests (id, tenant_id, location_id, visit_id, customer_id, channel, status, scheduled_at, sent_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, 'whatsapp', 'sent', NOW(), NOW(), NOW() + INTERVAL '23 hours')
+	`, requestID, tenantID, locationID, visitID, customerID)
+	if err != nil {
+		t.Fatalf("Failed to seed feedback request: %v", err)
+	}
+
+	// Construct webhook_event with button_payload
+	payload := `{
+		"event_type": "message.received",
+		"business_phone_number": "912212345678",
+		"message": {
+			"type": "button",
+			"button_payload": "RATING:4:` + visitID.String() + `"
+		},
+		"sender": {
+			"phone_number": "919876543210",
+			"display_name": "Rahul"
+		}
+	}`
+
+	os.Setenv("HMAC_SECRET", "testsecret")
+	os.Setenv("BHEJNA_FROM_PHONE", "+912212345678")
+
+	proc := NewProcessor(pool, NoopBroadcaster{})
+
+	// Simulate first delivery
+	eventID1 := uuid.New()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO webhook_events (id, source, external_event_id, event_type, tenant_id, location_id, payload, status)
+		VALUES ($1, 'bhejna', 'ext_rating_1', 'message.received', $2, $3, $4, 'pending')
+	`, eventID1, tenantID, locationID, []byte(payload))
+	if err != nil {
+		t.Fatalf("Failed to insert webhook event: %v", err)
+	}
+
+	row1, err := proc.claimEvent(ctx)
+	if err != nil || row1 == nil {
+		t.Fatalf("Failed to claim event 1: %v", err)
+	}
+
+	err = proc.processEvent(ctx, row1)
+	if err != nil {
+		t.Fatalf("processEvent 1 failed: %v", err)
+	}
+
+	// Verify feedback response exists and status is responded
+	var ratingVal int
+	err = pool.QueryRow(ctx, "SELECT rating FROM feedback_responses WHERE visit_id = $1", visitID).Scan(&ratingVal)
+	if err != nil {
+		t.Fatalf("Failed to find feedback response: %v", err)
+	}
+	if ratingVal != 4 {
+		t.Errorf("Expected rating 4, got %d", ratingVal)
+	}
+
+	var status string
+	err = pool.QueryRow(ctx, "SELECT status FROM feedback_requests WHERE id = $1", requestID).Scan(&status)
+	if err != nil {
+		t.Fatalf("Failed to query status: %v", err)
+	}
+	if status != "responded" {
+		t.Errorf("Expected feedback request status 'responded', got %q", status)
+	}
+
+	// Simulate duplicate delivery
+	eventID2 := uuid.New()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO webhook_events (id, source, external_event_id, event_type, tenant_id, location_id, payload, status)
+		VALUES ($1, 'bhejna', 'ext_rating_2', 'message.received', $2, $3, $4, 'pending')
+	`, eventID2, tenantID, locationID, []byte(payload))
+	if err != nil {
+		t.Fatalf("Failed to insert webhook event 2: %v", err)
+	}
+
+	row2, err := proc.claimEvent(ctx)
+	if err != nil || row2 == nil {
+		t.Fatalf("Failed to claim event 2: %v", err)
+	}
+
+	err = proc.processEvent(ctx, row2)
+	if err != nil {
+		t.Fatalf("processEvent 2 failed: %v", err)
+	}
+
+	// Verify exactly one response exists
+	var count int
+	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM feedback_responses WHERE visit_id = $1", visitID).Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to count feedback responses: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("Expected exactly 1 response on duplicate delivery, got %d", count)
+	}
+}
+
+func TestIntegration_RatingPlainText(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+
+	ctx := context.Background()
+	tenantID := uuid.New()
+	locationID := uuid.New()
+	customerID := uuid.New()
+	visitID := uuid.New()
+	sessionID := uuid.New()
+	requestID := uuid.New()
+
+	// Seed Tenant & Location
+	_, err := pool.Exec(ctx, `
+		INSERT INTO tenants (id, name, slug, owner_phone_number)
+		VALUES ($1, 'Rating Tenant PT', 'rating-tenant-pt', '+919876543213')
+	`, tenantID)
+	if err != nil {
+		t.Fatalf("Failed to seed tenant: %v", err)
+	}
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO locations (id, tenant_id, name, slug, timezone, is_active)
+		VALUES ($1, $2, 'Rating Location PT', 'rating-location-pt', 'Asia/Kolkata', true)
+	`, locationID, tenantID)
+	if err != nil {
+		t.Fatalf("Failed to seed location: %v", err)
+	}
+
+	// Seed Customer
+	_, err = pool.Exec(ctx, `
+		INSERT INTO customers (id, tenant_id, phone_number, name)
+		VALUES ($1, $2, '+919876543210', 'Rahul')
+	`, customerID, tenantID)
+	if err != nil {
+		t.Fatalf("Failed to seed customer: %v", err)
+	}
+
+	// Seed Queue Session
+	_, err = pool.Exec(ctx, `
+		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
+		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+	`, sessionID, tenantID, locationID)
+	if err != nil {
+		t.Fatalf("Failed to seed queue session: %v", err)
+	}
+
+	// Seed Visit
+	_, err = pool.Exec(ctx, `
+		INSERT INTO visits (id, tenant_id, location_id, customer_id, entry_type, status, total_duration_minutes)
+		VALUES ($1, $2, $3, $4, 'walk_in', 'active', 30)
+	`, visitID, tenantID, locationID, customerID)
+	if err != nil {
+		t.Fatalf("Failed to seed visit: %v", err)
+	}
+
+	// Seed Feedback Request (status='sent')
+	_, err = pool.Exec(ctx, `
+		INSERT INTO feedback_requests (id, tenant_id, location_id, visit_id, customer_id, channel, status, scheduled_at, sent_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, 'whatsapp', 'sent', NOW(), NOW(), NOW() + INTERVAL '23 hours')
+	`, requestID, tenantID, locationID, visitID, customerID)
+	if err != nil {
+		t.Fatalf("Failed to seed feedback request: %v", err)
+	}
+
+	// Construct plain text webhook event
+	payload := `{
+		"event_type": "message.received",
+		"business_phone_number": "912212345678",
+		"message": {
+			"type": "text",
+			"body": "4"
+		},
+		"sender": {
+			"phone_number": "919876543210",
+			"display_name": "Rahul"
+		}
+	}`
+
+	os.Setenv("HMAC_SECRET", "testsecret")
+	os.Setenv("BHEJNA_FROM_PHONE", "+912212345678")
+
+	proc := NewProcessor(pool, NoopBroadcaster{})
+
+	eventID := uuid.New()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO webhook_events (id, source, external_event_id, event_type, tenant_id, location_id, payload, status)
+		VALUES ($1, 'bhejna', 'ext_rating_pt', 'message.received', $2, $3, $4, 'pending')
+	`, eventID, tenantID, locationID, []byte(payload))
+	if err != nil {
+		t.Fatalf("Failed to insert webhook event: %v", err)
+	}
+
+	row, err := proc.claimEvent(ctx)
+	if err != nil || row == nil {
+		t.Fatalf("Failed to claim event: %v", err)
+	}
+
+	err = proc.processEvent(ctx, row)
+	if err != nil {
+		t.Fatalf("processEvent failed: %v", err)
+	}
+
+	// Verify feedback response exists and status is responded
+	var ratingVal int
+	err = pool.QueryRow(ctx, "SELECT rating FROM feedback_responses WHERE visit_id = $1", visitID).Scan(&ratingVal)
+	if err != nil {
+		t.Fatalf("Failed to find feedback response: %v", err)
+	}
+	if ratingVal != 4 {
+		t.Errorf("Expected rating 4, got %d", ratingVal)
+	}
+
+	var status string
+	err = pool.QueryRow(ctx, "SELECT status FROM feedback_requests WHERE id = $1", requestID).Scan(&status)
+	if err != nil {
+		t.Fatalf("Failed to query status: %v", err)
+	}
+	if status != "responded" {
+		t.Errorf("Expected feedback request status 'responded', got %q", status)
+	}
+}
+
