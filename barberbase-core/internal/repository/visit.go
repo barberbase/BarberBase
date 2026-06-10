@@ -1,3 +1,4 @@
+// package repository contains methods for interacting with visits and other entities
 package repository
 
 import (

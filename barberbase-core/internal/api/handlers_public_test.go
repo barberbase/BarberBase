@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"barberbase-core/internal/domain/queue"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
@@ -969,5 +971,130 @@ func TestC33_IntentPast23h(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("Expected 0 active intents when filtering by expires_at > NOW(), got %d", count)
+	}
+}
+
+func TestC42_BookAppointment_Idempotency(t *testing.T) {
+	cleanDatabase(t, os.Getenv("DATABASE_URL"))
+	t.Cleanup(func() { cleanDatabase(t, os.Getenv("DATABASE_URL")) })
+	_, pool, tenantID, locationID, _, _ := setupTestServer(t)
+	defer pool.Close()
+
+	variantID := seedServiceVariant(t, pool, tenantID, locationID, "Haircut", 30, 300, true)
+
+	for d := 0; d < 7; d++ {
+		_, err := pool.Exec(context.Background(), `INSERT INTO location_business_hours (id, tenant_id, location_id, day_of_week, is_closed) VALUES (gen_random_uuid(), $1, $2, $3, false)`, tenantID, locationID, d)
+		if err != nil {
+			// ignore if already seeded
+		}
+	}
+
+	repo := queue.QueueRepository{Pool: pool}
+	req := queue.BookAppointmentRequest{
+		LocationID:       locationID,
+		VariantIDs:       []uuid.UUID{variantID},
+		PartySize:        1,
+		ScheduledStartAt: time.Now().Add(24 * time.Hour),
+		PhoneNumber:      "+919876543210",
+		InitiatedVia:     "staff_dashboard",
+		IdempotencyKey:   uuid.New().String(),
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	results := make(chan *queue.BookAppointmentResult, 2)
+	errs := make(chan error, 2)
+
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			for {
+				res, err := repo.BookAppointment(context.Background(), tenantID, req)
+				if err != nil && err.Error() == "request still in flight" {
+					time.Sleep(10 * time.Millisecond)
+					continue
+				}
+				if err != nil {
+					errs <- err
+					return
+				}
+				results <- res
+				return
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	if len(errs) > 0 {
+		t.Fatalf("Got errors: %v", <-errs)
+	}
+
+	res1 := <-results
+	res2 := <-results
+	if res1.AppointmentID != res2.AppointmentID {
+		t.Fatalf("Expected same appointment ID due to idempotency, got %v and %v", res1.AppointmentID, res2.AppointmentID)
+	}
+
+	var count int
+	_ = pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM appointments").Scan(&count)
+	if count != 1 {
+		t.Fatalf("Expected exactly 1 appointment row, got %d", count)
+	}
+}
+
+func TestC42_CheckInAppointment_PrioritySort(t *testing.T) {
+	cleanDatabase(t, os.Getenv("DATABASE_URL"))
+	t.Cleanup(func() { cleanDatabase(t, os.Getenv("DATABASE_URL")) })
+	_, pool, tenantID, locationID, _, _ := setupTestServer(t)
+	defer pool.Close()
+
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+	_, visit1 := seedVisitAndEntryForTest(t, pool, tenantID, locationID, sessionID, "walk-in-token")
+
+	customerID := uuid.New()
+	_, _ = pool.Exec(context.Background(), `INSERT INTO customers(id, tenant_id, phone_number) VALUES($1, $2, '+919876543211')`, customerID, tenantID)
+
+	visit2 := uuid.New()
+	_, _ = pool.Exec(context.Background(), `
+		INSERT INTO visits (id, tenant_id, location_id, customer_id, entry_type, status, party_size, total_duration_minutes)
+		VALUES ($1, $2, $3, $4, 'appointment', 'active', 1, 30)`, visit2, tenantID, locationID, customerID)
+
+	_, _ = pool.Exec(context.Background(), `
+		INSERT INTO queue_entries (id, visit_id, queue_session_id, token_number, state, presence_state, is_dispatchable, session_channel, priority_group, sort_key)
+		VALUES (gen_random_uuid(), $1, $2, 2, 'waiting', 'arrived', true, 'whatsapp', 50, EXTRACT(EPOCH FROM NOW())::BIGINT)`, visit2, sessionID)
+
+	rows, err := pool.Query(context.Background(), `
+		SELECT priority_group, visit_id FROM queue_entries
+		WHERE queue_session_id = $1 AND state = 'waiting'
+		ORDER BY priority_group ASC, sort_key ASC
+	`, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	var priorities []int
+	var visitIDs []uuid.UUID
+	for rows.Next() {
+		var p int
+		var v uuid.UUID
+		if err := rows.Scan(&p, &v); err != nil {
+			t.Fatal(err)
+		}
+		priorities = append(priorities, p)
+		visitIDs = append(visitIDs, v)
+	}
+
+	if len(priorities) != 2 {
+		t.Fatalf("Expected 2 queue entries, got %d", len(priorities))
+	}
+	if priorities[0] != 50 || priorities[1] != 100 {
+		t.Fatalf("Expected priority order [50, 100], got %v", priorities)
+	}
+	if visitIDs[0] != visit2 || visitIDs[1] != visit1 {
+		t.Fatalf("Expected appointment entry to be first")
 	}
 }

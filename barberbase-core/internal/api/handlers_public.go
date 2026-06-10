@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/time/rate"
@@ -1038,3 +1040,76 @@ func (s *Server) GetAppointmentSlots(w http.ResponseWriter, r *http.Request, loc
 		"slots":                  []interface{}{},
 	})
 }
+
+// RegisterManualRoutes manually wires endpoints missing from or needing custom setup outside OpenAPI codegen
+func (s *Server) RegisterManualRoutes(r chi.Router) {
+	r.Post("/v1/staff/appointments/{appointment_id}/checkin", s.CheckInAppointment)
+}
+
+// BookAppointment handles POST /v1/appointments/book
+func (s *Server) BookAppointment(w http.ResponseWriter, r *http.Request) {
+	tenantIDStr := auth.TenantIDFromCtx(r.Context())
+	if tenantIDStr == "" {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	var req queue.BookAppointmentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	
+	repo := &queue.QueueRepository{Pool: s.Pool}
+	res, err := repo.BookAppointment(r.Context(), tenantID, req)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, res)
+}
+
+// CheckInAppointment handles POST /v1/staff/appointments/{appointment_id}/checkin
+func (s *Server) CheckInAppointment(w http.ResponseWriter, r *http.Request) {
+	tenantIDStr := auth.TenantIDFromCtx(r.Context())
+	if tenantIDStr == "" {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	appIDStr := chi.URLParam(r, "appointment_id")
+	appID, err := uuid.Parse(appIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid appointment_id"})
+		return
+	}
+
+	var req struct {
+		LocationID uuid.UUID `json:"location_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body location_id required"})
+		return
+	}
+	
+	repo := &queue.QueueRepository{Pool: s.Pool}
+	res, err := repo.CheckInAppointment(r.Context(), tenantID, req.LocationID, appID)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, res)
+}
+
