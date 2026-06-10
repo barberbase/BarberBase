@@ -15,6 +15,7 @@ import (
 	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/config"
 	"barberbase-core/internal/domain/presence"
+	"barberbase-core/internal/jobs"
 	"barberbase-core/internal/outbox"
 	"barberbase-core/internal/realtime"
 	"barberbase-core/internal/repository"
@@ -78,6 +79,13 @@ func main() {
 	
 	mgr := realtime.NewManager()
 	mgr.StartHeartbeats(ctx)
+
+	watchdog := jobs.NewWatchdog(pool, mgr, cfg)
+	eod      := jobs.NewEndOfDay(pool, mgr, cfg)
+	weekly   := jobs.NewWeeklySummary(pool, cfg)
+	go watchdog.Start(ctx)
+	go eod.Start(ctx)
+	go weekly.Start(ctx)
 
 	apiServer := &api.Server{
 		Pool:    pool,
