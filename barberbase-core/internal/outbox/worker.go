@@ -29,8 +29,9 @@ var ErrTerminal = errors.New("terminal: do not retry")
 var ErrUnhandledType = fmt.Errorf("unhandled outbox type: %w", ErrTerminal)
 
 type Worker struct {
-	pool     *pgxpool.Pool
-	handlers map[string]OutboxHandler
+	pool        *pgxpool.Pool
+	handlers    map[string]OutboxHandler
+	pushHandler *notification.PushHandler
 }
 
 func NewWorker(pool *pgxpool.Pool, bhejna bhejna.Client) *Worker {
@@ -42,6 +43,7 @@ func NewWorker(pool *pgxpool.Pool, bhejna bhejna.Client) *Worker {
 		}
 	}
 	fs := notification.NewFeedbackScheduler(pool, cfg)
+	pushHandler := &notification.PushHandler{Pool: pool, Config: cfg}
 	return &Worker{
 		pool: pool,
 		handlers: map[string]OutboxHandler{
@@ -51,6 +53,7 @@ func NewWorker(pool *pgxpool.Pool, bhejna bhejna.Client) *Worker {
 			"feedback_request.schedule": fs,
 			"web_push.send":             &stubHandler{}, // C6.5 replaces
 		},
+		pushHandler: pushHandler,
 	}
 }
 
@@ -128,12 +131,15 @@ func (w *Worker) processOne(ctx context.Context) error {
 		return err
 	}
 
-	handler, ok := w.handlers[event.Type]
-	if !ok {
-		handler = &stubHandler{}
+	if event.Type == "web_push.send" {
+		err = w.pushHandler.HandleWebPushSend(ctx, &event)
+	} else {
+		handler, ok := w.handlers[event.Type]
+		if !ok {
+			handler = &stubHandler{}
+		}
+		err = handler.Handle(ctx, w.pool, &event)
 	}
-
-	err = handler.Handle(ctx, w.pool, &event)
 
 	if err == nil {
 		// success
