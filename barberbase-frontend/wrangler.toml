@@ -1,0 +1,4 @@
+name = "barberbase-frontend"
+compatibility_date = "2026-06-11"
+compatibility_flags = ["nodejs_als"]
+pages_build_output_dir = ".svelte-kit/cloudflare"
