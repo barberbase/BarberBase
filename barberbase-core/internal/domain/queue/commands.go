@@ -974,6 +974,40 @@ func CompleteVisitAndCheckout(ctx context.Context, pool *pgxpool.Pool, params Ch
 			}
 		}
 
+		// Step 12.5 — Push trigger: web_push.send (Law 7 — inside tx; Law 21 — push-agnostic correctness)
+		// The dispatch handler applies the frequency gate (Law 19) at dispatch time.
+		// This step only signals that a checkout occurred at a push-capable location.
+		var anyPushEnabled bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS(
+				SELECT 1 FROM staff_members
+				WHERE location_id = $1
+				  AND push_enabled = true
+				  AND is_active    = true
+			)`, params.LocationID,
+		).Scan(&anyPushEnabled); err != nil {
+			return fmt.Errorf("step 12.5 push check: %w", err)
+		}
+		if anyPushEnabled {
+			pushPayload, err := json.Marshal(struct {
+				LocationID string `json:"location_id"`
+				TenantID   string `json:"tenant_id"`
+			}{
+				LocationID: params.LocationID.String(),
+				TenantID:   params.TenantID.String(),
+			})
+			if err != nil {
+				return fmt.Errorf("step 12.5 payload marshal: %w", err)
+			}
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO outbox_events (tenant_id, type, payload, process_after)
+				 VALUES ($1, 'web_push.send', $2, NOW())`,
+				params.TenantID, pushPayload,
+			); err != nil {
+				return fmt.Errorf("step 12.5 push outbox insert: %w", err)
+			}
+		}
+
 		// Step 15: INSERT outbox_events
 		if entry.CustomerID != nil {
 			var assignedBarber interface{}
