@@ -1,4 +1,4 @@
-import { error, redirect } from '@sveltejs/kit';
+import { redirect } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
 import { decodeToken, isTokenExpired } from '../../lib/api/client';
 
@@ -13,8 +13,12 @@ export const load: LayoutServerLoad = ({ cookies }) => {
 		throw redirect(302, '/login');
 	}
 
+	// Role guard per spec: barber → /dashboard, anything else → /login
+	if (claims.role === 'barber') {
+		throw redirect(302, '/dashboard');
+	}
 	if (claims.role !== 'owner' && claims.role !== 'manager') {
-		throw error(403, 'Forbidden');
+		throw redirect(302, '/login');
 	}
 
 	return {
