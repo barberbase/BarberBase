@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -439,4 +440,90 @@ func SetShopStatus(ctx context.Context, db *pgxpool.Pool, params SetShopStatusPa
 	}
 
 	return 0, nil
+}
+
+var (
+	ErrTenantSlugConflict   = errors.New("tenant_slug_conflict")
+	ErrLocationSlugConflict = errors.New("location_slug_conflict")
+	ErrOwnerPhoneConflict   = errors.New("owner_phone_conflict")
+)
+
+type ProvisionTenantParams struct {
+	TenantName      string
+	TenantSlug      string
+	OwnerName       string
+	OwnerPhone      string
+	LocationName    string
+	LocationSlug    string
+	Address         *string
+	Timezone        string
+	ArrivalPinPlain string
+	ArrivalPinHash  string
+}
+
+type ProvisionTenantResult struct {
+	TenantID           uuid.UUID
+	LocationID         uuid.UUID
+	OwnerStaffMemberID uuid.UUID
+}
+
+func ProvisionTenant(ctx context.Context, pool *pgxpool.Pool, p ProvisionTenantParams) (ProvisionTenantResult, error) {
+	var res ProvisionTenantResult
+
+	err := WithTx(ctx, pool, func(tx pgx.Tx) error {
+		// 1. Insert tenant
+		tenantQuery := `
+			INSERT INTO tenants (name, slug, owner_phone_number)
+			VALUES ($1, $2, $3)
+			RETURNING id
+		`
+		err := tx.QueryRow(ctx, tenantQuery, p.TenantName, p.TenantSlug, p.OwnerPhone).Scan(&res.TenantID)
+		if err != nil {
+			return err
+		}
+
+		// 2. Insert location
+		locationQuery := `
+			INSERT INTO locations (tenant_id, name, slug, address, timezone, arrival_pin_plain, arrival_pin_hash)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			RETURNING id
+		`
+		err = tx.QueryRow(ctx, locationQuery, res.TenantID, p.LocationName, p.LocationSlug, p.Address, p.Timezone, p.ArrivalPinPlain, p.ArrivalPinHash).Scan(&res.LocationID)
+		if err != nil {
+			return err
+		}
+
+		// 3. Insert owner staff member
+		staffQuery := `
+			INSERT INTO staff_members (tenant_id, location_id, name, phone_number, role, is_active)
+			VALUES ($1, $2, $3, $4, 'owner', true)
+			RETURNING id
+		`
+		err = tx.QueryRow(ctx, staffQuery, res.TenantID, res.LocationID, p.OwnerName, p.OwnerPhone).Scan(&res.OwnerStaffMemberID)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			if pgErr.Code == "23505" {
+				if pgErr.ConstraintName == "tenants_slug_key" {
+					return ProvisionTenantResult{}, ErrTenantSlugConflict
+				}
+				if pgErr.ConstraintName == "locations_slug_key" {
+					return ProvisionTenantResult{}, ErrLocationSlugConflict
+				}
+				if pgErr.ConstraintName == "staff_members_phone_number_key" {
+					return ProvisionTenantResult{}, ErrOwnerPhoneConflict
+				}
+			}
+		}
+		return ProvisionTenantResult{}, err
+	}
+
+	return res, nil
 }

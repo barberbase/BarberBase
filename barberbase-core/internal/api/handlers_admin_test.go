@@ -11,10 +11,14 @@ import (
 	"testing"
 
 	"barberbase-core/internal/auth"
+	"barberbase-core/internal/config"
 	"barberbase-core/internal/repository"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func setupAdminTestServer(t *testing.T) (*Server, *pgxpool.Pool, uuid.UUID, uuid.UUID, uuid.UUID, string) {
@@ -454,5 +458,294 @@ func TestCreateStaffMember_Integration(t *testing.T) {
 			t.Fatalf("Expected error code INVALID_ROLE, got %v", errResp["code"])
 		}
 	}
+}
+
+func TestProvisionTenant_Integration(t *testing.T) {
+	ctx := context.Background()
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("Skipping integration test: DATABASE_URL not set")
+	}
+
+	// Setup Server and Config
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	// Set test PLATFORM_ADMIN_KEY
+	originalAdminKey := cfg.PlatformAdminKey
+	cfg.PlatformAdminKey = "super-secret-test-platform-admin-key"
+	defer func() {
+		cfg.PlatformAdminKey = originalAdminKey
+	}()
+
+	pool, err := repository.InitPool(ctx, dbURL)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	s := &Server{
+		Pool:   pool,
+		Bhejna: mockBhejna{},
+		Config: cfg,
+	}
+
+	// Helper to truncate db
+	cleanDB := func() {
+		_, err := pool.Exec(ctx, "TRUNCATE tenants, locations, staff_members, service_categories, service_groups, service_variants, visits, visit_services, webhook_events, staff_otps, location_status_overrides CASCADE")
+		require.NoError(t, err)
+	}
+
+	// 1. Success Provisioning & check PIN consistency & OTP request
+	t.Run("Successful tenant provisioning", func(t *testing.T) {
+		cleanDB()
+
+		body := map[string]interface{}{
+			"tenant_name":   "New Salon",
+			"tenant_slug":   "new-salon",
+			"owner_name":    "Owner Name",
+			"owner_phone":   "+919876543210",
+			"location_name": "New Salon Koramangala",
+			"location_slug": "new-salon/koramangala",
+			"address":       "123 Road",
+			"timezone":      "Asia/Kolkata",
+		}
+		jsonBody, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/v1/admin/setup", bytes.NewReader(jsonBody))
+		req.Header.Set("X-Platform-Admin-Key", "super-secret-test-platform-admin-key")
+		rec := httptest.NewRecorder()
+
+		s.ProvisionTenant(rec, req)
+		require.Equal(t, http.StatusCreated, rec.Code)
+
+		var resp struct {
+			TenantID           string `json:"tenant_id"`
+			LocationID         string `json:"location_id"`
+			OwnerStaffMemberID string `json:"owner_staff_member_id"`
+			ArrivalPin         string `json:"arrival_pin"`
+		}
+		err = json.Unmarshal(rec.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		require.NotEmpty(t, resp.TenantID)
+		require.NotEmpty(t, resp.LocationID)
+		require.NotEmpty(t, resp.OwnerStaffMemberID)
+		require.Len(t, resp.ArrivalPin, 6)
+
+		// Verify database state
+		var ownerPhone string
+		err = pool.QueryRow(ctx, "SELECT owner_phone_number FROM tenants WHERE id = $1", resp.TenantID).Scan(&ownerPhone)
+		require.NoError(t, err)
+		require.Equal(t, "+919876543210", ownerPhone)
+
+		var locationSlug, arrivalPinPlain, arrivalPinHash string
+		err = pool.QueryRow(ctx, "SELECT slug, arrival_pin_plain, arrival_pin_hash FROM locations WHERE id = $1", resp.LocationID).Scan(&locationSlug, &arrivalPinPlain, &arrivalPinHash)
+		require.NoError(t, err)
+		require.Equal(t, "new-salon/koramangala", locationSlug)
+		require.Equal(t, resp.ArrivalPin, arrivalPinPlain)
+
+		// PIN plain and hash consistency: verify hash using bcrypt
+		err = bcrypt.CompareHashAndPassword([]byte(arrivalPinHash), []byte(resp.ArrivalPin))
+		require.NoError(t, err)
+
+		// Owner can immediately request OTP
+		otpBody := map[string]interface{}{
+			"phone_number": "+919876543210",
+		}
+		otpJsonBody, _ := json.Marshal(otpBody)
+		reqOTP := httptest.NewRequest(http.MethodPost, "/auth/staff/request-otp", bytes.NewReader(otpJsonBody))
+		recOTP := httptest.NewRecorder()
+		s.RequestStaffOTP(recOTP, reqOTP)
+		require.Equal(t, http.StatusOK, recOTP.Code)
+	})
+
+	// 2. Wrong PLATFORM_ADMIN_KEY -> 401
+	t.Run("Wrong Platform Admin Key", func(t *testing.T) {
+		cleanDB()
+
+		body := map[string]interface{}{
+			"tenant_name":   "New Salon",
+			"tenant_slug":   "new-salon",
+			"owner_name":    "Owner Name",
+			"owner_phone":   "+919876543210",
+			"location_name": "New Salon Koramangala",
+			"location_slug": "new-salon/koramangala",
+		}
+		jsonBody, _ := json.Marshal(body)
+
+		// Create router to test middleware integration
+		r := chi.NewRouter()
+		r.Route("/v1", func(r chi.Router) {
+			r.With(s.PlatformAdminKeyMiddleware).Post("/admin/setup", s.ProvisionTenant)
+		})
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/admin/setup", bytes.NewReader(jsonBody))
+		req.Header.Set("X-Platform-Admin-Key", "wrong-key")
+		rec := httptest.NewRecorder()
+
+		r.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	// 3. Duplicate tenant_slug -> 409 + rollback (zero rows created)
+	t.Run("Duplicate tenant slug rollback", func(t *testing.T) {
+		cleanDB()
+
+		// Create first tenant manually
+		tenantID := uuid.New()
+		_, err = pool.Exec(ctx, "INSERT INTO tenants (id, name, slug, owner_phone_number) VALUES ($1, 'First', 'first-slug', '+919999999999')", tenantID)
+		require.NoError(t, err)
+
+		body := map[string]interface{}{
+			"tenant_name":   "Second Salon",
+			"tenant_slug":   "first-slug", // duplicate tenant slug
+			"owner_name":    "Owner Name",
+			"owner_phone":   "+919876543210",
+			"location_name": "Second Salon Koramangala",
+			"location_slug": "first-slug/koramangala",
+		}
+		jsonBody, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/v1/admin/setup", bytes.NewReader(jsonBody))
+		req.Header.Set("X-Platform-Admin-Key", "super-secret-test-platform-admin-key")
+		rec := httptest.NewRecorder()
+
+		s.ProvisionTenant(rec, req)
+		require.Equal(t, http.StatusConflict, rec.Code)
+
+		var errResp map[string]interface{}
+		err = json.Unmarshal(rec.Body.Bytes(), &errResp)
+		require.NoError(t, err)
+		require.Equal(t, "TENANT_SLUG_CONFLICT", errResp["code"])
+
+		// Verify rollback: no new location or staff member was inserted
+		var locationCount int
+		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM locations WHERE slug = 'first-slug/koramangala'").Scan(&locationCount)
+		require.NoError(t, err)
+		require.Equal(t, 0, locationCount)
+
+		var staffCount int
+		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM staff_members WHERE phone_number = '+919876543210'").Scan(&staffCount)
+		require.NoError(t, err)
+		require.Equal(t, 0, staffCount)
+	})
+
+	// 4. Duplicate location_slug -> 409 + zero rows
+	t.Run("Duplicate location slug rollback", func(t *testing.T) {
+		cleanDB()
+
+		// Create first tenant and location manually with "second-slug/loc-slug"
+		tenantID := uuid.New()
+		_, err = pool.Exec(ctx, "INSERT INTO tenants (id, name, slug, owner_phone_number) VALUES ($1, 'First', 'first-slug', '+919999999999')", tenantID)
+		require.NoError(t, err)
+
+		locationID := uuid.New()
+		_, err = pool.Exec(ctx, "INSERT INTO locations (id, tenant_id, name, slug) VALUES ($1, $2, 'Location', 'second-slug/loc-slug')", locationID, tenantID)
+		require.NoError(t, err)
+
+		body := map[string]interface{}{
+			"tenant_name":   "Second Salon",
+			"tenant_slug":   "second-slug",
+			"owner_name":    "Owner Name",
+			"owner_phone":   "+919876543210",
+			"location_name": "Second Salon Koramangala",
+			"location_slug": "second-slug/loc-slug", // duplicate location slug
+		}
+		jsonBody, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/v1/admin/setup", bytes.NewReader(jsonBody))
+		req.Header.Set("X-Platform-Admin-Key", "super-secret-test-platform-admin-key")
+		rec := httptest.NewRecorder()
+
+		s.ProvisionTenant(rec, req)
+		require.Equal(t, http.StatusConflict, rec.Code)
+
+		var errResp map[string]interface{}
+		err = json.Unmarshal(rec.Body.Bytes(), &errResp)
+		require.NoError(t, err)
+		require.Equal(t, "LOCATION_SLUG_CONFLICT", errResp["code"])
+
+		// Verify rollback: no new tenant or staff member was inserted
+		var tenantCount int
+		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM tenants WHERE slug = 'second-slug'").Scan(&tenantCount)
+		require.NoError(t, err)
+		require.Equal(t, 0, tenantCount)
+
+		var staffCount int
+		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM staff_members WHERE phone_number = '+919876543210'").Scan(&staffCount)
+		require.NoError(t, err)
+		require.Equal(t, 0, staffCount)
+	})
+
+	// 5. Duplicate owner_phone -> 409 + zero rows
+	t.Run("Duplicate owner phone rollback", func(t *testing.T) {
+		cleanDB()
+
+		// Create first tenant, location, and owner staff manually
+		tenantID := uuid.New()
+		_, err = pool.Exec(ctx, "INSERT INTO tenants (id, name, slug, owner_phone_number) VALUES ($1, 'First', 'first-slug', '+919999999999')", tenantID)
+		require.NoError(t, err)
+
+		locationID := uuid.New()
+		_, err = pool.Exec(ctx, "INSERT INTO locations (id, tenant_id, name, slug) VALUES ($1, $2, 'Location', 'first-slug/loc-slug')", locationID, tenantID)
+		require.NoError(t, err)
+
+		ownerID := uuid.New()
+		_, err = pool.Exec(ctx, "INSERT INTO staff_members (id, tenant_id, location_id, name, phone_number, role, is_active) VALUES ($1, $2, $3, 'Owner', '+919876543210', 'owner', true)", ownerID, tenantID, locationID)
+		require.NoError(t, err)
+
+		body := map[string]interface{}{
+			"tenant_name":   "Second Salon",
+			"tenant_slug":   "second-slug",
+			"owner_name":    "Owner Name",
+			"owner_phone":   "+919876543210", // duplicate owner phone
+			"location_name": "Second Salon Koramangala",
+			"location_slug": "second-slug/loc-slug",
+		}
+		jsonBody, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/v1/admin/setup", bytes.NewReader(jsonBody))
+		req.Header.Set("X-Platform-Admin-Key", "super-secret-test-platform-admin-key")
+		rec := httptest.NewRecorder()
+
+		s.ProvisionTenant(rec, req)
+		require.Equal(t, http.StatusConflict, rec.Code)
+
+		var errResp map[string]interface{}
+		err = json.Unmarshal(rec.Body.Bytes(), &errResp)
+		require.NoError(t, err)
+		require.Equal(t, "OWNER_PHONE_CONFLICT", errResp["code"])
+
+		// Verify rollback: no new tenant or location was inserted
+		var tenantCount int
+		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM tenants WHERE slug = 'second-slug'").Scan(&tenantCount)
+		require.NoError(t, err)
+		require.Equal(t, 0, tenantCount)
+
+		var locationCount int
+		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM locations WHERE slug = 'second-slug/loc-slug'").Scan(&locationCount)
+		require.NoError(t, err)
+		require.Equal(t, 0, locationCount)
+	})
+
+	// 6. Invalid location slug prefix -> 422
+	t.Run("Invalid location slug prefix", func(t *testing.T) {
+		cleanDB()
+
+		body := map[string]interface{}{
+			"tenant_name":   "New Salon",
+			"tenant_slug":   "new-salon",
+			"owner_name":    "Owner Name",
+			"owner_phone":   "+919876543210",
+			"location_name": "New Salon Koramangala",
+			"location_slug": "wrong-prefix/koramangala", // invalid prefix
+		}
+		jsonBody, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/v1/admin/setup", bytes.NewReader(jsonBody))
+		req.Header.Set("X-Platform-Admin-Key", "super-secret-test-platform-admin-key")
+		rec := httptest.NewRecorder()
+
+		s.ProvisionTenant(rec, req)
+		require.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+
+		var errResp map[string]interface{}
+		err = json.Unmarshal(rec.Body.Bytes(), &errResp)
+		require.NoError(t, err)
+		require.Equal(t, "INVALID_LOCATION_SLUG", errResp["code"])
+	})
 }
 

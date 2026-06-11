@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Helper to respond with JSON
@@ -430,5 +433,192 @@ func (s *Server) CreateStaffMember(w http.ResponseWriter, r *http.Request) {
 
 	// 9. Success response with 201 Created and no body
 	w.WriteHeader(http.StatusCreated)
+}
+
+func (s *Server) PlatformAdminKeyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("X-Platform-Admin-Key")
+		if key == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		expectedKey := s.Config.PlatformAdminKey
+		if expectedKey == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		if subtle.ConstantTimeCompare([]byte(key), []byte(expectedKey)) != 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func generateArrivalPIN() (string, error) {
+	const digits = "0123456789"
+	var pin []byte
+	bytes := make([]byte, 6)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	for _, b := range bytes {
+		pin = append(pin, digits[int(b)%len(digits)])
+	}
+	return string(pin), nil
+}
+
+func (s *Server) ProvisionTenant(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var body ProvisionTenantJSONBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondAdminJSON(w, http.StatusBadRequest, map[string]string{
+			"code":    "INVALID_REQUEST",
+			"message": "invalid request body",
+		})
+		return
+	}
+
+	// 1. Validation
+	if strings.TrimSpace(body.TenantName) == "" || len(body.TenantName) > 255 {
+		respondAdminJSON(w, http.StatusBadRequest, map[string]string{
+			"code":    "INVALID_REQUEST",
+			"message": "tenant_name is required and must be <= 255 chars",
+		})
+		return
+	}
+
+	slugRegex := regexp.MustCompile(`^[a-z0-9-]+$`)
+	if !slugRegex.MatchString(body.TenantSlug) || len(body.TenantSlug) > 100 {
+		respondAdminJSON(w, http.StatusBadRequest, map[string]string{
+			"code":    "INVALID_REQUEST",
+			"message": "tenant_slug must be URL-safe and <= 100 chars",
+		})
+		return
+	}
+
+	if strings.TrimSpace(body.OwnerName) == "" || len(body.OwnerName) > 100 {
+		respondAdminJSON(w, http.StatusBadRequest, map[string]string{
+			"code":    "INVALID_REQUEST",
+			"message": "owner_name is required and must be <= 100 chars",
+		})
+		return
+	}
+
+	phoneRegex := regexp.MustCompile(`^\+[1-9]\d{1,14}$`)
+	if !phoneRegex.MatchString(string(body.OwnerPhone)) {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, map[string]string{
+			"code":    "INVALID_PHONE",
+			"message": "owner_phone must be in E.164 format",
+		})
+		return
+	}
+
+	if strings.TrimSpace(body.LocationName) == "" || len(body.LocationName) > 255 {
+		respondAdminJSON(w, http.StatusBadRequest, map[string]string{
+			"code":    "INVALID_REQUEST",
+			"message": "location_name is required and must be <= 255 chars",
+		})
+		return
+	}
+
+	if !strings.HasPrefix(body.LocationSlug, body.TenantSlug+"/") {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, map[string]string{
+			"code":    "INVALID_LOCATION_SLUG",
+			"message": "location_slug must be prefixed with tenant_slug",
+		})
+		return
+	}
+
+	// 2. Generate secure 6-digit arrival PIN
+	plainPin, err := generateArrivalPIN()
+	if err != nil {
+		log.Printf("[Error] Failed to generate arrival PIN: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "failed to generate arrival PIN",
+		})
+		return
+	}
+
+	// 3. Hash the PIN using bcrypt
+	pinHashBytes, err := bcrypt.GenerateFromPassword([]byte(plainPin), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("[Error] Failed to bcrypt hash arrival PIN: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "failed to hash arrival PIN",
+		})
+		return
+	}
+	pinHash := string(pinHashBytes)
+
+	// 4. Invoke repository layer inside transaction
+	var address *string
+	if body.Address != nil {
+		address = body.Address
+	}
+	timezone := "Asia/Kolkata"
+	if body.Timezone != nil && *body.Timezone != "" {
+		timezone = *body.Timezone
+	}
+
+	params := repository.ProvisionTenantParams{
+		TenantName:      strings.TrimSpace(body.TenantName),
+		TenantSlug:      strings.TrimSpace(body.TenantSlug),
+		OwnerName:       strings.TrimSpace(body.OwnerName),
+		OwnerPhone:      string(body.OwnerPhone),
+		LocationName:    strings.TrimSpace(body.LocationName),
+		LocationSlug:    strings.TrimSpace(body.LocationSlug),
+		Address:         address,
+		Timezone:        timezone,
+		ArrivalPinPlain: plainPin,
+		ArrivalPinHash:  pinHash,
+	}
+
+	result, err := repository.ProvisionTenant(ctx, s.Pool, params)
+	if err != nil {
+		if errors.Is(err, repository.ErrTenantSlugConflict) {
+			respondAdminJSON(w, http.StatusConflict, map[string]string{
+				"code":    "TENANT_SLUG_CONFLICT",
+				"message": "tenant_slug already exists",
+			})
+			return
+		}
+		if errors.Is(err, repository.ErrLocationSlugConflict) {
+			respondAdminJSON(w, http.StatusConflict, map[string]string{
+				"code":    "LOCATION_SLUG_CONFLICT",
+				"message": "location_slug already exists",
+			})
+			return
+		}
+		if errors.Is(err, repository.ErrOwnerPhoneConflict) {
+			respondAdminJSON(w, http.StatusConflict, map[string]string{
+				"code":    "OWNER_PHONE_CONFLICT",
+				"message": "owner_phone already exists",
+			})
+			return
+		}
+
+		log.Printf("[Error] ProvisionTenant transaction failed: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "internal server error",
+		})
+		return
+	}
+
+	// 5. Respond with 201 Created and IDs + plain PIN
+	resp := map[string]string{
+		"tenant_id":             result.TenantID.String(),
+		"location_id":           result.LocationID.String(),
+		"owner_staff_member_id": result.OwnerStaffMemberID.String(),
+		"arrival_pin":           plainPin,
+	}
+	respondAdminJSON(w, http.StatusCreated, resp)
 }
 

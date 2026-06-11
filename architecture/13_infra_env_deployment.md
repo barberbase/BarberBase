@@ -49,6 +49,7 @@ DATABASE_URL              # postgres://bb_user:${DB_PASSWORD}@postgres:5432/barb
 JWT_SECRET                # 32+ byte random — staff JWT signing
 HMAC_SECRET               # 32+ byte random — magic link token + state token signing
 AES_ENCRYPTION_KEY        # Exactly 32 bytes — AES-256-GCM for bhejna_api_key_encrypted
+PLATFORM_ADMIN_KEY        # 32+ byte random — gates POST /admin/setup (operator provisioning only, never shared with shops)
  
 # Bhejna — Mode A (shared platform number)
 BHEJNA_API_URL            # https://bhejna-api.codenxtlab.tech

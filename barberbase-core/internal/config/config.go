@@ -16,6 +16,8 @@ type Config struct {
 	// Platform Bhejna Mode A Credentials
 	BhejnaAPIKey    string
 	BhejnaFromPhone string
+
+	PlatformAdminKey string
 }
 
 func Load() (*Config, error) {
@@ -70,6 +72,8 @@ func Load() (*Config, error) {
 		}
 	}
 
+	platformAdminKey := os.Getenv("PLATFORM_ADMIN_KEY")
+
 	return &Config{
 		DatabaseURL:      dbURL,
 		JWTSecret:        jwtSecret,
@@ -79,5 +83,6 @@ func Load() (*Config, error) {
 		Port:             port,
 		BhejnaAPIKey:    bhejnaAPIKey,
 		BhejnaFromPhone: bhejnaFromPhone,
+		PlatformAdminKey: platformAdminKey,
 	}, nil
 }

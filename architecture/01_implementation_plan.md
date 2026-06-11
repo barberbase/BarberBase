@@ -260,10 +260,11 @@ Test: integration — login with a never-created phone → 401; created phone ca
 
 **C5.3 — Tenant onboarding (backend) · build #27 (backend) · [CL→AG]**
 Depends: C5.1, C5.2
-Read: `12_staff_dashboard_frontend.md` (admin), `01_product_domain.md` (company structure), `001` (`tenants`,`locations`)
-Write: `internal/api/handlers_admin.go`, `internal/repository/location.go`
-Accept: first-time setup creates tenant + location + slugs; `locations.slug` globally unique; arrival PIN initialized.
-Test: integration — duplicate slug rejected; new tenant fully isolated (Law 11 spot-check).
+Pre-flight: `provisionTenant` operationId must be present in `openapi.yaml` and `generated.go` must expose `ProvisionTenant` on `ServerInterface` before this unit starts. Re-run oapi-codegen as part of the pre-commit amendment if not already done.
+Read: `12_staff_dashboard_frontend.md` (admin), `01_product_domain.md` (company structure), `13_infra_env_deployment.md` (PLATFORM_ADMIN_KEY), `001` (`tenants`,`locations`,`staff_members`)
+Write: `internal/api/handlers_admin.go`, `internal/repository/location.go`, `internal/config/config.go`, `cmd/server/main.go`, `internal/api/generated.go`
+Accept: single atomic transaction creates tenant + location + owner staff_member (role=`owner`) + initializes arrival PIN (6-digit crypto/rand, bcrypt-hashed, plaintext stored in `arrival_pin_plain`); `PlatformAdminKey` middleware does constant-time compare against `PLATFORM_ADMIN_KEY` env var (not StaffJWT — no staff exist at setup time); `tenants.slug` and `locations.slug` globally unique (UNIQUE constraint enforces — return 409 on conflict, not 500); `locations.slug` must be prefixed with `tenant_slug` (validated in handler before insert); `owner_phone` must not already exist in `staff_members` (checked inside tx — return 409 on collision); response includes `tenant_id`, `location_id`, `owner_staff_member_id`, `arrival_pin` (plaintext, shown once); new tenant fully isolated — `tenant_id` sourced exclusively from the created row, never from request body (Law 11 pattern).
+Test: integration — duplicate `tenant_slug` → 409, zero rows written (full rollback); duplicate `location_slug` → 409, zero rows written; duplicate `owner_phone` → 409, zero rows written; valid request → owner can immediately `POST /auth/staff/request-otp` with the provisioned phone and receive OTP; `arrival_pin_plain` stored in `locations`, `arrival_pin_hash` is bcrypt of same PIN; wrong `PLATFORM_ADMIN_KEY` → 401.
 
 **C5.4 — Mode B own-number connect (backend) · build #28 (backend) · [CL→AG]**
 Depends: C0.4, C5.3

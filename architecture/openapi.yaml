@@ -4,7 +4,7 @@ info:
   version: 1.0.0
   description: |
     Real-time barbershop operations API.
-
+    
     ## Authentication Tiers
     - **Public**: No auth. Rate-limited by Cloudflare + x/time/rate. Used by customers.
     - **Customer Session**: Signed magic-link token in `X-Session-Token` header. Scoped to one queue_entry + location + 23h expiry.
@@ -60,10 +60,21 @@ components:
         Command-scoped: a call_next PAT cannot authorize any other endpoint (Law 20).
         See: 03_auth_identity.md, 16_web_push_service_worker.md
 
+    PlatformAdminKey:
+      type: apiKey
+      in: header
+      name: X-Platform-Admin-Key
+      description: |
+        Platform operator pre-shared key (env: PLATFORM_ADMIN_KEY). Authorizes tenant
+        provisioning before any staff account exists. Never issued to shops or customers.
+        Used exclusively by POST /admin/setup. Verified by constant-time compare in the
+        handler middleware — not via JWT, not via StaffJWT (no staff exist at setup time).
+
   # ─────────────────────────────────────────────────────────────────────────
   # SHARED SCHEMAS
   # ─────────────────────────────────────────────────────────────────────────
   schemas:
+
     # ── Primitives ──────────────────────────────────────────────────────────
     UUIDv7:
       type: string
@@ -100,20 +111,10 @@ components:
     # ── Location Public View ─────────────────────────────────────────────────
     LocationStatus:
       type: object
-      required:
-        [
-          id,
-          name,
-          slug,
-          shop_status,
-          queue_open,
-          queue_length,
-          estimated_wait_minutes,
-          business_hours_today,
-        ]
+      required: [id, name, slug, shop_status, queue_open, queue_length, estimated_wait_minutes, business_hours_today]
       properties:
         id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
         name:
           type: string
           example: "Star Salon"
@@ -153,19 +154,10 @@ components:
     # ── Service Catalog ──────────────────────────────────────────────────────
     ServiceVariant:
       type: object
-      required:
-        [
-          id,
-          name,
-          duration_minutes,
-          price_paise,
-          allow_walk_in,
-          allow_appointment,
-          requires_appointment,
-        ]
+      required: [id, name, duration_minutes, price_paise, allow_walk_in, allow_appointment, requires_appointment]
       properties:
         id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
         name:
           type: string
           example: "Mid Fade"
@@ -177,7 +169,7 @@ components:
           minimum: 1
           example: 25
         price_paise:
-          $ref: "#/components/schemas/Paise"
+          $ref: '#/components/schemas/Paise'
         allow_walk_in:
           type: boolean
         allow_appointment:
@@ -193,7 +185,7 @@ components:
       required: [id, name, variants]
       properties:
         id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
         name:
           type: string
           example: "Fade"
@@ -203,14 +195,14 @@ components:
         variants:
           type: array
           items:
-            $ref: "#/components/schemas/ServiceVariant"
+            $ref: '#/components/schemas/ServiceVariant'
 
     ServiceCategory:
       type: object
       required: [id, name, gender, groups]
       properties:
         id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
         name:
           type: string
           example: "Hair"
@@ -222,31 +214,30 @@ components:
         groups:
           type: array
           items:
-            $ref: "#/components/schemas/ServiceGroup"
+            $ref: '#/components/schemas/ServiceGroup'
 
     ServiceCatalog:
       type: object
       required: [location_id, display_mode, categories]
       properties:
         location_id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
         display_mode:
           type: string
           enum: [flat, grouped, hierarchical]
         categories:
           type: array
           items:
-            $ref: "#/components/schemas/ServiceCategory"
+            $ref: '#/components/schemas/ServiceCategory'
 
     BookingOptions:
       type: object
-      required:
-        [total_duration_minutes, total_price_paise, allowed_entry_methods]
+      required: [total_duration_minutes, total_price_paise, allowed_entry_methods]
       properties:
         total_duration_minutes:
           type: integer
         total_price_paise:
-          $ref: "#/components/schemas/Paise"
+          $ref: '#/components/schemas/Paise'
         allowed_entry_methods:
           type: array
           items:
@@ -255,14 +246,7 @@ components:
         blocked_reason:
           type: string
           nullable: true
-          enum:
-            [
-              shop_closed,
-              queue_full,
-              requires_appointment,
-              closing_time_exceeded,
-              null,
-            ]
+          enum: [shop_closed, queue_full, requires_appointment, closing_time_exceeded, null]
         queue_length:
           type: integer
         estimated_wait_minutes:
@@ -272,35 +256,16 @@ components:
     QueueEntryPublic:
       type: object
       description: Safe customer-facing view. No PII of other customers.
-      required:
-        [
-          id,
-          token_number,
-          state,
-          presence_state,
-          position_ahead,
-          estimated_wait_minutes,
-          services,
-        ]
+      required: [id, token_number, state, presence_state, position_ahead, estimated_wait_minutes, services]
       properties:
         id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
         token_number:
           type: integer
           example: 18
         state:
           type: string
-          enum:
-            [
-              waiting,
-              called,
-              in_progress,
-              completed,
-              skipped,
-              no_show,
-              cancelled,
-              expired,
-            ]
+          enum: [waiting, called, in_progress, completed, skipped, no_show, cancelled, expired]
         presence_state:
           type: string
           enum: [remote, notified, on_the_way, arrived, snoozed, unknown]
@@ -332,36 +297,15 @@ components:
     QueueEntryStaff:
       type: object
       description: Full staff-facing view including customer info and presence
-      required:
-        [
-          id,
-          token_number,
-          state,
-          presence_state,
-          is_dispatchable,
-          customer,
-          services,
-          total_duration_minutes,
-          joined_at,
-        ]
+      required: [id, token_number, state, presence_state, is_dispatchable, customer, services, total_duration_minutes, joined_at]
       properties:
         id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
         token_number:
           type: integer
         state:
           type: string
-          enum:
-            [
-              waiting,
-              called,
-              in_progress,
-              completed,
-              skipped,
-              no_show,
-              cancelled,
-              expired,
-            ]
+          enum: [waiting, called, in_progress, completed, skipped, no_show, cancelled, expired]
         presence_state:
           type: string
           enum: [remote, notified, on_the_way, arrived, snoozed, unknown]
@@ -371,7 +315,7 @@ components:
           type: object
           properties:
             id:
-              $ref: "#/components/schemas/UUIDv7"
+              $ref: '#/components/schemas/UUIDv7'
             name:
               type: string
               nullable: true
@@ -397,16 +341,16 @@ components:
               duration_minutes:
                 type: integer
               price_paise:
-                $ref: "#/components/schemas/Paise"
+                $ref: '#/components/schemas/Paise'
         total_duration_minutes:
           type: integer
         party_size:
           type: integer
         requested_barber_id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
           nullable: true
         assigned_barber_id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
           nullable: true
         joined_at:
           type: string
@@ -427,17 +371,10 @@ components:
     QueueSnapshot:
       type: object
       description: Full live queue for staff dashboard
-      required:
-        [
-          queue_session_id,
-          queue_version,
-          business_date,
-          session_status,
-          entries,
-        ]
+      required: [queue_session_id, queue_version, business_date, session_status, entries]
       properties:
         queue_session_id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
         queue_version:
           type: integer
           description: Monotonically increasing. SSE clients compare this to decide if fetch is needed.
@@ -450,7 +387,7 @@ components:
         entries:
           type: array
           items:
-            $ref: "#/components/schemas/QueueEntryStaff"
+            $ref: '#/components/schemas/QueueEntryStaff'
 
     # ── Appointment ──────────────────────────────────────────────────────────
     AppointmentSlot:
@@ -476,7 +413,7 @@ components:
       required: [id, scheduled_start_at, status, services, magic_link]
       properties:
         id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
         scheduled_start_at:
           type: string
           format: date-time
@@ -495,7 +432,7 @@ components:
         total_duration_minutes:
           type: integer
         total_price_paise:
-          $ref: "#/components/schemas/Paise"
+          $ref: '#/components/schemas/Paise'
         magic_link:
           type: string
           format: uri
@@ -506,9 +443,9 @@ components:
       required: [queue_entry_id, payment_lines]
       properties:
         queue_entry_id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
         discount_amount_paise:
-          $ref: "#/components/schemas/Paise"
+          $ref: '#/components/schemas/Paise'
           default: 0
         discount_reason:
           type: string
@@ -522,7 +459,7 @@ components:
             required: [product_id, quantity]
             properties:
               product_id:
-                $ref: "#/components/schemas/UUIDv7"
+                $ref: '#/components/schemas/UUIDv7'
               quantity:
                 type: integer
                 minimum: 1
@@ -538,7 +475,7 @@ components:
                 type: string
                 enum: [cash, upi, card, unpaid, complimentary]
               amount_paise:
-                $ref: "#/components/schemas/Paise"
+                $ref: '#/components/schemas/Paise'
               provider_reference_id:
                 type: string
                 nullable: true
@@ -547,17 +484,16 @@ components:
 
     CheckoutResponse:
       type: object
-      required:
-        [visit_id, total_amount_paise, payment_status, feedback_scheduled]
+      required: [visit_id, total_amount_paise, payment_status, feedback_scheduled]
       properties:
         visit_id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
         subtotal_amount_paise:
-          $ref: "#/components/schemas/Paise"
+          $ref: '#/components/schemas/Paise'
         discount_amount_paise:
-          $ref: "#/components/schemas/Paise"
+          $ref: '#/components/schemas/Paise'
         total_amount_paise:
-          $ref: "#/components/schemas/Paise"
+          $ref: '#/components/schemas/Paise'
         payment_status:
           type: string
           enum: [paid, unpaid, complimentary]
@@ -571,7 +507,7 @@ components:
       required: [id, name, role, status]
       properties:
         id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
         name:
           type: string
         role:
@@ -581,14 +517,13 @@ components:
           type: string
           enum: [idle, cutting, break, offline]
         current_entry_id:
-          $ref: "#/components/schemas/UUIDv7"
+          $ref: '#/components/schemas/UUIDv7'
           nullable: true
 
     # ── Daily Analytics (Phase 1 simple view) ────────────────────────────────
     DailyAnalytics:
       type: object
-      required:
-        [business_date, total_visits, total_revenue_paise, barber_breakdown]
+      required: [business_date, total_visits, total_revenue_paise, barber_breakdown]
       properties:
         business_date:
           type: string
@@ -596,7 +531,7 @@ components:
         total_visits:
           type: integer
         total_revenue_paise:
-          $ref: "#/components/schemas/Paise"
+          $ref: '#/components/schemas/Paise'
         average_wait_minutes:
           type: integer
         no_show_count:
@@ -609,13 +544,13 @@ components:
             type: object
             properties:
               barber_id:
-                $ref: "#/components/schemas/UUIDv7"
+                $ref: '#/components/schemas/UUIDv7'
               barber_name:
                 type: string
               visits_completed:
                 type: integer
               revenue_paise:
-                $ref: "#/components/schemas/Paise"
+                $ref: '#/components/schemas/Paise'
               average_service_minutes:
                 type: integer
 
@@ -623,6 +558,7 @@ components:
 # PATHS
 # ─────────────────────────────────────────────────────────────────────────────
 paths:
+
   # ════════════════════════════════════════════════════════════════════════════
   # PUBLIC — No auth. Customers and AI agent. Rate-limited by IP.
   # ════════════════════════════════════════════════════════════════════════════
@@ -644,18 +580,18 @@ paths:
             type: string
             example: "star-salon/koramangala"
       responses:
-        "200":
+        '200':
           description: Location status
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/LocationStatus"
-        "404":
+                $ref: '#/components/schemas/LocationStatus'
+        '404':
           description: Location not found
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
 
   /public/locations/{location_id}/service-catalog:
     get:
@@ -672,7 +608,7 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
         - name: gender
           in: query
           required: false
@@ -685,14 +621,14 @@ paths:
           required: false
           description: Filter to a single category
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       responses:
-        "200":
+        '200':
           description: Service catalog
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ServiceCatalog"
+                $ref: '#/components/schemas/ServiceCatalog'
 
   /public/locations/{location_id}/service-catalog/search:
     get:
@@ -708,7 +644,7 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
         - name: q
           in: query
           required: true
@@ -718,7 +654,7 @@ paths:
             maxLength: 100
             example: "mid fade"
       responses:
-        "200":
+        '200':
           description: Matching variants
           content:
             application/json:
@@ -729,7 +665,7 @@ paths:
                     type: array
                     items:
                       allOf:
-                        - $ref: "#/components/schemas/ServiceVariant"
+                        - $ref: '#/components/schemas/ServiceVariant'
                         - type: object
                           properties:
                             group_name:
@@ -752,7 +688,7 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       requestBody:
         required: true
         content:
@@ -765,19 +701,19 @@ paths:
                   type: array
                   minItems: 1
                   items:
-                    $ref: "#/components/schemas/UUIDv7"
+                    $ref: '#/components/schemas/UUIDv7'
                 party_size:
                   type: integer
                   minimum: 1
                   maximum: 10
                   default: 1
       responses:
-        "200":
+        '200':
           description: Booking options with computed totals
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BookingOptions"
+                $ref: '#/components/schemas/BookingOptions'
 
   /public/locations/{location_id}/checkin-intents:
     post:
@@ -805,7 +741,7 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       requestBody:
         required: true
         content:
@@ -818,7 +754,7 @@ paths:
                   type: array
                   minItems: 1
                   items:
-                    $ref: "#/components/schemas/UUIDv7"
+                    $ref: '#/components/schemas/UUIDv7'
                 party_size:
                   type: integer
                   minimum: 1
@@ -830,7 +766,7 @@ paths:
                   maxLength: 100
                   description: Optional. Carried into the intent and onto the queue_entry at resolution.
       responses:
-        "201":
+        '201':
           description: Intent created. Open deep_link to hand the session to WhatsApp.
           content:
             application/json:
@@ -839,7 +775,7 @@ paths:
                 required: [intent_id, token_code, deep_link, expires_at]
                 properties:
                   intent_id:
-                    $ref: "#/components/schemas/UUIDv7"
+                    $ref: '#/components/schemas/UUIDv7'
                   token_code:
                     type: string
                     example: "JN8K4P"
@@ -856,24 +792,24 @@ paths:
                     type: string
                     format: date-time
                     description: Intent expiry (created_at + 23h). After this, resolution returns 422.
-        "404":
+        '404':
           description: Location not found or not active
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "422":
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
           description: Walk-in not available for these services right now (booking resolver blocked)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "429":
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
           description: Rate limit exceeded
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
 
   /public/locations/{location_id}/appointment-slots:
     get:
@@ -889,7 +825,7 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
         - name: date
           in: query
           required: true
@@ -905,9 +841,9 @@ paths:
           schema:
             type: array
             items:
-              $ref: "#/components/schemas/UUIDv7"
+              $ref: '#/components/schemas/UUIDv7'
       responses:
-        "200":
+        '200':
           description: Available slots
           content:
             application/json:
@@ -922,7 +858,7 @@ paths:
                   slots:
                     type: array
                     items:
-                      $ref: "#/components/schemas/AppointmentSlot"
+                      $ref: '#/components/schemas/AppointmentSlot'
 
   # ── Auth (Step 1 of customer/staff WhatsApp path) ─────────────────────────
 
@@ -944,9 +880,9 @@ paths:
               required: [phone_number]
               properties:
                 phone_number:
-                  $ref: "#/components/schemas/PhoneNumber"
+                  $ref: '#/components/schemas/PhoneNumber'
       responses:
-        "200":
+        '200':
           description: OTP sent
           content:
             application/json:
@@ -959,7 +895,7 @@ paths:
                   expires_in_seconds:
                     type: integer
                     example: 300
-        "429":
+        '429':
           description: Rate limit exceeded
 
   /auth/staff/verify-otp:
@@ -976,14 +912,14 @@ paths:
               required: [phone_number, otp]
               properties:
                 phone_number:
-                  $ref: "#/components/schemas/PhoneNumber"
+                  $ref: '#/components/schemas/PhoneNumber'
                 otp:
                   type: string
                   minLength: 6
                   maxLength: 6
                   pattern: '^\d{6}$'
       responses:
-        "200":
+        '200':
           description: JWT issued. Set as httpOnly cookie by BFF.
           content:
             application/json:
@@ -992,22 +928,22 @@ paths:
                 required: [staff_member_id, name, role, location_id]
                 properties:
                   staff_member_id:
-                    $ref: "#/components/schemas/UUIDv7"
+                    $ref: '#/components/schemas/UUIDv7'
                   name:
                     type: string
                   role:
                     type: string
                     enum: [owner, manager, barber]
                   location_id:
-                    $ref: "#/components/schemas/UUIDv7"
+                    $ref: '#/components/schemas/UUIDv7'
                   tenant_id:
-                    $ref: "#/components/schemas/UUIDv7"
-        "401":
+                    $ref: '#/components/schemas/UUIDv7'
+        '401':
           description: Invalid or expired OTP
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
 
   /auth/staff/refresh:
     post:
@@ -1016,9 +952,9 @@ paths:
       description: Called automatically by SvelteKit BFF when access token expires (15 min TTL).
       operationId: refreshStaffToken
       responses:
-        "200":
+        '200':
           description: New access token issued
-        "401":
+        '401':
           description: Refresh token expired or invalid. Staff must re-login.
 
   # ── Customer Queue Join ────────────────────────────────────────────────────
@@ -1030,15 +966,15 @@ paths:
       description: |
         Called after customer completes service selection on the web UI and taps Confirm.
         Idempotency key prevents duplicate joins on retry.
-
+        
         Identity resolution order:
         1. If phone_number provided: lookup customer by (tenant_id, phone_number)
         2. If not found: create new customer record
         3. Store BSUID in customer_identities if provided
-
+        
         On success: creates visit + visit_services + queue_entry, fires outbox event
         to send WhatsApp confirmation via Bhejna.
-
+        
         Returns signed magic_link_token valid for 23 hours.
       operationId: joinQueue
       requestBody:
@@ -1047,16 +983,15 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                [location_id, variant_ids, idempotency_key, initiated_via]
+              required: [location_id, variant_ids, idempotency_key, initiated_via]
               properties:
                 location_id:
-                  $ref: "#/components/schemas/UUIDv7"
+                  $ref: '#/components/schemas/UUIDv7'
                 variant_ids:
                   type: array
                   minItems: 1
                   items:
-                    $ref: "#/components/schemas/UUIDv7"
+                    $ref: '#/components/schemas/UUIDv7'
                 party_size:
                   type: integer
                   minimum: 1
@@ -1068,7 +1003,7 @@ paths:
                   maxLength: 80
                   description: Optional. Barber sees this on dashboard.
                 phone_number:
-                  $ref: "#/components/schemas/PhoneNumber"
+                  $ref: '#/components/schemas/PhoneNumber'
                   nullable: true
                   description: |
                     Provided when customer joins via web OTP path.
@@ -1080,7 +1015,7 @@ paths:
                     Provided by Bhejna webhook resolution. Never sent by browser directly.
                     Stored in customer_identities. Phone number is the canonical sending address.
                 requested_barber_id:
-                  $ref: "#/components/schemas/UUIDv7"
+                  $ref: '#/components/schemas/UUIDv7'
                   nullable: true
                   description: Only respected if location.queue_routing_mode = hybrid or barber_specific
                 idempotency_key:
@@ -1091,7 +1026,7 @@ paths:
                   type: string
                   enum: [whatsapp, web_form, staff_dashboard, ai_agent]
       responses:
-        "200":
+        '200':
           description: Successfully joined or idempotent duplicate (returns existing entry)
           content:
             application/json:
@@ -1100,7 +1035,7 @@ paths:
                 required: [queue_entry, magic_link_token, whatsapp_sent]
                 properties:
                   queue_entry:
-                    $ref: "#/components/schemas/QueueEntryPublic"
+                    $ref: '#/components/schemas/QueueEntryPublic'
                   magic_link_token:
                     type: string
                     description: Signed token. Browser stores this. Also sent via WhatsApp.
@@ -1111,23 +1046,23 @@ paths:
                   whatsapp_sent:
                     type: boolean
                     description: false if customer has no phone number (anonymous walk-in)
-        "409":
+        '409':
           description: Customer already has an active entry at this location
           content:
             application/json:
               schema:
                 allOf:
-                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: '#/components/schemas/ErrorResponse'
                   - type: object
                     properties:
                       existing_entry:
-                        $ref: "#/components/schemas/QueueEntryPublic"
-        "422":
+                        $ref: '#/components/schemas/QueueEntryPublic'
+        '422':
           description: Booking resolver blocked this join (shop closed, queue full, requires appointment)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
 
   /appointments/book:
     post:
@@ -1144,22 +1079,15 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                [
-                  location_id,
-                  variant_ids,
-                  scheduled_start_at,
-                  phone_number,
-                  idempotency_key,
-                ]
+              required: [location_id, variant_ids, scheduled_start_at, phone_number, idempotency_key]
               properties:
                 location_id:
-                  $ref: "#/components/schemas/UUIDv7"
+                  $ref: '#/components/schemas/UUIDv7'
                 variant_ids:
                   type: array
                   minItems: 1
                   items:
-                    $ref: "#/components/schemas/UUIDv7"
+                    $ref: '#/components/schemas/UUIDv7'
                 party_size:
                   type: integer
                   default: 1
@@ -1171,10 +1099,10 @@ paths:
                   nullable: true
                   maxLength: 80
                 phone_number:
-                  $ref: "#/components/schemas/PhoneNumber"
+                  $ref: '#/components/schemas/PhoneNumber'
                   description: Required for appointment. WhatsApp confirmation sent here.
                 requested_barber_id:
-                  $ref: "#/components/schemas/UUIDv7"
+                  $ref: '#/components/schemas/UUIDv7'
                   nullable: true
                 idempotency_key:
                   type: string
@@ -1183,18 +1111,18 @@ paths:
                   type: string
                   enum: [whatsapp, web_form, staff_dashboard, ai_agent]
       responses:
-        "201":
+        '201':
           description: Appointment booked
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AppointmentResponse"
-        "409":
+                $ref: '#/components/schemas/AppointmentResponse'
+        '409':
           description: Slot no longer available
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
 
   # ── Customer Session (magic link token auth) ───────────────────────────────
 
@@ -1210,15 +1138,15 @@ paths:
       security:
         - CustomerSession: []
       responses:
-        "200":
+        '200':
           description: Current queue status
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QueueEntryPublic"
-        "401":
+                $ref: '#/components/schemas/QueueEntryPublic'
+        '401':
           description: Invalid or expired session token
-        "404":
+        '404':
           description: Entry not found or already completed/cancelled
 
   /queue/on-the-way:
@@ -1233,7 +1161,7 @@ paths:
       security:
         - CustomerSession: []
       responses:
-        "200":
+        '200':
           description: Presence updated
           content:
             application/json:
@@ -1246,7 +1174,7 @@ paths:
                   message:
                     type: string
                     example: "Great! Head over to Star Salon when ready."
-        "422":
+        '422':
           description: Invalid transition (already arrived, snoozed, or completed)
 
   /queue/confirm-arrival:
@@ -1255,12 +1183,12 @@ paths:
       summary: Confirm physical arrival at the shop
       description: |
         Transitions presence_state → arrived. Requires physical verification.
-
+        
         Methods:
         - pin: Customer enters static location PIN shown at counter
         - geolocation: Browser GPS within shop radius (auto-confirm, no input needed)
         - nfc: Signed payload from NFC tag tap
-
+        
         Rate limited: max 5 attempts per queue_entry, 10 per IP per hour.
         On success: is_dispatchable = true, SSE ping fires to staff dashboard.
       operationId: confirmArrival
@@ -1298,7 +1226,7 @@ paths:
                   type: string
                   description: Required when method = nfc. Signed payload from NFC tag.
       responses:
-        "200":
+        '200':
           description: Arrival confirmed
           content:
             application/json:
@@ -1311,23 +1239,23 @@ paths:
                   message:
                     type: string
                     example: "Welcome! You are next in line."
-        "400":
+        '400':
           description: Incorrect PIN or invalid NFC token
           content:
             application/json:
               schema:
                 allOf:
-                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: '#/components/schemas/ErrorResponse'
                   - type: object
                     properties:
                       attempts_remaining:
                         type: integer
-        "422":
+        '422':
           description: GPS accuracy too low. Fallback to PIN.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
 
   /queue/cancel:
     post:
@@ -1341,9 +1269,9 @@ paths:
       security:
         - CustomerSession: []
       responses:
-        "200":
+        '200':
           description: Entry cancelled
-        "422":
+        '422':
           description: Cannot cancel in current state (in_progress)
 
   /queue/feedback:
@@ -1374,9 +1302,9 @@ paths:
                   nullable: true
                   maxLength: 500
       responses:
-        "201":
+        '201':
           description: Feedback recorded
-        "409":
+        '409':
           description: Feedback already submitted for this visit
 
   # ── SSE Stream ────────────────────────────────────────────────────────────
@@ -1387,17 +1315,17 @@ paths:
       summary: SSE stream for queue version pings
       description: |
         Go maintains this SSE connection in-memory via sync.Map keyed by location_id.
-
+        
         Events emitted:
         - queue_changed: { type: "queue_changed", location_id: "uuid", queue_version: 184 }
         - heartbeat: { type: "heartbeat" } every 30 seconds to keep connection alive
-
+        
         Client behaviour:
         - On queue_changed: compare queue_version to local. If stale, fetch /queue/snapshot or /queue/my-status.
         - On disconnect: reconnect with exponential backoff (1s, 2s, 4s, max 30s).
         - Staff: persistent connection.
         - Customer magic link: active while tab visible, pause on hidden, timeout after 4h idle.
-
+        
         Auth:
         - Staff: StaffJWT query param (?token=...)
         - Customer: CustomerSession query param (?t=...)
@@ -1408,7 +1336,7 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
         - name: token
           in: query
           required: true
@@ -1416,13 +1344,13 @@ paths:
           schema:
             type: string
       responses:
-        "200":
+        '200':
           description: SSE stream opened
           content:
             text/event-stream:
               schema:
                 type: string
-        "401":
+        '401':
           description: Invalid token
 
   # ════════════════════════════════════════════════════════════════════════════
@@ -1441,12 +1369,12 @@ paths:
       security:
         - StaffJWT: []
       responses:
-        "200":
+        '200':
           description: Full queue snapshot
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QueueSnapshot"
+                $ref: '#/components/schemas/QueueSnapshot'
 
   /staff/queue/call-next:
     post:
@@ -1454,7 +1382,7 @@ paths:
       summary: Call next dispatchable customer
       description: |
         The primary barber action. Single tap moves the queue forward.
-
+        
         Transaction:
         1. Lock queue_session FOR UPDATE
         2. Find oldest dispatchable (state=waiting, is_dispatchable=true, presence=arrived)
@@ -1464,26 +1392,26 @@ paths:
         5. Fire outbox: WhatsApp "your turn" message to customer
         6. Increment queue_version, fire SSE ping via in-memory sync.Map
         7. Commit
-
+        
         If no arrived customers available: returns 404 with waiting_remote_count
         showing how many remote customers are on the way.
       operationId: callNextCustomer
       security:
         - StaffJWT: []
       responses:
-        "200":
+        '200':
           description: Customer called
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QueueEntryStaff"
-        "404":
+                $ref: '#/components/schemas/QueueEntryStaff'
+        '404':
           description: No dispatchable customers available
           content:
             application/json:
               schema:
                 allOf:
-                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: '#/components/schemas/ErrorResponse'
                   - type: object
                     properties:
                       waiting_remote_count:
@@ -1508,15 +1436,15 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       responses:
-        "200":
+        '200':
           description: Service started
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QueueEntryStaff"
-        "422":
+                $ref: '#/components/schemas/QueueEntryStaff'
+        '422':
           description: Invalid state transition or customer not arrived (for direct start)
 
   /staff/queue/entries/{entry_id}/complete:
@@ -1525,9 +1453,9 @@ paths:
       summary: Complete service and checkout (atomic)
       description: |
         The CompleteVisitAndCheckout transaction. All-or-nothing.
-
+        
         1. Lock queue_session FOR UPDATE
-        2. Lock queue_entry FOR UPDATE
+        2. Lock queue_entry FOR UPDATE  
         3. Lock visit FOR UPDATE
         4. Validate state = in_progress
         5. Finalize visit_charge
@@ -1548,21 +1476,21 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CheckoutRequest"
+              $ref: '#/components/schemas/CheckoutRequest'
       responses:
-        "200":
+        '200':
           description: Service completed and checkout recorded
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CheckoutResponse"
-        "422":
+                $ref: '#/components/schemas/CheckoutResponse'
+        '422':
           description: Entry not in in_progress state or payment sum mismatch
 
   /staff/queue/entries/{entry_id}/skip:
@@ -1581,9 +1509,9 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       responses:
-        "200":
+        '200':
           description: Entry skipped
 
   /staff/queue/entries/{entry_id}/no-show:
@@ -1602,9 +1530,9 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       responses:
-        "200":
+        '200':
           description: Marked as no-show
 
   /staff/queue/entries/{entry_id}/reactivate:
@@ -1627,14 +1555,14 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       responses:
-        "200":
+        '200':
           description: Entry reactivated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QueueEntryStaff"
+                $ref: '#/components/schemas/QueueEntryStaff'
 
   /staff/queue/entries/{entry_id}/confirm-arrival:
     post:
@@ -1653,9 +1581,9 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       responses:
-        "200":
+        '200':
           description: Arrival confirmed by staff
 
   /staff/queue/entries/{entry_id}/reassign:
@@ -1675,7 +1603,7 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       requestBody:
         required: true
         content:
@@ -1685,9 +1613,9 @@ paths:
               required: [new_barber_id]
               properties:
                 new_barber_id:
-                  $ref: "#/components/schemas/UUIDv7"
+                  $ref: '#/components/schemas/UUIDv7'
       responses:
-        "200":
+        '200':
           description: Reassigned
 
   /staff/queue/add-walkin:
@@ -1715,26 +1643,26 @@ paths:
                   maxLength: 80
                   description: '"Uncle", "Kid with dad", etc.'
                 phone_number:
-                  $ref: "#/components/schemas/PhoneNumber"
+                  $ref: '#/components/schemas/PhoneNumber'
                   nullable: true
                 variant_ids:
                   type: array
                   minItems: 1
                   items:
-                    $ref: "#/components/schemas/UUIDv7"
+                    $ref: '#/components/schemas/UUIDv7'
                 party_size:
                   type: integer
                   default: 1
                 requested_barber_id:
-                  $ref: "#/components/schemas/UUIDv7"
+                  $ref: '#/components/schemas/UUIDv7'
                   nullable: true
       responses:
-        "200":
+        '200':
           description: Walk-in added to queue
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QueueEntryStaff"
+                $ref: '#/components/schemas/QueueEntryStaff'
 
   # ── Shop Status Management ─────────────────────────────────────────────────
 
@@ -1745,7 +1673,7 @@ paths:
       security:
         - StaffJWT: []
       responses:
-        "200":
+        '200':
           description: Shop status
           content:
             application/json:
@@ -1775,7 +1703,7 @@ paths:
       description: |
         Staff or owner manually changes shop status.
         If active queue entries exist when closing, modal_action required.
-
+        
         modal_action values:
         - finish_remaining: stop new joins, serve existing queue to completion
         - expire_remaining: immediately expire all waiting entries, notify customers
@@ -1808,15 +1736,15 @@ paths:
                   enum: [finish_remaining, expire_remaining]
                   description: Required if closing with active queue entries.
       responses:
-        "200":
+        '200':
           description: Status updated
-        "422":
+        '422':
           description: Active entries exist. modal_action required.
           content:
             application/json:
               schema:
                 allOf:
-                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: '#/components/schemas/ErrorResponse'
                   - type: object
                     properties:
                       active_entry_count:
@@ -1831,7 +1759,7 @@ paths:
       security:
         - StaffJWT: []
       responses:
-        "200":
+        '200':
           description: Staff list
           content:
             application/json:
@@ -1841,7 +1769,7 @@ paths:
                   staff:
                     type: array
                     items:
-                      $ref: "#/components/schemas/StaffMember"
+                      $ref: '#/components/schemas/StaffMember'
 
   /staff/members/{staff_id}/status:
     patch:
@@ -1858,7 +1786,7 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       requestBody:
         required: true
         content:
@@ -1871,7 +1799,7 @@ paths:
                   type: string
                   enum: [idle, cutting, break, offline]
       responses:
-        "200":
+        '200':
           description: Status updated
 
   # ── Analytics ─────────────────────────────────────────────────────────────
@@ -1896,12 +1824,120 @@ paths:
             format: date
             description: Defaults to today (location timezone)
       responses:
-        "200":
+        '200':
           description: Daily analytics
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DailyAnalytics"
+                $ref: '#/components/schemas/DailyAnalytics'
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # PLATFORM PROVISIONING — PlatformAdminKey only (operator use, not shops)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /admin/setup:
+    post:
+      tags: [Admin - Provisioning]
+      summary: Provision a new tenant + first location + owner (one-shot bootstrap)
+      description: |
+        Platform operator endpoint. Atomically creates:
+          1. A tenant row (slug, name, owner_phone)
+          2. The tenant's first location (slug, name, address, timezone)
+          3. An owner staff_member (role=owner, phone=owner_phone) so the owner can
+             immediately request an OTP via POST /auth/staff/request-otp and log in.
+          4. Initializes the arrival PIN (6-digit crypto/rand, bcrypt-hashed).
+
+        StaffJWT cannot authorize this endpoint — no staff exist yet at setup time.
+        Gated by PlatformAdminKey (env: PLATFORM_ADMIN_KEY, constant-time compare).
+
+        Idempotency: duplicate tenant_slug, location_slug, or owner_phone → 409.
+        Phase 1: single location per tenant only (max_locations defaults to 1).
+        owner_phone must be E.164 and must not already exist in staff_members.
+      operationId: provisionTenant
+      security:
+        - PlatformAdminKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - tenant_name
+                - tenant_slug
+                - owner_name
+                - owner_phone
+                - location_name
+                - location_slug
+              properties:
+                tenant_name:
+                  type: string
+                  maxLength: 255
+                  example: "Star Salon"
+                tenant_slug:
+                  type: string
+                  maxLength: 100
+                  pattern: '^[a-z0-9-]+$'
+                  description: URL-safe globally unique tenant identifier. e.g. "star-salon"
+                  example: "star-salon"
+                owner_name:
+                  type: string
+                  maxLength: 100
+                  example: "Ravi Kumar"
+                owner_phone:
+                  $ref: '#/components/schemas/PhoneNumber'
+                location_name:
+                  type: string
+                  maxLength: 255
+                  example: "Star Salon — Koramangala"
+                location_slug:
+                  type: string
+                  maxLength: 100
+                  pattern: '^[a-z0-9-]+/[a-z0-9-]+$'
+                  description: |
+                    Globally unique full slug in the form "tenant-slug/location-slug".
+                    Must be prefixed with tenant_slug. e.g. "star-salon/koramangala"
+                  example: "star-salon/koramangala"
+                address:
+                  type: string
+                  example: "12, 80 Feet Road, Koramangala, Bengaluru 560034"
+                timezone:
+                  type: string
+                  default: "Asia/Kolkata"
+                  example: "Asia/Kolkata"
+      responses:
+        '201':
+          description: Tenant provisioned. arrival_pin must be noted — display once, then only readable from /staff/shop/status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - tenant_id
+                  - location_id
+                  - owner_staff_member_id
+                  - arrival_pin
+                properties:
+                  tenant_id:
+                    $ref: '#/components/schemas/UUIDv7'
+                  location_id:
+                    $ref: '#/components/schemas/UUIDv7'
+                  owner_staff_member_id:
+                    $ref: '#/components/schemas/UUIDv7'
+                  arrival_pin:
+                    type: string
+                    minLength: 4
+                    maxLength: 6
+                    example: "8362"
+                    description: Plaintext PIN shown once. Laminate on counter. Staff dashboard shows it thereafter.
+        '409':
+          description: tenant_slug, location_slug, or owner_phone already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid X-Platform-Admin-Key
 
   # ════════════════════════════════════════════════════════════════════════════
   # OWNER/ADMIN — Requires StaffJWT with role = owner or manager
@@ -1918,14 +1954,14 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       responses:
-        "200":
+        '200':
           description: Full service catalog for management
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ServiceCatalog"
+                $ref: '#/components/schemas/ServiceCatalog'
 
     post:
       tags: [Admin - Services]
@@ -1939,21 +1975,14 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required:
-                [
-                  category_name,
-                  group_name,
-                  variant_name,
-                  duration_minutes,
-                  price_paise,
-                ]
+              required: [category_name, group_name, variant_name, duration_minutes, price_paise]
               properties:
                 category_name:
                   type: string
@@ -1972,7 +2001,7 @@ paths:
                   type: integer
                   minimum: 1
                 price_paise:
-                  $ref: "#/components/schemas/Paise"
+                  $ref: '#/components/schemas/Paise'
                 allow_walk_in:
                   type: boolean
                   default: true
@@ -1986,12 +2015,12 @@ paths:
                   type: boolean
                   default: false
       responses:
-        "201":
+        '201':
           description: Service variant created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ServiceVariant"
+                $ref: '#/components/schemas/ServiceVariant'
 
   /admin/locations/{location_id}/services/{variant_id}:
     patch:
@@ -2008,12 +2037,12 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
         - name: variant_id
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       requestBody:
         required: true
         content:
@@ -2027,13 +2056,13 @@ paths:
                   type: integer
                   minimum: 1
                 price_paise:
-                  $ref: "#/components/schemas/Paise"
+                  $ref: '#/components/schemas/Paise'
                 is_active:
                   type: boolean
                 is_popular:
                   type: boolean
       responses:
-        "200":
+        '200':
           description: Updated
 
   /admin/locations/{location_id}/arrival-pin/regenerate:
@@ -2052,9 +2081,9 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       responses:
-        "200":
+        '200':
           description: New PIN generated
           content:
             application/json:
@@ -2085,12 +2114,12 @@ paths:
                   type: string
                   maxLength: 100
                 phone_number:
-                  $ref: "#/components/schemas/PhoneNumber"
+                  $ref: '#/components/schemas/PhoneNumber'
                 role:
                   type: string
                   enum: [manager, barber]
       responses:
-        "201":
+        '201':
           description: Staff member created
 
   # ════════════════════════════════════════════════════════════════════════════
@@ -2105,10 +2134,10 @@ paths:
         CRITICAL: Write to webhook_events table BEFORE returning 200.
         INSERT ... ON CONFLICT (source, external_event_id) DO NOTHING.
         Always return 200 (idempotent). Never return 4xx to Bhejna (causes retries).
-
+        
         Async Go worker processes webhook_events WHERE status = 'pending'
         using SKIP LOCKED for safe parallel processing.
-
+        
         Handled event_types:
         - message.received: Customer joins queue, replies to prompts, sends OTP
         - flow.completed: WhatsApp Flow form submission (future)
@@ -2122,15 +2151,7 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                [
-                  bhejna_event_id,
-                  event_type,
-                  channel,
-                  received_at,
-                  business_phone_number,
-                  sender,
-                ]
+              required: [bhejna_event_id, event_type, channel, received_at, business_phone_number, sender]
               properties:
                 bhejna_event_id:
                   type: string
@@ -2152,7 +2173,7 @@ paths:
                   required: [phone_number]
                   properties:
                     phone_number:
-                      $ref: "#/components/schemas/PhoneNumber"
+                      $ref: '#/components/schemas/PhoneNumber'
                       description: Primary canonical identity. Always required from Bhejna.
                     bsuid:
                       type: string
@@ -2180,7 +2201,7 @@ paths:
                       nullable: true
                       additionalProperties: true
       responses:
-        "200":
+        '200':
           description: Acknowledged. Always 200. Processing is async.
 
   # ════════════════════════════════════════════════════════════════════════════
@@ -2203,9 +2224,9 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       responses:
-        "200":
+        '200':
           description: Shop info for agent
           content:
             application/json:
@@ -2213,13 +2234,13 @@ paths:
                 type: object
                 properties:
                   status:
-                    $ref: "#/components/schemas/LocationStatus"
+                    $ref: '#/components/schemas/LocationStatus'
                   popular_services:
                     type: array
                     description: Top 5 is_popular variants for quick suggestions
                     items:
                       allOf:
-                        - $ref: "#/components/schemas/ServiceVariant"
+                        - $ref: '#/components/schemas/ServiceVariant'
                         - type: object
                           properties:
                             group_name:
@@ -2244,18 +2265,17 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                [location_id, variant_ids, phone_number, idempotency_key]
+              required: [location_id, variant_ids, phone_number, idempotency_key]
               properties:
                 location_id:
-                  $ref: "#/components/schemas/UUIDv7"
+                  $ref: '#/components/schemas/UUIDv7'
                 variant_ids:
                   type: array
                   minItems: 1
                   items:
-                    $ref: "#/components/schemas/UUIDv7"
+                    $ref: '#/components/schemas/UUIDv7'
                 phone_number:
-                  $ref: "#/components/schemas/PhoneNumber"
+                  $ref: '#/components/schemas/PhoneNumber'
                 party_size:
                   type: integer
                   default: 1
@@ -2266,15 +2286,15 @@ paths:
                   type: string
                   format: uuid
       responses:
-        "200":
+        '200':
           description: Joined
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QueueEntryPublic"
-        "409":
+                $ref: '#/components/schemas/QueueEntryPublic'
+        '409':
           description: Already in queue
-        "422":
+        '422':
           description: Booking blocked
 
   /agent/appointments/book:
@@ -2291,27 +2311,20 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                [
-                  location_id,
-                  variant_ids,
-                  scheduled_start_at,
-                  phone_number,
-                  idempotency_key,
-                ]
+              required: [location_id, variant_ids, scheduled_start_at, phone_number, idempotency_key]
               properties:
                 location_id:
-                  $ref: "#/components/schemas/UUIDv7"
+                  $ref: '#/components/schemas/UUIDv7'
                 variant_ids:
                   type: array
                   minItems: 1
                   items:
-                    $ref: "#/components/schemas/UUIDv7"
+                    $ref: '#/components/schemas/UUIDv7'
                 scheduled_start_at:
                   type: string
                   format: date-time
                 phone_number:
-                  $ref: "#/components/schemas/PhoneNumber"
+                  $ref: '#/components/schemas/PhoneNumber'
                 party_size:
                   type: integer
                   default: 1
@@ -2322,19 +2335,19 @@ paths:
                   type: string
                   format: uuid
       responses:
-        "201":
+        '201':
           description: Appointment booked
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AppointmentResponse"
+                $ref: '#/components/schemas/AppointmentResponse'
 
   /agent/customer/status:
     get:
       tags: [AI Agent]
       summary: "[TOOL] Get customer's current queue or appointment status"
       description: |
-        Agent calls this when customer asks "What's my token number?" or
+        Agent calls this when customer asks "What's my token number?" or 
         "How long until my turn?" in WhatsApp conversation.
       operationId: agentGetCustomerStatus
       security:
@@ -2344,20 +2357,20 @@ paths:
           in: query
           required: true
           schema:
-            $ref: "#/components/schemas/PhoneNumber"
+            $ref: '#/components/schemas/PhoneNumber'
         - name: location_id
           in: query
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       responses:
-        "200":
+        '200':
           description: Customer status
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QueueEntryPublic"
-        "404":
+                $ref: '#/components/schemas/QueueEntryPublic'
+        '404':
           description: No active entry found
 
   /agent/customer/cancel:
@@ -2377,15 +2390,15 @@ paths:
               required: [phone_number, location_id]
               properties:
                 phone_number:
-                  $ref: "#/components/schemas/PhoneNumber"
+                  $ref: '#/components/schemas/PhoneNumber'
                 location_id:
-                  $ref: "#/components/schemas/UUIDv7"
+                  $ref: '#/components/schemas/UUIDv7'
       responses:
-        "200":
+        '200':
           description: Cancelled
-        "422":
+        '422':
           description: Cannot cancel (in_progress)
-        "404":
+        '404':
           description: No active entry
 
   # ── Staff Push (PWA — Service Worker background context) ───────────────────
@@ -2421,7 +2434,7 @@ paths:
                   type: string
                   description: Base64url 16-byte auth secret (PushSubscription.getKey("auth"))
       responses:
-        "204":
+        '204':
           description: Subscription stored
 
   /staff/push/call-next:
@@ -2444,39 +2457,38 @@ paths:
       security:
         - PushActionToken: []
       responses:
-        "200":
+        '200':
           description: Customer called — return updated queue state for notification refresh
           content:
             application/json:
               schema:
                 type: object
-                required:
-                  [called_entry, waiting_arrived_count, estimated_wait_minutes]
+                required: [called_entry, waiting_arrived_count, estimated_wait_minutes]
                 properties:
                   called_entry:
-                    $ref: "#/components/schemas/QueueEntryStaff"
+                    $ref: '#/components/schemas/QueueEntryStaff'
                   waiting_arrived_count:
                     type: integer
                     description: Remaining arrived dispatchable entries after this call
                   estimated_wait_minutes:
                     type: integer
-        "404":
+        '404':
           description: No arrived dispatchable customers at this location
           content:
             application/json:
               schema:
                 allOf:
-                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: '#/components/schemas/ErrorResponse'
                   - type: object
                     properties:
                       waiting_remote_count:
                         type: integer
                         description: Customers in queue but not yet arrived
-        "401":
+        '401':
           description: PAT expired or signature invalid — Service Worker must show "Session expired" notification
-        "403":
+        '403':
           description: PAT command mismatch (Law 20)
-        "429":
+        '429':
           description: Rate limited (1 per 3s per staff member) — barber double-tapped, ignore
 
   # ── Mode B (own-number WhatsApp) — Phase 1 Premium ────────────────────────
@@ -2501,7 +2513,7 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       requestBody:
         required: true
         description: Config blob copied verbatim from the Bhejna Developer Settings page.
@@ -2509,14 +2521,7 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                [
-                  bhejna_config_version,
-                  phone_number,
-                  api_key,
-                  webhook_secret,
-                  whatsapp_status,
-                ]
+              required: [bhejna_config_version, phone_number, api_key, webhook_secret, whatsapp_status]
               properties:
                 bhejna_config_version:
                   type: string
@@ -2525,7 +2530,7 @@ paths:
                   type: string
                   description: Validation/diagnostic only — not persisted.
                 phone_number:
-                  $ref: "#/components/schemas/PhoneNumber"
+                  $ref: '#/components/schemas/PhoneNumber'
                 phone_number_id:
                   type: string
                 api_key:
@@ -2547,7 +2552,7 @@ paths:
                   type: integer
                   description: Validation/diagnostic only — not persisted.
       responses:
-        "200":
+        '200':
           description: Connected — returns the webhook URL to paste into the Bhejna portal
           content:
             application/json:
@@ -2562,12 +2567,12 @@ paths:
                     type: string
                     format: uri
                     example: "https://api.barberbase.in/v1/webhooks/bhejna/loc/0190..."
-        "422":
+        '422':
           description: Validation failed (status not ACTIVE, quality RED, bad phone, or test-send failed)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
 
   /admin/locations/{location_id}/whatsapp/disconnect:
     post:
@@ -2585,9 +2590,9 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       responses:
-        "204":
+        '204':
           description: Disconnected — location reverted to shared platform number
 
   /webhooks/bhejna/loc/{location_id}:
@@ -2610,7 +2615,7 @@ paths:
           in: path
           required: true
           schema:
-            $ref: "#/components/schemas/UUIDv7"
+            $ref: '#/components/schemas/UUIDv7'
       requestBody:
         required: true
         content:
@@ -2619,9 +2624,9 @@ paths:
               type: object
               description: Raw Bhejna event payload (message.received / message.status_updated).
       responses:
-        "200":
+        '200':
           description: Accepted (always 200 after HMAC passes — never 5xx, Law 9)
-        "401":
+        '401':
           description: HMAC signature invalid
-        "404":
+        '404':
           description: location_id not found or not in own_number mode

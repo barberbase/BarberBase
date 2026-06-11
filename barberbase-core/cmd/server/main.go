@@ -35,6 +35,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+	if cfg.PlatformAdminKey == "" {
+		log.Fatal("PLATFORM_ADMIN_KEY environment variable is required")
+	}
 	log.Printf("Configuration loaded successfully. Environment: %s", cfg.Environment)
 
 	// 2. Initialize database connection pool
@@ -104,7 +107,10 @@ func main() {
 	apiServer.Arrival = presence.NewService(pool, broadcast)
 
 	apiHandler := api.Handler(apiServer)
-	r.Mount("/v1", apiHandler)
+	r.Route("/v1", func(r chi.Router) {
+		r.With(apiServer.PlatformAdminKeyMiddleware).Post("/admin/setup", apiServer.ProvisionTenant)
+		r.Mount("/", apiHandler)
+	})
 
 	// 6. Start HTTP Server
 	serverAddr := fmt.Sprintf(":%s", cfg.Port)
