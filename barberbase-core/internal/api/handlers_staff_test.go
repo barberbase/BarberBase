@@ -43,6 +43,17 @@ func setupTestServer(t *testing.T) (*Server, *pgxpool.Pool, uuid.UUID, uuid.UUID
 		t.Skip("Skipping integration test: DATABASE_URL not set")
 	}
 
+	// Ensure VAPID vars are present for config.Load() validation.
+	if os.Getenv("VAPID_PUBLIC_KEY") == "" {
+		os.Setenv("VAPID_PUBLIC_KEY", "BNhSTbMpAHFWBkBYWMjmFPuMYSoXqPuPmPqCelgQrhs9ZITAbBuznEzGm9ZfFlm-m8jkLBm4J1P7H2RqCOhFhJo")
+	}
+	if os.Getenv("VAPID_PRIVATE_KEY") == "" {
+		os.Setenv("VAPID_PRIVATE_KEY", "tLd5AVFH6m5Y3IjUcw5hR4bTmw6RtMXRVfcQaEd9kDo")
+	}
+	if os.Getenv("VAPID_SUBJECT") == "" {
+		os.Setenv("VAPID_SUBJECT", "mailto:ops@barberbase.in")
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)

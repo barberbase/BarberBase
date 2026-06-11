@@ -18,6 +18,10 @@ type Config struct {
 	BhejnaFromPhone string
 
 	PlatformAdminKey string
+
+	VAPIDPublicKey  string // VAPID_PUBLIC_KEY env — base64url EC P-256 public key
+	VAPIDPrivateKey string `json:"-"` // VAPID_PRIVATE_KEY env — base64url EC P-256 private key; NEVER log, NEVER return in any response
+	VAPIDSubject    string // VAPID_SUBJECT env — contact URI e.g. mailto:ops@barberbase.in
 }
 
 func Load() (*Config, error) {
@@ -74,6 +78,21 @@ func Load() (*Config, error) {
 
 	platformAdminKey := os.Getenv("PLATFORM_ADMIN_KEY")
 
+	vapidPublicKey := os.Getenv("VAPID_PUBLIC_KEY")
+	if vapidPublicKey == "" {
+		return nil, fmt.Errorf("VAPID_PUBLIC_KEY required")
+	}
+
+	vapidPrivateKey := os.Getenv("VAPID_PRIVATE_KEY")
+	if vapidPrivateKey == "" {
+		return nil, fmt.Errorf("VAPID_PRIVATE_KEY required")
+	}
+
+	vapidSubject := os.Getenv("VAPID_SUBJECT")
+	if vapidSubject == "" {
+		return nil, fmt.Errorf("VAPID_SUBJECT required")
+	}
+
 	return &Config{
 		DatabaseURL:      dbURL,
 		JWTSecret:        jwtSecret,
@@ -81,8 +100,11 @@ func Load() (*Config, error) {
 		AESEncryptionKey: aesKey,
 		Environment:      env,
 		Port:             port,
-		BhejnaAPIKey:    bhejnaAPIKey,
-		BhejnaFromPhone: bhejnaFromPhone,
+		BhejnaAPIKey:     bhejnaAPIKey,
+		BhejnaFromPhone:  bhejnaFromPhone,
 		PlatformAdminKey: platformAdminKey,
+		VAPIDPublicKey:   vapidPublicKey,
+		VAPIDPrivateKey:  vapidPrivateKey,
+		VAPIDSubject:     vapidSubject,
 	}, nil
 }

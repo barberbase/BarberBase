@@ -33,6 +33,9 @@ func main() {
 	// 1. Load configuration
 	cfg, err := config.Load()
 	if err != nil {
+		if err.Error() == "VAPID_PUBLIC_KEY required" || err.Error() == "VAPID_PRIVATE_KEY required" || err.Error() == "VAPID_SUBJECT required" {
+			log.Fatal(err.Error())
+		}
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 	if cfg.PlatformAdminKey == "" {
