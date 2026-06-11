@@ -36,15 +36,9 @@ func setupCallNextTestServer(t *testing.T) (*Server, *pgxpool.Pool, uuid.UUID, u
 	err = repository.Migrate(ctx, pool, "../../migrations/001_complete_schema.sql")
 	require.NoError(t, err)
 
-	// Clean tables in correct dependency order
-	_, _ = pool.Exec(ctx, "DELETE FROM outbox_events")
-	_, _ = pool.Exec(ctx, "DELETE FROM queue_entries")
-	_, _ = pool.Exec(ctx, "DELETE FROM visits")
-	_, _ = pool.Exec(ctx, "DELETE FROM customers")
-	_, _ = pool.Exec(ctx, "DELETE FROM queue_sessions")
-	_, _ = pool.Exec(ctx, "DELETE FROM staff_members")
-	_, _ = pool.Exec(ctx, "DELETE FROM locations")
-	_, _ = pool.Exec(ctx, "DELETE FROM tenants")
+	// Clean tables using TRUNCATE CASCADE to prevent foreign key constraint failures
+	_, err = pool.Exec(ctx, "TRUNCATE tenants, locations, staff_members, queue_sessions, queue_entries, customers, visits, outbox_events, webhook_events, staff_otps, visit_charges CASCADE")
+	require.NoError(t, err)
 
 	// Seed tenant, location, and staff members (Barber A and Barber B)
 	tenantID := uuid.New()

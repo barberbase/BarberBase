@@ -297,3 +297,36 @@ func TestBhejnaClient_ErrorTaxonomy(t *testing.T) {
 		})
 	}
 }
+
+func TestAESGCMRoundTrip(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef") // 32 bytes
+	plaintext := "my-secret-payload-12345"
+
+	// Test successful round-trip
+	encrypted, err := AESGCMEncrypt(plaintext, key)
+	if err != nil {
+		t.Fatalf("AESGCMEncrypt failed: %v", err)
+	}
+
+	decrypted, err := AESGCMDecrypt(encrypted, key)
+	if err != nil {
+		t.Fatalf("AESGCMDecrypt failed: %v", err)
+	}
+
+	if decrypted != plaintext {
+		t.Errorf("Expected decrypted text to equal plaintext, got %q, expected %q", decrypted, plaintext)
+	}
+
+	// Test invalid key size
+	invalidKey := []byte("too-short")
+	_, err = AESGCMEncrypt(plaintext, invalidKey)
+	if err == nil {
+		t.Error("Expected error when encrypting with invalid key size, got nil")
+	}
+
+	_, err = AESGCMDecrypt(encrypted, invalidKey)
+	if err == nil {
+		t.Error("Expected error when decrypting with invalid key size, got nil")
+	}
+}
+

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"barberbase-core/internal/auth"
+	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/config"
 	"barberbase-core/internal/repository"
 
@@ -748,4 +749,357 @@ func TestProvisionTenant_Integration(t *testing.T) {
 		require.Equal(t, "INVALID_LOCATION_SLUG", errResp["code"])
 	})
 }
+
+func TestConnectWhatsAppModeB_AllCases(t *testing.T) {
+	s, pool, tenantID, locationID, staffID, _ := setupAdminTestServer(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	// 1. Role Gate check (barber -> 403)
+	{
+		body := ConnectWhatsAppModeBJSONBody{
+			BhejnaConfigVersion: "1",
+			PhoneNumber:         "+919876543210",
+			ApiKey:              "key-123",
+			WebhookSecret:       "secret-123",
+			WhatsappStatus:      "ACTIVE",
+		}
+		jsonBody, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/locations/%s/whatsapp/connect", locationID), bytes.NewReader(jsonBody))
+		ctxReq := req.Context()
+		ctxReq = context.WithValue(ctxReq, auth.CtxTenantID, tenantID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxLocationID, locationID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxStaffMemberID, staffID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxRole, "barber") // Role is barber
+		req = req.WithContext(ctxReq)
+
+		rec := httptest.NewRecorder()
+		s.ConnectWhatsAppModeB(rec, req, locationID)
+		require.Equal(t, http.StatusForbidden, rec.Code)
+	}
+
+	// 2. Field Validation checks
+	validationTests := []struct {
+		name         string
+		body         map[string]interface{}
+		expectedCode string
+	}{
+		{
+			name: "Unsupported config version",
+			body: map[string]interface{}{
+				"bhejna_config_version": "2",
+				"phone_number":          "+919876543210",
+				"api_key":               "key-123",
+				"webhook_secret":        "secret-123",
+				"whatsapp_status":       "ACTIVE",
+			},
+			expectedCode: "unsupported_config_version",
+		},
+		{
+			name: "WhatsApp status not active",
+			body: map[string]interface{}{
+				"bhejna_config_version": "1",
+				"phone_number":          "+919876543210",
+				"api_key":               "key-123",
+				"webhook_secret":        "secret-123",
+				"whatsapp_status":       "PENDING",
+			},
+			expectedCode: "whatsapp_not_active",
+		},
+		{
+			name: "Quality rating RED rejected",
+			body: map[string]interface{}{
+				"bhejna_config_version": "1",
+				"phone_number":          "+919876543210",
+				"api_key":               "key-123",
+				"webhook_secret":        "secret-123",
+				"whatsapp_status":       "ACTIVE",
+				"quality_rating":        "RED",
+			},
+			expectedCode: "quality_rating_red",
+		},
+		{
+			name: "Invalid phone E.164",
+			body: map[string]interface{}{
+				"bhejna_config_version": "1",
+				"phone_number":          "9876543210", // missing +
+				"api_key":               "key-123",
+				"webhook_secret":        "secret-123",
+				"whatsapp_status":       "ACTIVE",
+			},
+			expectedCode: "invalid_phone_number",
+		},
+		{
+			name: "Missing api key",
+			body: map[string]interface{}{
+				"bhejna_config_version": "1",
+				"phone_number":          "+919876543210",
+				"api_key":               "",
+				"webhook_secret":        "secret-123",
+				"whatsapp_status":       "ACTIVE",
+			},
+			expectedCode: "missing_api_key",
+		},
+		{
+			name: "Missing webhook secret",
+			body: map[string]interface{}{
+				"bhejna_config_version": "1",
+				"phone_number":          "+919876543210",
+				"api_key":               "key-123",
+				"webhook_secret":        "",
+				"whatsapp_status":       "ACTIVE",
+			},
+			expectedCode: "missing_webhook_secret",
+		},
+	}
+
+	for _, vt := range validationTests {
+		t.Run(vt.name, func(t *testing.T) {
+			jsonBody, _ := json.Marshal(vt.body)
+			req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/locations/%s/whatsapp/connect", locationID), bytes.NewReader(jsonBody))
+			ctxReq := req.Context()
+			ctxReq = context.WithValue(ctxReq, auth.CtxTenantID, tenantID.String())
+			ctxReq = context.WithValue(ctxReq, auth.CtxLocationID, locationID.String())
+			ctxReq = context.WithValue(ctxReq, auth.CtxStaffMemberID, staffID.String())
+			ctxReq = context.WithValue(ctxReq, auth.CtxRole, "owner")
+			req = req.WithContext(ctxReq)
+
+			rec := httptest.NewRecorder()
+			s.ConnectWhatsAppModeB(rec, req, locationID)
+			require.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+
+			var errResp ErrorResponse
+			err := json.Unmarshal(rec.Body.Bytes(), &errResp)
+			require.NoError(t, err)
+			require.Equal(t, vt.expectedCode, errResp.Code)
+		})
+	}
+
+	// 3. Test-send simulation and credentials check
+	t.Run("Credential validation status codes", func(t *testing.T) {
+		mockBhejnaStatuses := []struct {
+			httpStatus   int
+			expectedCode string
+			shouldPass   bool
+		}{
+			{httpStatus: http.StatusUnauthorized, expectedCode: "bhejna_auth_failed", shouldPass: false},
+			{httpStatus: http.StatusForbidden, expectedCode: "bhejna_auth_failed", shouldPass: false},
+			{httpStatus: http.StatusInternalServerError, expectedCode: "bhejna_unreachable", shouldPass: false},
+			{httpStatus: http.StatusNotFound, shouldPass: true}, // treated as pass (Known Limitation)
+			{httpStatus: http.StatusOK, shouldPass: true},
+		}
+
+		for _, mockCase := range mockBhejnaStatuses {
+			// Spin up mock server
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(mockCase.httpStatus)
+			}))
+
+			originalURL := os.Getenv("BHEJNA_API_URL")
+			os.Setenv("BHEJNA_API_URL", ts.URL)
+
+			body := ConnectWhatsAppModeBJSONBody{
+				BhejnaConfigVersion: "1",
+				PhoneNumber:         "+919876543210",
+				ApiKey:              "mock-key",
+				WebhookSecret:       "mock-secret",
+				WhatsappStatus:      "ACTIVE",
+			}
+			jsonBody, _ := json.Marshal(body)
+			req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/locations/%s/whatsapp/connect", locationID), bytes.NewReader(jsonBody))
+			ctxReq := req.Context()
+			ctxReq = context.WithValue(ctxReq, auth.CtxTenantID, tenantID.String())
+			ctxReq = context.WithValue(ctxReq, auth.CtxLocationID, locationID.String())
+			ctxReq = context.WithValue(ctxReq, auth.CtxStaffMemberID, staffID.String())
+			ctxReq = context.WithValue(ctxReq, auth.CtxRole, "owner")
+			req = req.WithContext(ctxReq)
+
+			rec := httptest.NewRecorder()
+			s.ConnectWhatsAppModeB(rec, req, locationID)
+
+			if mockCase.shouldPass {
+				require.Equal(t, http.StatusOK, rec.Code)
+			} else {
+				require.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+				var errResp ErrorResponse
+				_ = json.Unmarshal(rec.Body.Bytes(), &errResp)
+				require.Equal(t, mockCase.expectedCode, errResp.Code)
+			}
+
+			ts.Close()
+			if originalURL != "" {
+				os.Setenv("BHEJNA_API_URL", originalURL)
+			} else {
+				os.Unsetenv("BHEJNA_API_URL")
+			}
+		}
+	})
+
+	// 4. Successful connect (stored key round-trip & DB check)
+	t.Run("Successful connection and encryption round-trip", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer ts.Close()
+
+		originalURL := os.Getenv("BHEJNA_API_URL")
+		os.Setenv("BHEJNA_API_URL", ts.URL)
+		defer func() {
+			if originalURL != "" {
+				os.Setenv("BHEJNA_API_URL", originalURL)
+			} else {
+				os.Unsetenv("BHEJNA_API_URL")
+			}
+		}()
+
+		body := ConnectWhatsAppModeBJSONBody{
+			BhejnaConfigVersion: "1",
+			PhoneNumber:         "+919876543219",
+			ApiKey:              "my-bhejna-api-key",
+			WebhookSecret:       "my-bhejna-webhook-secret",
+			WhatsappStatus:      "ACTIVE",
+			QualityRating:       &[]string{"GREEN"}[0],
+		}
+		jsonBody, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/locations/%s/whatsapp/connect", locationID), bytes.NewReader(jsonBody))
+		ctxReq := req.Context()
+		ctxReq = context.WithValue(ctxReq, auth.CtxTenantID, tenantID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxLocationID, locationID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxStaffMemberID, staffID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxRole, "owner")
+		req = req.WithContext(ctxReq)
+
+		rec := httptest.NewRecorder()
+		s.ConnectWhatsAppModeB(rec, req, locationID)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var resp map[string]interface{}
+		err := json.Unmarshal(rec.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		require.Equal(t, "own_number", resp["whatsapp_mode"])
+		require.Equal(t, "https://api.barberbase.in/v1/webhooks/bhejna/loc/"+locationID.String(), resp["webhook_url"])
+
+		// Verify DB row
+		var whatsappMode, businessPhone, encryptedAPIKey, encryptedWebhookSecret string
+		err = pool.QueryRow(ctx, `
+			SELECT whatsapp_mode, business_whatsapp_number, bhejna_api_key_encrypted, bhejna_webhook_secret_encrypted
+			FROM locations WHERE id = $1 AND tenant_id = $2
+		`, locationID, tenantID).Scan(&whatsappMode, &businessPhone, &encryptedAPIKey, &encryptedWebhookSecret)
+		require.NoError(t, err)
+
+		require.Equal(t, "own_number", whatsappMode)
+		require.Equal(t, "+919876543219", businessPhone)
+
+		// Decrypt keys and assert they roundtrip
+		decryptedKey, err := bhejna.AESGCMDecrypt(encryptedAPIKey, s.Config.AESEncryptionKey)
+		require.NoError(t, err)
+		require.Equal(t, "my-bhejna-api-key", decryptedKey)
+
+		decryptedSecret, err := bhejna.AESGCMDecrypt(encryptedWebhookSecret, s.Config.AESEncryptionKey)
+		require.NoError(t, err)
+		require.Equal(t, "my-bhejna-webhook-secret", decryptedSecret)
+	})
+
+	// 5. Wrong tenant or location ID connect -> 404
+	t.Run("Connect to wrong tenant location", func(t *testing.T) {
+		wrongTenantID := uuid.New()
+		body := ConnectWhatsAppModeBJSONBody{
+			BhejnaConfigVersion: "1",
+			PhoneNumber:         "+919876543210",
+			ApiKey:              "key-123",
+			WebhookSecret:       "secret-123",
+			WhatsappStatus:      "ACTIVE",
+		}
+		jsonBody, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/locations/%s/whatsapp/connect", locationID), bytes.NewReader(jsonBody))
+		ctxReq := req.Context()
+		ctxReq = context.WithValue(ctxReq, auth.CtxTenantID, wrongTenantID.String()) // wrong tenant in JWT context
+		ctxReq = context.WithValue(ctxReq, auth.CtxLocationID, locationID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxStaffMemberID, staffID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxRole, "owner")
+		req = req.WithContext(ctxReq)
+
+		rec := httptest.NewRecorder()
+		s.ConnectWhatsAppModeB(rec, req, locationID)
+		require.Equal(t, http.StatusNotFound, rec.Code)
+	})
+}
+
+func TestDisconnectWhatsAppModeB_AllCases(t *testing.T) {
+	s, pool, tenantID, locationID, staffID, _ := setupAdminTestServer(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	// Seed location to be own_number mode first
+	_, err := pool.Exec(ctx, `
+		UPDATE locations SET
+			whatsapp_mode = 'own_number',
+			business_whatsapp_number = '+919876543222',
+			bhejna_api_key_encrypted = 'some-enc-key',
+			bhejna_webhook_secret_encrypted = 'some-enc-secret'
+		WHERE id = $1 AND tenant_id = $2
+	`, locationID, tenantID)
+	require.NoError(t, err)
+
+	// 1. Role Gate check (barber -> 403)
+	{
+		req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/locations/%s/whatsapp/disconnect", locationID), nil)
+		ctxReq := req.Context()
+		ctxReq = context.WithValue(ctxReq, auth.CtxTenantID, tenantID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxLocationID, locationID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxStaffMemberID, staffID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxRole, "barber") // Role is barber
+		req = req.WithContext(ctxReq)
+
+		rec := httptest.NewRecorder()
+		s.DisconnectWhatsAppModeB(rec, req, locationID)
+		require.Equal(t, http.StatusForbidden, rec.Code)
+	}
+
+	// 2. Disconnect successful -> 204
+	{
+		req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/locations/%s/whatsapp/disconnect", locationID), nil)
+		ctxReq := req.Context()
+		ctxReq = context.WithValue(ctxReq, auth.CtxTenantID, tenantID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxLocationID, locationID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxStaffMemberID, staffID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxRole, "owner")
+		req = req.WithContext(ctxReq)
+
+		rec := httptest.NewRecorder()
+		s.DisconnectWhatsAppModeB(rec, req, locationID)
+		require.Equal(t, http.StatusNoContent, rec.Code)
+
+		// Verify DB fields cleared and reverted to shared
+		var whatsappMode string
+		var businessPhone, encryptedAPIKey, encryptedWebhookSecret *string
+		err = pool.QueryRow(ctx, `
+			SELECT whatsapp_mode, business_whatsapp_number, bhejna_api_key_encrypted, bhejna_webhook_secret_encrypted
+			FROM locations WHERE id = $1 AND tenant_id = $2
+		`, locationID, tenantID).Scan(&whatsappMode, &businessPhone, &encryptedAPIKey, &encryptedWebhookSecret)
+		require.NoError(t, err)
+
+		require.Equal(t, "shared", whatsappMode)
+		require.Nil(t, businessPhone)
+		require.Nil(t, encryptedAPIKey)
+		require.Nil(t, encryptedWebhookSecret)
+	}
+
+	// 3. Disconnect wrong tenant -> 404
+	{
+		wrongTenantID := uuid.New()
+		req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/locations/%s/whatsapp/disconnect", locationID), nil)
+		ctxReq := req.Context()
+		ctxReq = context.WithValue(ctxReq, auth.CtxTenantID, wrongTenantID.String()) // wrong tenant in context
+		ctxReq = context.WithValue(ctxReq, auth.CtxLocationID, locationID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxStaffMemberID, staffID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxRole, "owner")
+		req = req.WithContext(ctxReq)
+
+		rec := httptest.NewRecorder()
+		s.DisconnectWhatsAppModeB(rec, req, locationID)
+		require.Equal(t, http.StatusNotFound, rec.Code)
+	}
+}
+
 

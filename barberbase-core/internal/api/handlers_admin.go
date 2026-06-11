@@ -1,16 +1,20 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"barberbase-core/internal/auth"
+	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/repository"
 
 	"github.com/google/uuid"
@@ -621,4 +625,182 @@ func (s *Server) ProvisionTenant(w http.ResponseWriter, r *http.Request) {
 	}
 	respondAdminJSON(w, http.StatusCreated, resp)
 }
+
+// ConnectWhatsAppModeB connects a shop's own WABA
+func (s *Server) ConnectWhatsAppModeB(w http.ResponseWriter, r *http.Request, locationId UUIDv7) {
+	ctx := r.Context()
+
+	// 1. Auth & Role Gate
+	role := auth.RoleFromCtx(ctx)
+	if role != "owner" && role != "manager" {
+		respondAdminJSON(w, http.StatusForbidden, ErrorResponse{Code: "FORBIDDEN", Message: "insufficient role"})
+		return
+	}
+
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondAdminJSON(w, http.StatusForbidden, ErrorResponse{Code: "FORBIDDEN", Message: "insufficient role"})
+		return
+	}
+
+	// 2. Parse request body
+	var body ConnectWhatsAppModeBJSONBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondAdminJSON(w, http.StatusBadRequest, ErrorResponse{Code: "INVALID_REQUEST", Message: "invalid JSON body"})
+		return
+	}
+
+	// Validate fields
+	if body.BhejnaConfigVersion != "1" {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, ErrorResponse{
+			Code:    "unsupported_config_version",
+			Message: "bhejna_config_version must be \"1\"",
+		})
+		return
+	}
+	if body.WhatsappStatus != "ACTIVE" {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, ErrorResponse{
+			Code:    "whatsapp_not_active",
+			Message: "whatsapp_status must be ACTIVE",
+		})
+		return
+	}
+	if body.QualityRating != nil && *body.QualityRating == "RED" {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, ErrorResponse{
+			Code:    "quality_rating_red",
+			Message: "quality rating must not be RED",
+		})
+		return
+	}
+
+	phoneRegex := regexp.MustCompile(`^\+[1-9]\d{9,14}$`)
+	if !phoneRegex.MatchString(string(body.PhoneNumber)) {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, ErrorResponse{
+			Code:    "invalid_phone_number",
+			Message: "phone_number must be E.164",
+		})
+		return
+	}
+	if body.ApiKey == "" {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, ErrorResponse{
+			Code:    "missing_api_key",
+			Message: "api_key is required",
+		})
+		return
+	}
+	if body.WebhookSecret == "" {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, ErrorResponse{
+			Code:    "missing_webhook_secret",
+			Message: "webhook_secret is required",
+		})
+		return
+	}
+
+	// 3. Test-send (credential validation)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	bhejnaAPIURL := os.Getenv("BHEJNA_API_URL")
+	if bhejnaAPIURL == "" {
+		bhejnaAPIURL = "https://bhejna-api.codenxtlab.tech"
+	}
+	reqURL := bhejnaAPIURL + "/v1/account"
+	req, err := http.NewRequestWithContext(timeoutCtx, "GET", reqURL, nil)
+	if err != nil {
+		respondAdminJSON(w, http.StatusInternalServerError, ErrorResponse{Code: "INTERNAL_ERROR", Message: "failed to create test-send request"})
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+body.ApiKey)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, ErrorResponse{
+			Code:    "bhejna_unreachable",
+			Message: "Could not reach Bhejna API",
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, ErrorResponse{
+			Code:    "bhejna_auth_failed",
+			Message: "Bhejna API key is invalid",
+		})
+		return
+	}
+	if resp.StatusCode >= 500 {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, ErrorResponse{
+			Code:    "bhejna_unreachable",
+			Message: "Could not reach Bhejna API",
+		})
+		return
+	}
+
+	// 4. AES-256-GCM encrypt
+	encryptedKey, err := bhejna.AESGCMEncrypt(body.ApiKey, s.Config.AESEncryptionKey)
+	if err != nil {
+		respondAdminJSON(w, http.StatusInternalServerError, ErrorResponse{Code: "INTERNAL_ERROR", Message: "encryption failed"})
+		return
+	}
+	encryptedSecret, err := bhejna.AESGCMEncrypt(body.WebhookSecret, s.Config.AESEncryptionKey)
+	if err != nil {
+		respondAdminJSON(w, http.StatusInternalServerError, ErrorResponse{Code: "INTERNAL_ERROR", Message: "encryption failed"})
+		return
+	}
+
+	// 5. Repository update
+	err = repository.ConnectModeBWhatsApp(ctx, s.Pool, uuid.UUID(locationId), tenantID, string(body.PhoneNumber), encryptedKey, encryptedSecret)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			respondAdminJSON(w, http.StatusNotFound, ErrorResponse{Code: "NOT_FOUND", Message: "location not found or wrong tenant"})
+			return
+		}
+		log.Printf("[Error] ConnectModeBWhatsApp failed: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, ErrorResponse{Code: "INTERNAL_ERROR", Message: "internal server error"})
+		return
+	}
+
+	// 6. Return response
+	webhookURL := "https://api.barberbase.in/v1/webhooks/bhejna/loc/" + locationId.String()
+	respondAdminJSON(w, http.StatusOK, map[string]interface{}{
+		"whatsapp_mode": "own_number",
+		"webhook_url":   webhookURL,
+	})
+}
+
+// DisconnectWhatsAppModeB disconnects a shop's WABA and reverts to shared platform mode
+func (s *Server) DisconnectWhatsAppModeB(w http.ResponseWriter, r *http.Request, locationId UUIDv7) {
+	ctx := r.Context()
+
+	// Role Gate
+	role := auth.RoleFromCtx(ctx)
+	if role != "owner" && role != "manager" {
+		respondAdminJSON(w, http.StatusForbidden, ErrorResponse{Code: "FORBIDDEN", Message: "insufficient role"})
+		return
+	}
+
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondAdminJSON(w, http.StatusForbidden, ErrorResponse{Code: "FORBIDDEN", Message: "insufficient role"})
+		return
+	}
+
+	err = repository.DisconnectModeBWhatsApp(ctx, s.Pool, uuid.UUID(locationId), tenantID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			respondAdminJSON(w, http.StatusNotFound, ErrorResponse{Code: "NOT_FOUND", Message: "location not found or wrong tenant"})
+			return
+		}
+		log.Printf("[Error] DisconnectModeBWhatsApp failed: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, ErrorResponse{Code: "INTERNAL_ERROR", Message: "internal server error"})
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 

@@ -446,6 +446,7 @@ var (
 	ErrTenantSlugConflict   = errors.New("tenant_slug_conflict")
 	ErrLocationSlugConflict = errors.New("location_slug_conflict")
 	ErrOwnerPhoneConflict   = errors.New("owner_phone_conflict")
+	ErrNotFound             = pgx.ErrNoRows
 )
 
 type ProvisionTenantParams struct {
@@ -527,3 +528,97 @@ func ProvisionTenant(ctx context.Context, pool *pgxpool.Pool, p ProvisionTenantP
 
 	return res, nil
 }
+
+// ConnectModeBWhatsApp atomically updates the location's Mode B columns.
+// Verifies location belongs to tenantID before updating (multi-tenant safety).
+func ConnectModeBWhatsApp(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	locationID uuid.UUID,
+	tenantID   uuid.UUID,
+	phone      string,
+	encryptedAPIKey      string,
+	encryptedWebhookSecret string,
+) error {
+	query := `
+		UPDATE locations SET
+			whatsapp_mode                   = 'own_number',
+			business_whatsapp_number        = $3,
+			bhejna_api_key_encrypted        = $4,
+			bhejna_webhook_secret_encrypted = $5,
+			updated_at                      = NOW()
+		WHERE id = $1 AND tenant_id = $2 AND is_active = true
+	`
+	cmdTag, err := pool.Exec(ctx, query, locationID, tenantID, phone, encryptedAPIKey, encryptedWebhookSecret)
+	if err != nil {
+		return err
+	}
+	if cmdTag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DisconnectModeBWhatsApp reverts the location to shared platform mode.
+func DisconnectModeBWhatsApp(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	locationID uuid.UUID,
+	tenantID   uuid.UUID,
+) error {
+	query := `
+		UPDATE locations SET
+			whatsapp_mode                   = 'shared',
+			business_whatsapp_number        = NULL,
+			bhejna_api_key_encrypted        = NULL,
+			bhejna_webhook_secret_encrypted = NULL,
+			updated_at                      = NOW()
+		WHERE id = $1 AND tenant_id = $2 AND is_active = true
+	`
+	cmdTag, err := pool.Exec(ctx, query, locationID, tenantID)
+	if err != nil {
+		return err
+	}
+	if cmdTag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// LocationModeBWebhookConfig fetches only what the Mode B webhook handler needs.
+type LocationModeBWebhookConfig struct {
+	TenantID                     uuid.UUID
+	BhejnaWebhookSecretEncrypted string
+}
+
+// GetLocationForModeBWebhook fetches only what the Mode B webhook handler needs.
+// NO tenant filter — this is called from a path that has no JWT.
+// Returns error (NotFound variant) if:
+//   - location does not exist
+//   - is_active = false
+//   - whatsapp_mode != 'own_number'
+//   - bhejna_webhook_secret_encrypted IS NULL
+func GetLocationForModeBWebhook(
+	ctx  context.Context,
+	pool *pgxpool.Pool,
+	locationID uuid.UUID,
+) (LocationModeBWebhookConfig, error) {
+	query := `
+		SELECT tenant_id, bhejna_webhook_secret_encrypted
+		FROM locations
+		WHERE id = $1
+		  AND is_active = true
+		  AND whatsapp_mode = 'own_number'
+		  AND bhejna_webhook_secret_encrypted IS NOT NULL
+	`
+	var cfg LocationModeBWebhookConfig
+	err := pool.QueryRow(ctx, query, locationID).Scan(&cfg.TenantID, &cfg.BhejnaWebhookSecretEncrypted)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return LocationModeBWebhookConfig{}, ErrNotFound
+		}
+		return LocationModeBWebhookConfig{}, err
+	}
+	return cfg, nil
+}
+

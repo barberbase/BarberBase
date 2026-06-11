@@ -324,3 +324,30 @@ func EncryptAESGCM(plaintext string, key []byte) (string, error) {
 	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
+
+// AESGCMEncrypt encrypts a plaintext string with a 32-byte key using AES-256-GCM
+func AESGCMEncrypt(plaintext string, key []byte) (string, error) {
+	if len(key) != 32 {
+		return "", errors.New("key must be exactly 32 bytes")
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return base64.StdEncoding.EncodeToString(ciphertext), nil
+}
+
+// AESGCMDecrypt decrypts a ciphertext string with a 32-byte key using AES-256-GCM
+func AESGCMDecrypt(ciphertext string, key []byte) (string, error) {
+	return DecryptAESGCM(ciphertext, key)
+}
+
