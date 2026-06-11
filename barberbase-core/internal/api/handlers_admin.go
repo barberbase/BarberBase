@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"barberbase-core/internal/auth"
 	"barberbase-core/internal/repository"
@@ -344,3 +346,89 @@ func (s *Server) UpdateServiceVariant(w http.ResponseWriter, r *http.Request, lo
 
 	respondAdminJSON(w, http.StatusOK, resp)
 }
+
+// CreateStaffMember adds a new staff member
+func (s *Server) CreateStaffMember(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// 1. Extract JWT claims from context
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondAdminJSON(w, http.StatusForbidden, map[string]string{"code": "FORBIDDEN", "message": "insufficient role"})
+		return
+	}
+
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondAdminJSON(w, http.StatusForbidden, map[string]string{"code": "FORBIDDEN", "message": "insufficient role"})
+		return
+	}
+
+	callerRole := auth.RoleFromCtx(ctx)
+
+	// 2. Role Gate: barber role is forbidden
+	if callerRole == "barber" {
+		respondAdminJSON(w, http.StatusForbidden, map[string]string{"code": "FORBIDDEN", "message": "insufficient role"})
+		return
+	}
+
+	// 3. Decode JSON request body
+	var body CreateStaffMemberJSONBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondAdminJSON(w, http.StatusBadRequest, map[string]string{"code": "INVALID_REQUEST", "message": "invalid JSON body"})
+		return
+	}
+
+	// 4. Validate required fields are not empty/missing
+	if body.Name == "" || body.PhoneNumber == "" || body.Role == "" {
+		respondAdminJSON(w, http.StatusBadRequest, map[string]string{"code": "INVALID_REQUEST", "message": "missing or empty required fields: name, phone_number, role"})
+		return
+	}
+
+	// 5. Validate phone number matches E.164 pattern
+	phoneRegex := regexp.MustCompile(`^\+[1-9]\d{1,14}$`)
+	if !phoneRegex.MatchString(string(body.PhoneNumber)) {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": "INVALID_PHONE", "message": "phone_number must be E.164"})
+		return
+	}
+
+	// 6. Validate role is exactly "manager" or "barber"
+	roleStr := string(body.Role)
+	if roleStr != "manager" && roleStr != "barber" {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": "INVALID_ROLE", "message": "role must be manager or barber"})
+		return
+	}
+
+	// 7. Validate name is non-empty after strings.TrimSpace and len <= 100
+	trimmedName := strings.TrimSpace(body.Name)
+	if trimmedName == "" || len(trimmedName) > 100 {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": "INVALID_NAME", "message": "name must be non-empty and less than or equal to 100 characters"})
+		return
+	}
+
+	// 8. Insert staff member via repository
+	insertParams := repository.InsertStaffMemberParams{
+		TenantID:    tenantID,
+		LocationID:  locationID,
+		Name:        trimmedName,
+		PhoneNumber: string(body.PhoneNumber),
+		Role:        roleStr,
+	}
+
+	_, err = repository.InsertStaffMember(ctx, s.Pool, insertParams)
+	if err != nil {
+		if errors.Is(err, repository.ErrPhoneAlreadyExists) {
+			respondAdminJSON(w, http.StatusConflict, map[string]string{"code": "PHONE_ALREADY_EXISTS", "message": "A staff member with this phone number already exists"})
+			return
+		}
+		log.Printf("[Error] InsertStaffMember failed: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_SERVER_ERROR", "message": "internal server error"})
+		return
+	}
+
+	// 9. Success response with 201 Created and no body
+	w.WriteHeader(http.StatusCreated)
+}
+

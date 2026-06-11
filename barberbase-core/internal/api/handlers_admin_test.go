@@ -288,3 +288,171 @@ func TestAdminServices_UpdateVariant_PATCH_Validation_And_Immutability(t *testin
 		t.Errorf("Expected booking rules to remain unchanged (true, true, false), got (%t, %t, %t)", allowWalkIn, allowAppt, reqAppt)
 	}
 }
+
+func TestCreateStaffMember_Integration(t *testing.T) {
+	s, pool, tenantID, locationID, staffID, _ := setupAdminTestServer(t)
+	defer pool.Close()
+
+	// 1. request-otp with a phone never inserted → 401 (validates no self-registration)
+	{
+		otpBody := RequestStaffOTPJSONBody{
+			PhoneNumber: "+919876543210",
+		}
+		otpBodyBytes, _ := json.Marshal(otpBody)
+		reqOTP := httptest.NewRequest(http.MethodPost, "/auth/staff/request-otp", bytes.NewReader(otpBodyBytes))
+		recOTP := httptest.NewRecorder()
+		s.RequestStaffOTP(recOTP, reqOTP)
+		if recOTP.Code != http.StatusUnauthorized {
+			t.Fatalf("Expected 401 Unauthorized for unregistered phone, got %d. Body: %s", recOTP.Code, recOTP.Body.String())
+		}
+	}
+
+	// 2. Insert via CreateStaffMember, then request-otp with that phone → 200
+	{
+		createBody := CreateStaffMemberJSONRequestBody{
+			Name:        "Test Staff Member",
+			PhoneNumber: "+919876543210",
+			Role:        CreateStaffMemberJSONBodyRoleBarber,
+		}
+		createBodyBytes, _ := json.Marshal(createBody)
+		reqCreate := httptest.NewRequest(http.MethodPost, "/admin/staff", bytes.NewReader(createBodyBytes))
+		ctxCreate := reqCreate.Context()
+		ctxCreate = context.WithValue(ctxCreate, auth.CtxTenantID, tenantID.String())
+		ctxCreate = context.WithValue(ctxCreate, auth.CtxLocationID, locationID.String())
+		ctxCreate = context.WithValue(ctxCreate, auth.CtxStaffMemberID, staffID.String())
+		ctxCreate = context.WithValue(ctxCreate, auth.CtxRole, "manager")
+		reqCreate = reqCreate.WithContext(ctxCreate)
+
+		recCreate := httptest.NewRecorder()
+		s.CreateStaffMember(recCreate, reqCreate)
+		if recCreate.Code != http.StatusCreated {
+			t.Fatalf("Expected 201 Created for staff creation, got %d, body: %s", recCreate.Code, recCreate.Body.String())
+		}
+
+		otpBody := RequestStaffOTPJSONBody{
+			PhoneNumber: "+919876543210",
+		}
+		otpBodyBytes, _ := json.Marshal(otpBody)
+		reqOTP2 := httptest.NewRequest(http.MethodPost, "/auth/staff/request-otp", bytes.NewReader(otpBodyBytes))
+		recOTP2 := httptest.NewRecorder()
+		s.RequestStaffOTP(recOTP2, reqOTP2)
+		if recOTP2.Code != http.StatusOK {
+			t.Fatalf("Expected 200 OK for registered phone, got %d, body: %s", recOTP2.Code, recOTP2.Body.String())
+		}
+	}
+
+	// 3. Duplicate phone on second create → 409
+	{
+		createBody := CreateStaffMemberJSONRequestBody{
+			Name:        "Another Staff",
+			PhoneNumber: "+919876543210", // duplicate phone
+			Role:        CreateStaffMemberJSONBodyRoleBarber,
+		}
+		createBodyBytes, _ := json.Marshal(createBody)
+		reqDup := httptest.NewRequest(http.MethodPost, "/admin/staff", bytes.NewReader(createBodyBytes))
+		ctxDup := reqDup.Context()
+		ctxDup = context.WithValue(ctxDup, auth.CtxTenantID, tenantID.String())
+		ctxDup = context.WithValue(ctxDup, auth.CtxLocationID, locationID.String())
+		ctxDup = context.WithValue(ctxDup, auth.CtxStaffMemberID, staffID.String())
+		ctxDup = context.WithValue(ctxDup, auth.CtxRole, "manager")
+		reqDup = reqDup.WithContext(ctxDup)
+
+		recDup := httptest.NewRecorder()
+		s.CreateStaffMember(recDup, reqDup)
+		if recDup.Code != http.StatusConflict {
+			t.Fatalf("Expected 409 Conflict for duplicate phone, got %d, body: %s", recDup.Code, recDup.Body.String())
+		}
+
+		var errResp map[string]interface{}
+		_ = json.Unmarshal(recDup.Body.Bytes(), &errResp)
+		if errResp["code"] != "PHONE_ALREADY_EXISTS" {
+			t.Fatalf("Expected error code PHONE_ALREADY_EXISTS, got %v", errResp["code"])
+		}
+	}
+
+	// 4. barber role JWT → 403 on create attempt
+	{
+		createBody := CreateStaffMemberJSONRequestBody{
+			Name:        "Barber Created Staff",
+			PhoneNumber: "+919876543211",
+			Role:        CreateStaffMemberJSONBodyRoleBarber,
+		}
+		createBodyBytes, _ := json.Marshal(createBody)
+		reqBarber := httptest.NewRequest(http.MethodPost, "/admin/staff", bytes.NewReader(createBodyBytes))
+		ctxBarber := reqBarber.Context()
+		ctxBarber = context.WithValue(ctxBarber, auth.CtxTenantID, tenantID.String())
+		ctxBarber = context.WithValue(ctxBarber, auth.CtxLocationID, locationID.String())
+		ctxBarber = context.WithValue(ctxBarber, auth.CtxStaffMemberID, staffID.String())
+		ctxBarber = context.WithValue(ctxBarber, auth.CtxRole, "barber") // Role is barber
+		reqBarber = reqBarber.WithContext(ctxBarber)
+
+		recBarber := httptest.NewRecorder()
+		s.CreateStaffMember(recBarber, reqBarber)
+		if recBarber.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for barber role, got %d, body: %s", recBarber.Code, recBarber.Body.String())
+		}
+	}
+
+	// 5. Body-supplied tenant_id has no effect; inserted row uses JWT tenant_id
+	{
+		bodyWithFakeTenant := map[string]interface{}{
+			"name":         "Ignored Tenant Staff",
+			"phone_number": "+919876543212",
+			"role":         "barber",
+			"tenant_id":    uuid.New().String(), // Supplying fake tenant_id
+		}
+		bodyWithFakeTenantBytes, _ := json.Marshal(bodyWithFakeTenant)
+		reqFake := httptest.NewRequest(http.MethodPost, "/admin/staff", bytes.NewReader(bodyWithFakeTenantBytes))
+		ctxFake := reqFake.Context()
+		ctxFake = context.WithValue(ctxFake, auth.CtxTenantID, tenantID.String()) // JWT has correct tenantID
+		ctxFake = context.WithValue(ctxFake, auth.CtxLocationID, locationID.String())
+		ctxFake = context.WithValue(ctxFake, auth.CtxStaffMemberID, staffID.String())
+		ctxFake = context.WithValue(ctxFake, auth.CtxRole, "owner")
+		reqFake = reqFake.WithContext(ctxFake)
+
+		recFake := httptest.NewRecorder()
+		s.CreateStaffMember(recFake, reqFake)
+		if recFake.Code != http.StatusCreated {
+			t.Fatalf("Expected 201 Created, got %d", recFake.Code)
+		}
+
+		var dbTenantID uuid.UUID
+		err := pool.QueryRow(context.Background(), "SELECT tenant_id FROM staff_members WHERE phone_number = $1", "+919876543212").Scan(&dbTenantID)
+		if err != nil {
+			t.Fatalf("Failed to query inserted staff member's tenant_id: %v", err)
+		}
+		if dbTenantID != tenantID {
+			t.Fatalf("Expected staff member tenant_id to be %s (from JWT), got %s", tenantID, dbTenantID)
+		}
+	}
+
+	// 6. Role values owner and anything outside [manager, barber] in the request body → 422
+	{
+		bodyOwner := map[string]interface{}{
+			"name":         "Invalid Role Staff",
+			"phone_number": "+919876543213",
+			"role":         "owner", // Role is owner
+		}
+		bodyOwnerBytes, _ := json.Marshal(bodyOwner)
+		reqOwner := httptest.NewRequest(http.MethodPost, "/admin/staff", bytes.NewReader(bodyOwnerBytes))
+		ctxOwner := reqOwner.Context()
+		ctxOwner = context.WithValue(ctxOwner, auth.CtxTenantID, tenantID.String())
+		ctxOwner = context.WithValue(ctxOwner, auth.CtxLocationID, locationID.String())
+		ctxOwner = context.WithValue(ctxOwner, auth.CtxStaffMemberID, staffID.String())
+		ctxOwner = context.WithValue(ctxOwner, auth.CtxRole, "manager")
+		reqOwner = reqOwner.WithContext(ctxOwner)
+
+		recOwner := httptest.NewRecorder()
+		s.CreateStaffMember(recOwner, reqOwner)
+		if recOwner.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("Expected 422 Unprocessable Entity for role 'owner', got %d", recOwner.Code)
+		}
+
+		var errResp map[string]interface{}
+		_ = json.Unmarshal(recOwner.Body.Bytes(), &errResp)
+		if errResp["code"] != "INVALID_ROLE" {
+			t.Fatalf("Expected error code INVALID_ROLE, got %v", errResp["code"])
+		}
+	}
+}
+
