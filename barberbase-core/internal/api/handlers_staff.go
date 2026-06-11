@@ -614,13 +614,6 @@ func (s *Server) UpdateBarberStatus(w http.ResponseWriter, r *http.Request, staf
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-func (s *Server) PushCallNext(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-func (s *Server) SubscribePush(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
 
 func (s *Server) AddWalkIn(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
