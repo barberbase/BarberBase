@@ -65,7 +65,9 @@ export const actions: Actions = {
 					pending_expires: expires_in_minutes_raw !== null ? Number(expires_in_minutes_raw) : null
 				});
 			}
-			return fail(err?.status || 500, { error: err?.data?.message || 'Failed to update shop status' });
+			return fail(err?.status || 500, {
+				error: err?.data?.message || 'Failed to update shop status'
+			});
 		}
 	},
 
@@ -74,7 +76,9 @@ export const actions: Actions = {
 		const client = makeClient(event);
 
 		try {
-			const res = await client.post<{ new_pin?: string }>(`/v1/admin/locations/${locationId}/arrival-pin/regenerate`);
+			const res = await client.post<{ new_pin?: string }>(
+				`/v1/admin/locations/${locationId}/arrival-pin/regenerate`
+			);
 			return { new_pin: res.new_pin, pin_success: true };
 		} catch (err: any) {
 			if (err?.status === 401) throw redirect(302, '/login');

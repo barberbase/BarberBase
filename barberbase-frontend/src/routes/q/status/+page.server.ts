@@ -16,9 +16,8 @@ export const load: PageServerLoad = async (event) => {
 	let locationId: string;
 	try {
 		const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-		const raw = typeof atob !== 'undefined'
-			? atob(base64)
-			: Buffer.from(base64, 'base64').toString('binary');
+		const raw =
+			typeof atob !== 'undefined' ? atob(base64) : Buffer.from(base64, 'base64').toString('binary');
 		const utf8 = decodeURIComponent(
 			raw
 				.split('')

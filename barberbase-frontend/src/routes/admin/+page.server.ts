@@ -6,9 +6,8 @@ import type { components } from '$lib/api/client';
 type ServiceCatalog = components['schemas']['ServiceCatalog'];
 
 function getApiBase(event: any): string {
-	const isTest =
-		event.url.hostname === 'localhost' || event.url.hostname === '127.0.0.1';
-	return isTest ? 'http://127.0.0.1:9090' : undefined as any;
+	const isTest = event.url.hostname === 'localhost' || event.url.hostname === '127.0.0.1';
+	return isTest ? 'http://127.0.0.1:9090' : (undefined as any);
 }
 
 function makeClient(event: any) {
@@ -25,7 +24,11 @@ export const load: PageServerLoad = async (event) => {
 
 	const client = makeClient(event);
 
-	let catalog: ServiceCatalog = { location_id: locationId, display_mode: 'hierarchical', categories: [] };
+	let catalog: ServiceCatalog = {
+		location_id: locationId,
+		display_mode: 'hierarchical',
+		categories: []
+	};
 	try {
 		catalog = await client.get<ServiceCatalog>(`/v1/admin/locations/${locationId}/services`);
 	} catch (err: any) {

@@ -6,8 +6,10 @@
 
 	let showAddForm = $state(false);
 
-	const roleLabel = (r: string) => ({ owner: '👑 Owner', manager: '🔑 Manager', barber: '✂️ Barber' })[r] || r;
-	const statusLabel = (s: string) => ({ idle: '🟢 Idle', cutting: '✂️ Cutting', break: '⏸ Break', offline: '⚫ Offline' })[s] || s;
+	const roleLabel = (r: string) =>
+		({ owner: '👑 Owner', manager: '🔑 Manager', barber: '✂️ Barber' })[r] || r;
+	const statusLabel = (s: string) =>
+		({ idle: '🟢 Idle', cutting: '✂️ Cutting', break: '⏸ Break', offline: '⚫ Offline' })[s] || s;
 </script>
 
 <svelte:head>
@@ -20,7 +22,9 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between mb-6">
 			<div class="flex items-center gap-3">
-				<a href="/admin" class="text-slate-400 hover:text-white transition-colors text-sm">← Admin</a>
+				<a href="/admin" class="text-slate-400 hover:text-white transition-colors text-sm"
+					>← Admin</a
+				>
 				<span class="text-slate-600">/</span>
 				<h1 class="text-2xl font-bold text-white">Staff</h1>
 			</div>
@@ -34,10 +38,16 @@
 		</div>
 
 		{#if form?.error}
-			<div class="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6 text-red-400 text-sm">{form.error}</div>
+			<div class="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6 text-red-400 text-sm">
+				{form.error}
+			</div>
 		{/if}
 		{#if form?.success}
-			<div class="bg-green-900/30 border border-green-700 rounded-xl p-4 mb-6 text-green-400 text-sm">✓ Staff member added successfully</div>
+			<div
+				class="bg-green-900/30 border border-green-700 rounded-xl p-4 mb-6 text-green-400 text-sm"
+			>
+				✓ Staff member added successfully
+			</div>
 		{/if}
 
 		<!-- Add Staff Form -->
@@ -58,22 +68,44 @@
 					<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
 						<div>
 							<label for="staff-name" class="block text-xs text-slate-400 mb-1">Full Name *</label>
-							<input id="staff-name" name="name" required placeholder="Ravi Kumar" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
+							<input
+								id="staff-name"
+								name="name"
+								required
+								placeholder="Ravi Kumar"
+								class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+							/>
 						</div>
 						<div>
-							<label for="staff-phone" class="block text-xs text-slate-400 mb-1">WhatsApp Number *</label>
-							<input id="staff-phone" name="phone_number" required placeholder="9876543210" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
+							<label for="staff-phone" class="block text-xs text-slate-400 mb-1"
+								>WhatsApp Number *</label
+							>
+							<input
+								id="staff-phone"
+								name="phone_number"
+								required
+								placeholder="9876543210"
+								class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+							/>
 							<p class="text-xs text-slate-500 mt-1">Will prepend +91 if not provided</p>
 						</div>
 						<div>
 							<label for="staff-role" class="block text-xs text-slate-400 mb-1">Role *</label>
-							<select id="staff-role" name="role" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500">
+							<select
+								id="staff-role"
+								name="role"
+								class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+							>
 								<option value="barber">Barber</option>
 								<option value="manager">Manager</option>
 							</select>
 						</div>
 					</div>
-					<button id="submit-add-staff-btn" type="submit" class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-6 py-2 rounded-xl text-sm transition-all">
+					<button
+						id="submit-add-staff-btn"
+						type="submit"
+						class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-6 py-2 rounded-xl text-sm transition-all"
+					>
 						Add Staff Member
 					</button>
 				</form>
@@ -91,9 +123,18 @@
 				<table class="w-full">
 					<thead>
 						<tr class="border-b border-slate-700">
-							<th class="px-6 py-4 text-left text-xs text-slate-400 font-medium uppercase tracking-wider">Name</th>
-							<th class="px-4 py-4 text-left text-xs text-slate-400 font-medium uppercase tracking-wider">Role</th>
-							<th class="px-4 py-4 text-left text-xs text-slate-400 font-medium uppercase tracking-wider">Status</th>
+							<th
+								class="px-6 py-4 text-left text-xs text-slate-400 font-medium uppercase tracking-wider"
+								>Name</th
+							>
+							<th
+								class="px-4 py-4 text-left text-xs text-slate-400 font-medium uppercase tracking-wider"
+								>Role</th
+							>
+							<th
+								class="px-4 py-4 text-left text-xs text-slate-400 font-medium uppercase tracking-wider"
+								>Status</th
+							>
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-slate-700/50">
@@ -107,7 +148,10 @@
 					</tbody>
 				</table>
 			</div>
-			<p class="text-xs text-slate-500 mt-3 text-center">{data.staffMembers.length} staff member{data.staffMembers.length !== 1 ? 's' : ''} — Staff can log in using their WhatsApp number</p>
+			<p class="text-xs text-slate-500 mt-3 text-center">
+				{data.staffMembers.length} staff member{data.staffMembers.length !== 1 ? 's' : ''} — Staff can
+				log in using their WhatsApp number
+			</p>
 		{/if}
 	</div>
 </div>

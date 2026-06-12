@@ -48,7 +48,7 @@ test.beforeAll(async () => {
 			res.writeHead(200, {
 				'Content-Type': 'text/event-stream',
 				'Cache-Control': 'no-cache',
-				'Connection': 'keep-alive'
+				Connection: 'keep-alive'
 			});
 			res.write(':\n\n'); // keep-alive comment
 			sseClients.push(res);
@@ -85,7 +85,9 @@ test.beforeAll(async () => {
 						res.end(JSON.stringify({ presence_state: 'arrived', message: 'Welcome!' }));
 					} else {
 						res.writeHead(400, { 'Content-Type': 'application/json' });
-						res.end(JSON.stringify({ code: 'WRONG_PIN', message: 'Wrong PIN', attempts_remaining: 3 }));
+						res.end(
+							JSON.stringify({ code: 'WRONG_PIN', message: 'Wrong PIN', attempts_remaining: 3 })
+						);
 					}
 				} else if (parsed.method === 'geolocation') {
 					if (parsed.accuracy_metres > 150) {
@@ -122,11 +124,13 @@ test.beforeAll(async () => {
 	});
 
 	await new Promise<void>((resolve, reject) => {
-		server.listen(mockPort, () => {
-			resolve();
-		}).on('error', (err) => {
-			reject(err);
-		});
+		server
+			.listen(mockPort, () => {
+				resolve();
+			})
+			.on('error', (err) => {
+				reject(err);
+			});
 	});
 });
 
@@ -163,11 +167,11 @@ test('reload mid-session restores from URL parameters identically', async ({ pag
 	await expect(page.locator('text=Token #18')).toBeVisible();
 	await expect(page.locator('text=Mid Fade')).toBeVisible();
 	await expect(page.locator('text=Beard Trim')).toBeVisible();
-	await expect(page.locator('text=I\'m On My Way')).toBeVisible();
+	await expect(page.locator("text=I'm On My Way")).toBeVisible();
 
 	// Reload the page
 	await page.reload();
-	
+
 	// Assert state is identically restored
 	await expect(page.locator('text=Token #18')).toBeVisible();
 	await expect(page.locator('text=Mid Fade')).toBeVisible();
@@ -192,7 +196,7 @@ test('PIN success transitions the page to the arrived state', async ({ page }) =
 	await confirmBtn.click();
 
 	// Verify transitions to arrived state
-	await expect(page.locator('text=You\'re Confirmed!')).toBeVisible();
+	await expect(page.locator("text=You're Confirmed!")).toBeVisible();
 	await expect(page.locator('text=Please wait inside the shop')).toBeVisible();
 	expect(arrivalRequests.length).toBe(2);
 	expect(arrivalRequests[1].pin).toBe('4729');
@@ -221,7 +225,9 @@ test('GPS accuracy too low fallback to PIN', async ({ page }) => {
 	});
 
 	await page.locator('button:has-text("Auto-Confirm using GPS")').click();
-	await expect(page.locator('text=GPS accuracy too low. Please enter the PIN instead.')).toBeVisible();
+	await expect(
+		page.locator('text=GPS accuracy too low. Please enter the PIN instead.')
+	).toBeVisible();
 });
 
 test('SSE disconnect triggers immediate status refetch upon reconnection', async ({ page }) => {
@@ -278,5 +284,7 @@ test('Service Worker is never registered on the status page (Law 17)', async ({ 
 test('missing token t parameter renders invalid link state', async ({ page }) => {
 	await page.goto('/q/status');
 	await expect(page.locator('text=Invalid Link')).toBeVisible();
-	await expect(page.locator('text=This link is not valid. Please request a new one via WhatsApp.')).toBeVisible();
+	await expect(
+		page.locator('text=This link is not valid. Please request a new one via WhatsApp.')
+	).toBeVisible();
 });

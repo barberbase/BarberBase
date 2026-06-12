@@ -13,7 +13,13 @@
 	let webhookUrl = $derived((form as any)?.webhook_url ?? '');
 	let connectedPhone = $derived((form as any)?.phone_number ?? '');
 
-	const REQUIRED_FIELDS = ['bhejna_config_version', 'phone_number', 'api_key', 'webhook_secret', 'whatsapp_status'];
+	const REQUIRED_FIELDS = [
+		'bhejna_config_version',
+		'phone_number',
+		'api_key',
+		'webhook_secret',
+		'whatsapp_status'
+	];
 
 	let jsonValidationError = $derived(() => {
 		if (!pasteJson.trim()) return '';
@@ -49,7 +55,9 @@
 		</div>
 
 		{#if form?.error}
-			<div class="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6 text-red-400 text-sm">{form.error}</div>
+			<div class="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6 text-red-400 text-sm">
+				{form.error}
+			</div>
 		{/if}
 
 		<!-- Mode info card -->
@@ -62,19 +70,30 @@
 							<span class="text-green-400 font-semibold text-sm">Mode B — Your Own Number</span>
 						</div>
 						<p class="text-white font-mono text-lg">{connectedPhone}</p>
-						<p class="text-slate-400 text-xs mt-1">Customers see your shop name as the WhatsApp sender</p>
+						<p class="text-slate-400 text-xs mt-1">
+							Customers see your shop name as the WhatsApp sender
+						</p>
 					{:else if isDisconnected}
 						<div class="flex items-center gap-2 mb-2">
 							<span class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
-							<span class="text-slate-400 font-semibold text-sm">Mode A — Shared BarberBase Number</span>
+							<span class="text-slate-400 font-semibold text-sm"
+								>Mode A — Shared BarberBase Number</span
+							>
 						</div>
-						<p class="text-slate-300 text-sm">Disconnected. You are now using the shared platform number.</p>
+						<p class="text-slate-300 text-sm">
+							Disconnected. You are now using the shared platform number.
+						</p>
 					{:else}
 						<div class="flex items-center gap-2 mb-2">
 							<span class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
-							<span class="text-slate-400 font-semibold text-sm">Mode A — Shared BarberBase Number</span>
+							<span class="text-slate-400 font-semibold text-sm"
+								>Mode A — Shared BarberBase Number</span
+							>
 						</div>
-						<p class="text-slate-300 text-sm mt-1">All your customers message BarberBase's number. Upgrade to Mode B to use your own number.</p>
+						<p class="text-slate-300 text-sm mt-1">
+							All your customers message BarberBase's number. Upgrade to Mode B to use your own
+							number.
+						</p>
 					{/if}
 				</div>
 			</div>
@@ -82,8 +101,13 @@
 
 		{#if isConnected}
 			<!-- Webhook URL copy box -->
-			<div id="webhook-url-panel" class="bg-green-900/20 border border-green-700 rounded-2xl p-6 mb-6 shadow-xl">
-				<p class="text-green-400 font-semibold mb-1 text-sm">Step 2: Paste this URL into your Bhejna portal</p>
+			<div
+				id="webhook-url-panel"
+				class="bg-green-900/20 border border-green-700 rounded-2xl p-6 mb-6 shadow-xl"
+			>
+				<p class="text-green-400 font-semibold mb-1 text-sm">
+					Step 2: Paste this URL into your Bhejna portal
+				</p>
 				<p class="text-slate-400 text-xs mb-3">Bhejna portal → Developer Settings → Webhook URL</p>
 				<div class="flex gap-2 items-center">
 					<input
@@ -105,13 +129,18 @@
 			<!-- Disconnect -->
 			<div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl">
 				<h2 class="text-lg font-bold text-white mb-2">Disconnect Own Number</h2>
-				<p class="text-slate-400 text-sm mb-4">This will revert your shop to the shared BarberBase number. All credentials will be cleared.</p>
+				<p class="text-slate-400 text-sm mb-4">
+					This will revert your shop to the shared BarberBase number. All credentials will be
+					cleared.
+				</p>
 				<form method="POST" action="?/disconnect" use:enhance>
 					<button
 						id="disconnect-whatsapp-btn"
 						type="submit"
 						class="bg-red-700/80 hover:bg-red-700 text-white font-bold px-6 py-2 rounded-xl text-sm transition-all"
-						onclick={(e) => { if (!confirm('Disconnect your own WhatsApp number?')) e.preventDefault(); }}
+						onclick={(e) => {
+							if (!confirm('Disconnect your own WhatsApp number?')) e.preventDefault();
+						}}
 					>
 						Disconnect
 					</button>
@@ -122,11 +151,15 @@
 			<div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl">
 				<h2 class="text-lg font-bold text-white mb-2">Connect Your Own WhatsApp Number</h2>
 				<p class="text-slate-400 text-sm mb-4">
-					In your Bhejna portal, go to <strong class="text-white">Developer Settings</strong> and click <strong class="text-white">Copy BarberBase Integration Config</strong>. Then paste the JSON here.
+					In your Bhejna portal, go to <strong class="text-white">Developer Settings</strong> and
+					click <strong class="text-white">Copy BarberBase Integration Config</strong>. Then paste
+					the JSON here.
 				</p>
 				<form id="connect-whatsapp-form" method="POST" action="?/connect" use:enhance>
 					<div class="mb-4">
-						<label for="config-json-input" class="block text-xs text-slate-400 mb-1">Bhejna Integration Config JSON</label>
+						<label for="config-json-input" class="block text-xs text-slate-400 mb-1"
+							>Bhejna Integration Config JSON</label
+						>
 						<textarea
 							id="config-json-input"
 							name="config_json"

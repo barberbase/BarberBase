@@ -13,7 +13,9 @@
 
 	// Categories & gender tabs
 	const categories = (data.catalog?.categories || []) as any[];
-	const genders = Array.from(new Set(categories.map((c: any) => c.gender))).filter(Boolean) as string[];
+	const genders = Array.from(new Set(categories.map((c: any) => c.gender))).filter(
+		Boolean
+	) as string[];
 	let activeTab = $state<string>(genders[0] || 'men');
 
 	// Derived categories matching active tab to avoid HTML template implicit any errors
@@ -37,16 +39,19 @@
 		isResolving = true;
 		resolveError = null;
 		try {
-			const res = await fetch(`${data.apiBase}/v1/public/locations/${data.location.id}/booking-options`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({
-					variant_ids: selectedVariantIds,
-					party_size: 1
-				})
-			});
+			const res = await fetch(
+				`${data.apiBase}/v1/public/locations/${data.location.id}/booking-options`,
+				{
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({
+						variant_ids: selectedVariantIds,
+						party_size: 1
+					})
+				}
+			);
 			if (res.ok) {
 				bookingOptions = await res.json();
 			} else {
@@ -69,7 +74,7 @@
 	// Toggle variant selection
 	function toggleVariant(variantId: string) {
 		if (selectedVariantIds.includes(variantId)) {
-			selectedVariantIds = selectedVariantIds.filter(id => id !== variantId);
+			selectedVariantIds = selectedVariantIds.filter((id) => id !== variantId);
 		} else {
 			selectedVariantIds = [...selectedVariantIds, variantId];
 		}
@@ -148,16 +153,19 @@
 		isJoining = true;
 		joinError = null;
 		try {
-			const res = await fetch(`${data.apiBase}/v1/public/locations/${data.location.id}/checkin-intents`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({
-					variant_ids: selectedVariantIds,
-					party_size: 1
-				})
-			});
+			const res = await fetch(
+				`${data.apiBase}/v1/public/locations/${data.location.id}/checkin-intents`,
+				{
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({
+						variant_ids: selectedVariantIds,
+						party_size: 1
+					})
+				}
+			);
 			if (res.status === 201) {
 				checkinResponse = await res.json();
 			} else {
@@ -288,7 +296,9 @@
 									<div class="variants-grid">
 										{#each group.variants as variant}
 											<button
-												class="variant-card {selectedVariantIds.includes(variant.id) ? 'selected' : ''}"
+												class="variant-card {selectedVariantIds.includes(variant.id)
+													? 'selected'
+													: ''}"
 												onclick={() => toggleVariant(variant.id)}
 											>
 												<div class="variant-meta">
@@ -387,7 +397,10 @@
 		<div class="confirmation-card">
 			<div class="modal-icon">📱</div>
 			<h2>WhatsApp will open</h2>
-			<p>Simply press <strong>Send</strong> on the pre-filled message inside WhatsApp to confirm your spot in the queue.</p>
+			<p>
+				Simply press <strong>Send</strong> on the pre-filled message inside WhatsApp to confirm your spot
+				in the queue.
+			</p>
 			<a
 				href={checkinResponse.deep_link}
 				class="wa-confirm-btn"
@@ -403,7 +416,11 @@
 <style>
 	:global(body) {
 		margin: 0;
-		font-family: 'Inter', system-ui, -apple-system, sans-serif;
+		font-family:
+			'Inter',
+			system-ui,
+			-apple-system,
+			sans-serif;
 		background-color: #0b0f19;
 		color: #f3f4f6;
 	}
@@ -444,7 +461,9 @@
 		flex-wrap: wrap;
 	}
 
-	.status-badge, .queue-badge, .wait-badge {
+	.status-badge,
+	.queue-badge,
+	.wait-badge {
 		font-size: 0.8rem;
 		font-weight: 600;
 		padding: 0.35rem 0.75rem;
@@ -464,7 +483,8 @@
 		border-color: rgba(245, 158, 11, 0.25);
 	}
 
-	.status-badge.temporarily_closed, .status-badge.closed {
+	.status-badge.temporarily_closed,
+	.status-badge.closed {
 		background: rgba(239, 68, 68, 0.15);
 		color: #f87171;
 		border-color: rgba(239, 68, 68, 0.25);

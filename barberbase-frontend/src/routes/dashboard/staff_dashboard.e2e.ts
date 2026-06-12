@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-function-type, @typescript-eslint/no-unused-vars */
 import { expect, test } from '@playwright/test';
 import http from 'http';
 
@@ -68,7 +69,7 @@ test.beforeAll(() => {
 			res.writeHead(200, {
 				'Content-Type': 'text/event-stream',
 				'Cache-Control': 'no-cache',
-				'Connection': 'keep-alive'
+				Connection: 'keep-alive'
 			});
 			res.write(':\n\n'); // keep-alive comment
 			sseClients.push(res);
@@ -124,7 +125,8 @@ test('one-tap actions issue exactly one request (debounced)', async ({ page, con
 	await context.addCookies([
 		{
 			name: 'access_token',
-			value: 'dummy.eyJyb2xlIjoiYmFyYmVyIiwiZXhwIjo5OTk5OTk5OTk5LCJsb2NhdGlvbl9pZCI6ImxvYy0xMjMiLCJuYW1lIjoiVGVzdCBTdGFmZiJ9.dummy',
+			value:
+				'dummy.eyJyb2xlIjoiYmFyYmVyIiwiZXhwIjo5OTk5OTk5OTk5LCJsb2NhdGlvbl9pZCI6ImxvYy0xMjMiLCJuYW1lIjoiVGVzdCBTdGFmZiJ9.dummy',
 			domain: 'localhost',
 			path: '/'
 		}
@@ -157,7 +159,8 @@ test('checkout total mismatch blocks submit', async ({ page, context }) => {
 	await context.addCookies([
 		{
 			name: 'access_token',
-			value: 'dummy.eyJyb2xlIjoiYmFyYmVyIiwiZXhwIjo5OTk5OTk5OTk5LCJsb2NhdGlvbl9pZCI6ImxvYy0xMjMiLCJuYW1lIjoiVGVzdCBTdGFmZiJ9.dummy',
+			value:
+				'dummy.eyJyb2xlIjoiYmFyYmVyIiwiZXhwIjo5OTk5OTk5OTk5LCJsb2NhdGlvbl9pZCI6ImxvYy0xMjMiLCJuYW1lIjoiVGVzdCBTdGFmZiJ9.dummy',
 			domain: 'localhost',
 			path: '/'
 		}
@@ -239,7 +242,8 @@ test('kill SSE, mutate via another client, dashboard recovers on reconnect via s
 	await context.addCookies([
 		{
 			name: 'access_token',
-			value: 'dummy.eyJyb2xlIjoiYmFyYmVyIiwiZXhwIjo5OTk5OTk5OTk5LCJsb2NhdGlvbl9pZCI6ImxvYy0xMjMiLCJuYW1lIjoiVGVzdCBTdGFmZiJ9.dummy',
+			value:
+				'dummy.eyJyb2xlIjoiYmFyYmVyIiwiZXhwIjo5OTk5OTk5OTk5LCJsb2NhdGlvbl9pZCI6ImxvYy0xMjMiLCJuYW1lIjoiVGVzdCBTdGFmZiJ9.dummy',
 			domain: 'localhost',
 			path: '/'
 		}
@@ -262,4 +266,394 @@ test('kill SSE, mutate via another client, dashboard recovers on reconnect via s
 
 	// Wait for dashboard to automatically reconnect and update client UI via snapshot reload
 	await expect(page.locator('text=Jane Doe Mutated')).toBeVisible({ timeout: 10000 });
+});
+
+test('Push Permission Prompt is hidden on first session', async ({ page, context }) => {
+	await context.addCookies([
+		{
+			name: 'access_token',
+			value:
+				'dummy.eyJyb2xlIjoiYmFyYmVyIiwiZXhwIjo5OTk5OTk5OTk5LCJsb2NhdGlvbl9pZCI6ImxvYy0xMjMiLCJuYW1lIjoiVGVzdCBTdGFmZiJ9.dummy',
+			domain: 'localhost',
+			path: '/'
+		}
+	]);
+
+	await page.addInitScript(() => {
+		// Reset storage
+		localStorage.clear();
+		sessionStorage.clear();
+		// Mock Notification permission as default
+		Object.defineProperty(window, 'Notification', {
+			value: {
+				permission: 'default',
+				requestPermission: async () => 'default'
+			},
+			writable: true
+		});
+	});
+
+	await page.goto('/dashboard');
+	// Wait a bit to ensure it had time to mount/render
+	await page.waitForTimeout(500);
+	// Assert prompt is NOT visible
+	const prompt = page.locator('#push-permission-prompt');
+	await expect(prompt).not.toBeVisible();
+});
+
+test('Push Permission Prompt is shown on second session and can be denied gracefully (Law 21)', async ({
+	page,
+	context
+}) => {
+	await context.addCookies([
+		{
+			name: 'access_token',
+			value:
+				'dummy.eyJyb2xlIjoiYmFyYmVyIiwiZXhwIjo5OTk5OTk5OTk5LCJsb2NhdGlvbl9pZCI6ImxvYy0xMjMiLCJuYW1lIjoiVGVzdCBTdGFmZiJ9.dummy',
+			domain: 'localhost',
+			path: '/'
+		}
+	]);
+
+	await page.addInitScript(() => {
+		localStorage.clear();
+		sessionStorage.clear();
+		// Set session count to 1, so this next load makes it 2
+		localStorage.setItem('bb_dash_session_count', '1');
+
+		// Mock Notification permission as default, and requestPermission returns 'denied'
+		Object.defineProperty(window, 'Notification', {
+			value: {
+				permission: 'default',
+				requestPermission: async () => 'denied'
+			},
+			writable: true
+		});
+
+		// Mock serviceWorker register and ready getter using Object.defineProperty
+		Object.defineProperty(navigator.serviceWorker, 'register', {
+			value: async () => {
+				return {
+					scope: '/dashboard/',
+					pushManager: {
+						subscribe: async () => {
+							throw new Error('Should not be called if permission is denied');
+						}
+					}
+				} as any;
+			},
+			configurable: true
+		});
+		Object.defineProperty(navigator.serviceWorker, 'ready', {
+			get: () => Promise.resolve({} as any),
+			configurable: true
+		});
+	});
+
+	await page.goto('/dashboard');
+
+	// Assert prompt is visible
+	const prompt = page.locator('#push-permission-prompt');
+	await expect(prompt).toBeVisible();
+
+	// Click Enable Notifications
+	const enableBtn = page.locator('#btn-enable-notifications');
+	await enableBtn.click();
+
+	// Assert prompt closes silently without errors
+	await expect(prompt).not.toBeVisible();
+});
+
+test('Push Permission Prompt handles network failure gracefully on subscribe POST (Law 21)', async ({
+	page,
+	context
+}) => {
+	await context.addCookies([
+		{
+			name: 'access_token',
+			value:
+				'dummy.eyJyb2xlIjoiYmFyYmVyIiwiZXhwIjo5OTk5OTk5OTk5LCJsb2NhdGlvbl9pZCI6ImxvYy0xMjMiLCJuYW1lIjoiVGVzdCBTdGFmZiJ9.dummy',
+			domain: 'localhost',
+			path: '/'
+		}
+	]);
+
+	await page.addInitScript(() => {
+		localStorage.clear();
+		sessionStorage.clear();
+		localStorage.setItem('bb_dash_session_count', '1');
+
+		Object.defineProperty(window, 'Notification', {
+			value: {
+				permission: 'default',
+				requestPermission: async () => 'granted'
+			},
+			writable: true
+		});
+
+		// Mock serviceWorker register, ready getter, and pushManager subscription
+		Object.defineProperty(navigator.serviceWorker, 'register', {
+			value: async () => {
+				return {
+					scope: '/dashboard/',
+					pushManager: {
+						subscribe: async () => {
+							return {
+								endpoint: 'https://fcm.googleapis.com/fcm/send/some-token',
+								getKey: () => new ArrayBuffer(8)
+							} as any;
+						}
+					}
+				} as any;
+			},
+			configurable: true
+		});
+		Object.defineProperty(navigator.serviceWorker, 'ready', {
+			get: () => Promise.resolve({} as any),
+			configurable: true
+		});
+
+		// Mock fetch to simulate subscribe endpoint failure
+		const originalFetch = window.fetch;
+		window.fetch = async (input, init) => {
+			const url = typeof input === 'string' ? input : input.url;
+			if (url.includes('/v1/staff/push/subscribe')) {
+				return Promise.reject(new Error('Network error'));
+			}
+			return originalFetch(input, init);
+		};
+	});
+
+	await page.goto('/dashboard');
+
+	const prompt = page.locator('#push-permission-prompt');
+	await expect(prompt).toBeVisible();
+
+	const enableBtn = page.locator('#btn-enable-notifications');
+	await enableBtn.click();
+
+	// Prompt should close and not throw/crash the page
+	await expect(prompt).not.toBeVisible();
+});
+
+test('service-worker.js handles push and notificationclick event flows', async ({ page }) => {
+	// 1. Go to any page (e.g. status or login) so we can evaluate JS
+	await page.goto('/login');
+
+	// 2. Evaluate script to mock SW environment and run the service worker code
+	const testResults = await page.evaluate(async () => {
+		// Fetch the service-worker.js code
+		const response = await fetch('/service-worker.js');
+		const swCode = await response.text();
+
+		// Set up mock Service Worker scope
+		const events: { [key: string]: Function[] } = {};
+		const notificationsShown: any[] = [];
+		const closedNotifications: any[] = [];
+		let openedWindow: string | null = null;
+		let focusedWindow = false;
+
+		const mockSelf = {
+			addEventListener: (event: string, callback: Function) => {
+				if (!events[event]) events[event] = [];
+				events[event].push(callback);
+			},
+			registration: {
+				showNotification: async (title: string, options: any) => {
+					notificationsShown.push({ title, options });
+					return {
+						close: () => {
+							closedNotifications.push({ title, options });
+						}
+					};
+				}
+			},
+			clients: {
+				matchAll: async () => {
+					return [
+						{
+							url: 'http://localhost:4173/dashboard',
+							focus: async () => {
+								focusedWindow = true;
+								return {};
+							}
+						}
+					];
+				},
+				openWindow: async (url: string) => {
+					openedWindow = url;
+					return {};
+				}
+			}
+		};
+
+		// Run SW code inside a function context with 'self' and 'clients' mocked
+		const runSW = new Function('self', 'clients', 'addEventListener', 'fetch', swCode);
+
+		// We need to pass mock fetch to intercept push-action API requests
+		let lastFetchUrl: string | null = null;
+		let lastFetchInit: any = null;
+		let mockFetchStatus = 200;
+		let mockFetchResponseJson = {};
+		let mockFetchError = false;
+
+		const mockFetch = async (url: string, init: any) => {
+			lastFetchUrl = url;
+			lastFetchInit = init;
+			if (mockFetchError) {
+				return Promise.reject(new Error('Network error'));
+			}
+			return {
+				status: mockFetchStatus,
+				ok: mockFetchStatus >= 200 && mockFetchStatus < 300,
+				json: async () => mockFetchResponseJson
+			} as any;
+		};
+
+		// Run the SW initialization
+		runSW(mockSelf, mockSelf.clients, mockSelf.addEventListener, mockFetch);
+
+		// Helper to invoke 'push'
+		const triggerPush = async (payload: any) => {
+			const pushCallback = events['push']?.[0];
+			if (!pushCallback) throw new Error('No push listener registered');
+
+			let waitPromise: Promise<any> = Promise.resolve();
+			const event = {
+				data: {
+					json: () => payload
+				},
+				waitUntil: (promise: Promise<any>) => {
+					waitPromise = promise;
+				}
+			};
+			pushCallback(event);
+			await waitPromise;
+		};
+
+		// Helper to invoke 'notificationclick'
+		const triggerClick = async (action: string, notificationData: any) => {
+			const clickCallback = events['notificationclick']?.[0];
+			if (!clickCallback) throw new Error('No notificationclick listener registered');
+
+			let waitPromise: Promise<any> = Promise.resolve();
+			const notification = {
+				close: () => {},
+				data: notificationData
+			};
+			const event = {
+				action,
+				notification,
+				waitUntil: (promise: Promise<any>) => {
+					waitPromise = promise;
+				}
+			};
+			clickCallback(event);
+			await waitPromise;
+		};
+
+		const results: any = {};
+
+		// Test Case A: Push event shows silent, scoped notification
+		notificationsShown.length = 0;
+		await triggerPush({
+			location_name: 'Downtown',
+			waiting_count: 3,
+			pat: 'mock-pat',
+			api_url: 'https://api.barberbase.in/v1'
+		});
+		results.pushEvent = {
+			shownCount: notificationsShown.length,
+			title: notificationsShown[0]?.title,
+			body: notificationsShown[0]?.options?.body,
+			silent: notificationsShown[0]?.options?.silent,
+			tag: notificationsShown[0]?.options?.tag,
+			requireInteraction: notificationsShown[0]?.options?.requireInteraction
+		};
+
+		// Test Case B: 200 OK on notificationclick call_next
+		notificationsShown.length = 0;
+		mockFetchStatus = 200;
+		mockFetchResponseJson = { waiting_arrived_count: 2 };
+		await triggerClick('call_next', { pat: 'mock-pat', api_url: 'https://api.barberbase.in/v1' });
+		results.click200 = {
+			lastFetchUrl,
+			headerToken: lastFetchInit?.headers?.['X-Push-Action-Token'],
+			shownCount: notificationsShown.length,
+			body: notificationsShown[0]?.options?.body,
+			actionsCount: notificationsShown[0]?.options?.actions?.length
+		};
+
+		// Test Case C: 401 Unauthorized updates notification to expired session
+		notificationsShown.length = 0;
+		mockFetchStatus = 401;
+		await triggerClick('call_next', { pat: 'mock-pat', api_url: 'https://api.barberbase.in/v1' });
+		results.click401 = {
+			shownCount: notificationsShown.length,
+			body: notificationsShown[0]?.options?.body,
+			actionsCount: notificationsShown[0]?.options?.actions?.length
+		};
+
+		// Test Case D: 404 Not Found updates notification to queue clear
+		notificationsShown.length = 0;
+		mockFetchStatus = 404;
+		await triggerClick('call_next', { pat: 'mock-pat', api_url: 'https://api.barberbase.in/v1' });
+		results.click404 = {
+			shownCount: notificationsShown.length,
+			body: notificationsShown[0]?.options?.body,
+			actionsCount: notificationsShown[0]?.options?.actions?.length
+		};
+
+		// Test Case E: 429 Too Many Requests bypasses updates (ignores)
+		notificationsShown.length = 0;
+		mockFetchStatus = 429;
+		await triggerClick('call_next', { pat: 'mock-pat', api_url: 'https://api.barberbase.in/v1' });
+		results.click429 = {
+			shownCount: notificationsShown.length
+		};
+
+		// Test Case F: Network failure updates to retry
+		notificationsShown.length = 0;
+		mockFetchError = true;
+		await triggerClick('call_next', { pat: 'mock-pat', api_url: 'https://api.barberbase.in/v1' });
+		results.clickError = {
+			shownCount: notificationsShown.length,
+			body: notificationsShown[0]?.options?.body
+		};
+
+		return results;
+	});
+
+	// Assertions based on the returned evaluation results
+
+	// Case A: Push
+	expect(testResults.pushEvent.shownCount).toBe(1);
+	expect(testResults.pushEvent.title).toContain('Downtown');
+	expect(testResults.pushEvent.body).toBe('3 arrived · NEXT CLIENT ready');
+	expect(testResults.pushEvent.silent).toBe(true);
+	expect(testResults.pushEvent.tag).toBe('barberbase-queue');
+	expect(testResults.pushEvent.requireInteraction).toBe(true);
+
+	// Case B: 200 OK
+	expect(testResults.click200.lastFetchUrl).toBe(
+		'https://api.barberbase.in/v1/staff/push/call-next'
+	);
+	expect(testResults.click200.headerToken).toBe('mock-pat');
+	expect(testResults.click200.shownCount).toBe(1);
+	expect(testResults.click200.body).toContain('✓ Called · 2 remaining');
+
+	// Case C: 401
+	expect(testResults.click401.shownCount).toBe(1);
+	expect(testResults.click401.body).toContain('Session expired · Open dashboard to continue');
+
+	// Case D: 404
+	expect(testResults.click404.shownCount).toBe(1);
+	expect(testResults.click404.body).toContain('Queue clear · No arrived customers');
+
+	// Case E: 429
+	expect(testResults.click429.shownCount).toBe(0);
+
+	// Case F: Network Error
+	expect(testResults.clickError.shownCount).toBe(1);
+	expect(testResults.clickError.body).toContain('Network error · Tap to retry');
 });

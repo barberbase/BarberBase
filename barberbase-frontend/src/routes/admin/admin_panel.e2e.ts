@@ -246,9 +246,7 @@ test.beforeAll(() => {
 		// Queue snapshot (for dashboard redirect target)
 		if (url.includes('/staff/queue/snapshot')) {
 			res.writeHead(200, { 'Content-Type': 'application/json' });
-			res.end(
-				JSON.stringify({ queue_version: 1, session_status: 'active', entries: [] })
-			);
+			res.end(JSON.stringify({ queue_version: 1, session_status: 'active', entries: [] }));
 			return;
 		}
 

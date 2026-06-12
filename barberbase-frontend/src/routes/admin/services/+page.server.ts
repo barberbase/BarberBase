@@ -26,7 +26,11 @@ export const load: PageServerLoad = async (event) => {
 	const locationId = parentData.staff.location_id;
 	const client = makeClient(event);
 
-	let catalog: ServiceCatalog = { location_id: locationId, display_mode: 'hierarchical', categories: [] };
+	let catalog: ServiceCatalog = {
+		location_id: locationId,
+		display_mode: 'hierarchical',
+		categories: []
+	};
 	try {
 		catalog = await client.get<ServiceCatalog>(`/v1/admin/locations/${locationId}/services`);
 	} catch (err: any) {
@@ -103,12 +107,15 @@ export const actions: Actions = {
 		const variantId = String(data.get('variant_id') || '');
 
 		try {
-			await client.patch(`/v1/admin/locations/${locationId}/services/${variantId}`, { is_active: false });
+			await client.patch(`/v1/admin/locations/${locationId}/services/${variantId}`, {
+				is_active: false
+			});
 			return { success: true };
 		} catch (err: any) {
 			if (err?.status === 401) throw redirect(302, '/login');
-			return fail(err?.status || 500, { error: err?.data?.message || 'Failed to deactivate service' });
+			return fail(err?.status || 500, {
+				error: err?.data?.message || 'Failed to deactivate service'
+			});
 		}
 	}
 };
-

@@ -18,7 +18,13 @@ function getLocationId(event: any): string {
 	return claims.location_id;
 }
 
-const REQUIRED_FIELDS = ['bhejna_config_version', 'phone_number', 'api_key', 'webhook_secret', 'whatsapp_status'];
+const REQUIRED_FIELDS = [
+	'bhejna_config_version',
+	'phone_number',
+	'api_key',
+	'webhook_secret',
+	'whatsapp_status'
+];
 
 export const load: PageServerLoad = async (event) => {
 	const parentData = await event.parent();
@@ -56,7 +62,9 @@ export const actions: Actions = {
 			return { connected: true, webhook_url: res.webhook_url, phone_number: parsed.phone_number };
 		} catch (err: any) {
 			if (err?.status === 401) throw redirect(302, '/login');
-			return fail(err?.status || 500, { error: err?.data?.message || 'Failed to connect WhatsApp' });
+			return fail(err?.status || 500, {
+				error: err?.data?.message || 'Failed to connect WhatsApp'
+			});
 		}
 	},
 
@@ -69,7 +77,9 @@ export const actions: Actions = {
 			return { disconnected: true };
 		} catch (err: any) {
 			if (err?.status === 401) throw redirect(302, '/login');
-			return fail(err?.status || 500, { error: err?.data?.message || 'Failed to disconnect WhatsApp' });
+			return fail(err?.status || 500, {
+				error: err?.data?.message || 'Failed to disconnect WhatsApp'
+			});
 		}
 	}
 };

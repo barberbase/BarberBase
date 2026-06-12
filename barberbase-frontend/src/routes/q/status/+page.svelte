@@ -31,14 +31,14 @@
 
 	let currentEntry = $state<any>(initialData.entry);
 	let localQueueVersion = $state<number>(initialData.entry?.queue_version ?? 0);
-	
+
 	let pinInput = $state<string>('');
 	let pinError = $state<string | null>(null);
 	let pinAttemptsRemaining = $state<number | null>(null);
-	
+
 	let gpsLoading = $state<boolean>(false);
 	let gpsError = $state<string | null>(null);
-	
+
 	let actionError = $state<string | null>(null);
 	let feedbackRating = $state<number>(0);
 	let feedbackSubmitted = $state<boolean>(false);
@@ -59,10 +59,13 @@
 
 		const resetIdle = () => {
 			clearTimeout(idleTimer);
-			idleTimer = setTimeout(() => {
-				es?.close();
-				stopped = true;
-			}, 4 * 60 * 60 * 1000); // 4 hours idle timeout
+			idleTimer = setTimeout(
+				() => {
+					es?.close();
+					stopped = true;
+				},
+				4 * 60 * 60 * 1000
+			); // 4 hours idle timeout
 		};
 
 		const refetch = async () => {
@@ -162,7 +165,7 @@
 		if (!token || isSubmitting) return;
 		isSubmitting = true;
 		actionError = null;
-		
+
 		try {
 			const apiBase = getClientApiBase();
 			const res = await fetch(`${apiBase}/v1/queue/on-the-way`, {
@@ -339,24 +342,36 @@
 	<title>Live Queue Status — BarberBase</title>
 </svelte:head>
 
-<div class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-zinc-950 text-slate-100 flex flex-col items-center justify-center p-4 md:p-6 font-sans">
-	<div class="w-full max-w-md bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 rounded-3xl p-6 shadow-2xl space-y-6 relative overflow-hidden">
+<div
+	class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-zinc-950 text-slate-100 flex flex-col items-center justify-center p-4 md:p-6 font-sans"
+>
+	<div
+		class="w-full max-w-md bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 rounded-3xl p-6 shadow-2xl space-y-6 relative overflow-hidden"
+	>
 		<!-- Subtle ambient backdrop light glow -->
-		<div class="absolute -top-24 -left-24 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
-		<div class="absolute -bottom-24 -right-24 w-48 h-48 bg-amber-500/5 rounded-full blur-3xl pointer-events-none"></div>
+		<div
+			class="absolute -top-24 -left-24 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"
+		></div>
+		<div
+			class="absolute -bottom-24 -right-24 w-48 h-48 bg-amber-500/5 rounded-full blur-3xl pointer-events-none"
+		></div>
 
 		<!-- ERROR PAGES -->
 		{#if initialError === 'invalid_link'}
 			<div class="text-center py-10 space-y-4">
 				<div class="text-5xl">⚠️</div>
 				<h1 class="text-xl font-extrabold text-slate-200">Invalid Link</h1>
-				<p class="text-sm text-slate-400">This link is not valid. Please request a new one via WhatsApp.</p>
+				<p class="text-sm text-slate-400">
+					This link is not valid. Please request a new one via WhatsApp.
+				</p>
 			</div>
 		{:else if initialError === 'expired'}
 			<div class="text-center py-10 space-y-4">
 				<div class="text-5xl">⏰</div>
 				<h1 class="text-xl font-extrabold text-slate-200">Link Expired</h1>
-				<p class="text-sm text-slate-400">Your session has expired (links are valid for 23 hours).</p>
+				<p class="text-sm text-slate-400">
+					Your session has expired (links are valid for 23 hours).
+				</p>
 			</div>
 		{:else if initialError === 'not_found'}
 			<div class="text-center py-10 space-y-4">
@@ -368,10 +383,16 @@
 			<!-- HEADER SECTION -->
 			<div class="flex justify-between items-center border-b border-slate-800/80 pb-4">
 				<div>
-					<h2 class="text-xs font-bold text-amber-500 uppercase tracking-widest">{currentEntry.shop_name || 'BarberBase'}</h2>
-					<p class="text-[10px] text-slate-400 mt-0.5">{currentEntry.location_name || 'Salon Location'}</p>
+					<h2 class="text-xs font-bold text-amber-500 uppercase tracking-widest">
+						{currentEntry.shop_name || 'BarberBase'}
+					</h2>
+					<p class="text-[10px] text-slate-400 mt-0.5">
+						{currentEntry.location_name || 'Salon Location'}
+					</p>
 				</div>
-				<span class="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-black px-3.5 py-1.5 rounded-full">
+				<span
+					class="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-black px-3.5 py-1.5 rounded-full"
+				>
 					Token #{currentEntry.token_number}
 				</span>
 			</div>
@@ -382,11 +403,15 @@
 				<div class="text-center py-6 space-y-4">
 					<div class="text-5xl animate-bounce-slow">🎉</div>
 					<h1 class="text-2xl font-black text-slate-100">All Done!</h1>
-					<p class="text-sm text-slate-400">Thanks for visiting {currentEntry.shop_name || 'us'}.</p>
-					
+					<p class="text-sm text-slate-400">
+						Thanks for visiting {currentEntry.shop_name || 'us'}.
+					</p>
+
 					<!-- Feedback Star Widget -->
 					<div class="bg-slate-950/40 border border-slate-800/60 rounded-2xl p-5 space-y-3.5 mt-2">
-						<span class="text-xs font-bold text-slate-400 uppercase tracking-wider block">Rate your experience</span>
+						<span class="text-xs font-bold text-slate-400 uppercase tracking-wider block"
+							>Rate your experience</span
+						>
 						<div class="flex justify-center space-x-2.5">
 							{#each [1, 2, 3, 4, 5] as star}
 								<button
@@ -395,7 +420,9 @@
 									onclick={() => handleFeedback(star)}
 									disabled={feedbackSubmitted}
 								>
-									<span class={star <= (feedbackRating || 0) ? 'text-amber-400' : 'text-slate-700'}>★</span>
+									<span class={star <= (feedbackRating || 0) ? 'text-amber-400' : 'text-slate-700'}
+										>★</span
+									>
 								</button>
 							{/each}
 						</div>
@@ -406,14 +433,18 @@
 				</div>
 			{:else if currentEntry.state === 'called'}
 				<!-- STATE 4 — Called -->
-				<div class="text-center py-8 space-y-4 bg-amber-500/10 border border-amber-500/30 rounded-3xl p-6 ring-2 ring-amber-500/20">
+				<div
+					class="text-center py-8 space-y-4 bg-amber-500/10 border border-amber-500/30 rounded-3xl p-6 ring-2 ring-amber-500/20"
+				>
 					<div class="text-5xl animate-pulse">🔔</div>
 					<h1 class="text-2xl font-black text-amber-400">It's Your Turn!</h1>
 					<p class="text-sm text-amber-200">Please go to the barber chair now.</p>
 				</div>
 			{:else if currentEntry.state === 'in_progress'}
 				<!-- STATE 5 — In Progress -->
-				<div class="text-center py-8 space-y-4 bg-emerald-500/10 border border-emerald-500/30 rounded-3xl p-6">
+				<div
+					class="text-center py-8 space-y-4 bg-emerald-500/10 border border-emerald-500/30 rounded-3xl p-6"
+				>
 					<div class="text-5xl">✂️</div>
 					<h1 class="text-2xl font-black text-emerald-400">In Progress</h1>
 					<p class="text-sm text-emerald-200">Enjoy your service!</p>
@@ -423,47 +454,78 @@
 				<div class="text-center py-6 space-y-4">
 					<div class="text-5xl">⏸</div>
 					<h1 class="text-2xl font-black text-slate-300">Spot Paused</h1>
-					<p class="text-sm text-slate-400">Your turn was passed. Ask staff to reactivate your spot.</p>
-					
+					<p class="text-sm text-slate-400">
+						Your turn was passed. Ask staff to reactivate your spot.
+					</p>
+
 					<div class="pt-2">
 						<span class="text-sm text-slate-400 font-bold block">{currentEntry.shop_name}</span>
-						<span class="text-xs text-slate-500 mt-1 block">Please consult our front desk team.</span>
+						<span class="text-xs text-slate-500 mt-1 block"
+							>Please consult our front desk team.</span
+						>
 					</div>
 				</div>
 			{:else if currentEntry.presence_state === 'arrived'}
 				<!-- STATE 3 — Arrived -->
-				<div class="text-center py-8 space-y-4 bg-slate-950/40 border border-slate-800 rounded-3xl p-6">
+				<div
+					class="text-center py-8 space-y-4 bg-slate-950/40 border border-slate-800 rounded-3xl p-6"
+				>
 					<div class="text-5xl">✅</div>
 					<h1 class="text-2xl font-black text-slate-200">You're Confirmed!</h1>
-					<p class="text-sm text-slate-400">Please wait inside the shop. We will call you when it is your turn.</p>
-					<div class="pt-2 flex justify-between items-center text-xs text-slate-500 border-t border-slate-800/60 mt-4">
-						<span>Position ahead: <strong class="text-slate-300">{currentEntry.position_ahead}</strong></span>
-						<span>Est. Wait: <strong class="text-slate-300">{currentEntry.estimated_wait_minutes} min</strong></span>
+					<p class="text-sm text-slate-400">
+						Please wait inside the shop. We will call you when it is your turn.
+					</p>
+					<div
+						class="pt-2 flex justify-between items-center text-xs text-slate-500 border-t border-slate-800/60 mt-4"
+					>
+						<span
+							>Position ahead: <strong class="text-slate-300">{currentEntry.position_ahead}</strong
+							></span
+						>
+						<span
+							>Est. Wait: <strong class="text-slate-300"
+								>{currentEntry.estimated_wait_minutes} min</strong
+							></span
+						>
 					</div>
 				</div>
 			{:else if currentEntry.presence_state === 'on_the_way'}
 				<!-- STATE 2 — On The Way (PIN / GPS verification) -->
 				<div class="space-y-6">
 					<!-- Queue info card -->
-					<div class="bg-slate-950/50 border border-slate-850 rounded-2xl p-4 flex justify-around text-center">
+					<div
+						class="bg-slate-950/50 border border-slate-850 rounded-2xl p-4 flex justify-around text-center"
+					>
 						<div>
-							<div class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Ahead of You</div>
-							<div class="text-xl font-black text-slate-200 mt-0.5">{currentEntry.position_ahead}</div>
+							<div class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+								Ahead of You
+							</div>
+							<div class="text-xl font-black text-slate-200 mt-0.5">
+								{currentEntry.position_ahead}
+							</div>
 						</div>
 						<div class="w-px bg-slate-850"></div>
 						<div>
-							<div class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Est. Wait</div>
-							<div class="text-xl font-black text-slate-200 mt-0.5">{currentEntry.estimated_wait_minutes}m</div>
+							<div class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+								Est. Wait
+							</div>
+							<div class="text-xl font-black text-slate-200 mt-0.5">
+								{currentEntry.estimated_wait_minutes}m
+							</div>
 						</div>
 					</div>
 
 					<!-- Arrival confirmation form -->
 					<div class="space-y-4">
-						<h3 class="text-sm font-bold text-slate-200 uppercase tracking-wider text-center">Verify Physical Arrival</h3>
+						<h3 class="text-sm font-bold text-slate-200 uppercase tracking-wider text-center">
+							Verify Physical Arrival
+						</h3>
 
 						<form onsubmit={handleConfirmArrivalPin} class="space-y-3">
 							<div>
-								<label for="pin-input" class="block text-xs font-semibold text-slate-400 mb-1.5">Enter 4-Digit Counter PIN</label>
+								<label for="pin-input" class="block text-xs font-semibold text-slate-400 mb-1.5"
+									>Enter 4-Digit Counter PIN</label
+								>
 								<div class="flex gap-2">
 									<input
 										type="tel"
@@ -486,11 +548,17 @@
 							</div>
 
 							{#if pinError}
-								<p class="text-xs text-rose-400 mt-1 text-center font-medium bg-rose-950/20 border border-rose-900/40 rounded-lg py-2 px-3">{pinError}</p>
+								<p
+									class="text-xs text-rose-400 mt-1 text-center font-medium bg-rose-950/20 border border-rose-900/40 rounded-lg py-2 px-3"
+								>
+									{pinError}
+								</p>
 							{/if}
 
 							{#if pinAttemptsRemaining === 0}
-								<p class="text-xs text-rose-400 mt-1 text-center font-bold bg-rose-950/30 border border-rose-900/60 rounded-lg py-2 px-3">
+								<p
+									class="text-xs text-rose-400 mt-1 text-center font-bold bg-rose-950/30 border border-rose-900/60 rounded-lg py-2 px-3"
+								>
 									Too many attempts. Ask staff to confirm your arrival.
 								</p>
 							{/if}
@@ -498,7 +566,10 @@
 
 						<div class="relative flex py-2 items-center">
 							<div class="flex-grow border-t border-slate-850"></div>
-							<span class="flex-shrink mx-4 text-xs font-bold text-slate-500 uppercase tracking-widest">or</span>
+							<span
+								class="flex-shrink mx-4 text-xs font-bold text-slate-500 uppercase tracking-widest"
+								>or</span
+							>
 							<div class="flex-grow border-t border-slate-850"></div>
 						</div>
 
@@ -519,7 +590,11 @@
 							</button>
 
 							{#if gpsError}
-								<p class="text-xs text-rose-400 text-center font-medium bg-rose-950/20 border border-rose-900/40 rounded-lg py-2 px-3">{gpsError}</p>
+								<p
+									class="text-xs text-rose-400 text-center font-medium bg-rose-950/20 border border-rose-900/40 rounded-lg py-2 px-3"
+								>
+									{gpsError}
+								</p>
 							{/if}
 						</div>
 					</div>
@@ -528,22 +603,36 @@
 				<!-- STATE 1 — Remote / Notified -->
 				<div class="space-y-6">
 					<!-- Queue info card -->
-					<div class="bg-slate-950/50 border border-slate-850 rounded-2xl p-4 flex justify-around text-center">
+					<div
+						class="bg-slate-950/50 border border-slate-850 rounded-2xl p-4 flex justify-around text-center"
+					>
 						<div>
-							<div class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Ahead of You</div>
-							<div class="text-xl font-black text-slate-200 mt-0.5">{currentEntry.position_ahead}</div>
+							<div class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+								Ahead of You
+							</div>
+							<div class="text-xl font-black text-slate-200 mt-0.5">
+								{currentEntry.position_ahead}
+							</div>
 						</div>
 						<div class="w-px bg-slate-850"></div>
 						<div>
-							<div class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Est. Wait</div>
-							<div class="text-xl font-black text-slate-200 mt-0.5">{currentEntry.estimated_wait_minutes}m</div>
+							<div class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+								Est. Wait
+							</div>
+							<div class="text-xl font-black text-slate-200 mt-0.5">
+								{currentEntry.estimated_wait_minutes}m
+							</div>
 						</div>
 					</div>
 
 					<!-- Services list -->
 					<div class="space-y-2">
-						<span class="text-xs font-bold text-slate-400 uppercase tracking-wider block">Requested Services</span>
-						<div class="bg-slate-950/30 border border-slate-850 rounded-2xl p-4 divide-y divide-slate-850/60">
+						<span class="text-xs font-bold text-slate-400 uppercase tracking-wider block"
+							>Requested Services</span
+						>
+						<div
+							class="bg-slate-950/30 border border-slate-850 rounded-2xl p-4 divide-y divide-slate-850/60"
+						>
 							{#each currentEntry.services as svc}
 								<div class="flex justify-between items-center py-2 first:pt-0 last:pb-0 text-xs">
 									<span class="font-extrabold text-slate-200">{svc.name}</span>
@@ -576,7 +665,11 @@
 					</div>
 
 					{#if actionError}
-						<p class="text-xs text-rose-400 text-center font-medium bg-rose-950/20 border border-rose-900/40 rounded-lg py-2 px-3">{actionError}</p>
+						<p
+							class="text-xs text-rose-400 text-center font-medium bg-rose-950/20 border border-rose-900/40 rounded-lg py-2 px-3"
+						>
+							{actionError}
+						</p>
 					{/if}
 				</div>
 			{/if}
@@ -595,13 +688,14 @@
 	}
 
 	@keyframes bounce {
-		0%, 100% {
+		0%,
+		100% {
 			transform: translateY(-5%);
-			animation-timing-function: cubic-bezier(0.8,0,1,1);
+			animation-timing-function: cubic-bezier(0.8, 0, 1, 1);
 		}
 		50% {
 			transform: none;
-			animation-timing-function: cubic-bezier(0,0,0.2,1);
+			animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
 		}
 	}
 </style>

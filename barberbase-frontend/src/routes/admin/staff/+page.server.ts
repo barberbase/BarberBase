@@ -57,7 +57,9 @@ export const actions: Actions = {
 			return { success: true };
 		} catch (err: any) {
 			if (err?.status === 401) throw redirect(302, '/login');
-			return fail(err?.status || 500, { error: err?.data?.message || 'Failed to add staff member' });
+			return fail(err?.status || 500, {
+				error: err?.data?.message || 'Failed to add staff member'
+			});
 		}
 	}
 };
