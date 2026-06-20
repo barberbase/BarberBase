@@ -17,36 +17,23 @@ function uint8ArrayToBase64url(arr: Uint8Array): string {
 	for (let i = 0; i < len; i++) {
 		binary += String.fromCharCode(arr[i]);
 	}
-	return btoa(binary)
-		.replace(/=/g, '')
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_');
+	return btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
 
 async function getHmacKey(secret: string): Promise<CryptoKey> {
 	const keyData = encoder.encode(secret);
-	return crypto.subtle.importKey(
-		'raw',
-		keyData,
-		{ name: 'HMAC', hash: 'SHA-256' },
-		false,
-		['sign', 'verify']
-	);
+	return crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, [
+		'sign',
+		'verify'
+	]);
 }
 
 export async function signSession(secret: string, ttlSeconds: number): Promise<string> {
 	const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
-	const payload = btoa(String(exp))
-		.replace(/=/g, '')
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_'); // base64url
+	const payload = btoa(String(exp)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_'); // base64url
 
 	const key = await getHmacKey(secret);
-	const sigBuffer = await crypto.subtle.sign(
-		'HMAC',
-		key,
-		encoder.encode(payload)
-	);
+	const sigBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(payload));
 
 	const sigArray = new Uint8Array(sigBuffer);
 	const sig = uint8ArrayToBase64url(sigArray);
@@ -62,11 +49,7 @@ export async function verifySession(token: string, secret: string): Promise<bool
 	const key = await getHmacKey(secret);
 
 	// Recompute signature
-	const expectedBuffer = await crypto.subtle.sign(
-		'HMAC',
-		key,
-		encoder.encode(payload)
-	);
+	const expectedBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(payload));
 	const expectedArray = new Uint8Array(expectedBuffer);
 	const expectedSig = uint8ArrayToBase64url(expectedArray);
 
@@ -76,11 +59,7 @@ export async function verifySession(token: string, secret: string): Promise<bool
 
 	// Decode payload (exp timestamp)
 	try {
-		const decodedPayload = atob(
-			payload
-				.replace(/-/g, '+')
-				.replace(/_/g, '/')
-		);
+		const decodedPayload = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
 		const exp = parseInt(decodedPayload, 10);
 		if (isNaN(exp)) return false;
 		return exp > Math.floor(Date.now() / 1000);

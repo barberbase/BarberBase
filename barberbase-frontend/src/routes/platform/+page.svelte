@@ -100,15 +100,21 @@
 	<title>Operator Console — BarberBase</title>
 </svelte:head>
 
-<div class="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
+<div
+	class="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950"
+>
 	<!-- Top Navigation Header -->
-	<header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center">
+	<header
+		class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center"
+	>
 		<div class="flex items-center space-x-3">
 			<span class="text-xl font-extrabold text-amber-500 tracking-wider">BarberBase</span>
 			<span class="text-slate-500">|</span>
 			<span class="text-sm font-semibold text-slate-300">Operator Console</span>
 		</div>
-		<div class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-slate-700 bg-slate-800 text-slate-300">
+		<div
+			class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-slate-700 bg-slate-800 text-slate-300"
+		>
 			Authorized Session
 		</div>
 	</header>
@@ -116,55 +122,91 @@
 	<main class="flex-1 max-w-4xl w-full mx-auto p-6 flex flex-col justify-center">
 		{#if form?.success}
 			<!-- SUCCESS PANEL -->
-			<div class="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-8 animate-fade-in">
+			<div
+				class="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-8 animate-fade-in"
+			>
 				<div class="text-center space-y-2">
-					<div class="mx-auto w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-3xl">
+					<div
+						class="mx-auto w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-3xl"
+					>
 						🎉
 					</div>
 					<h2 class="text-2xl font-extrabold text-emerald-400">Shop Successfully Provisioned!</h2>
-					<p class="text-sm text-slate-400">Write down these credentials. The database records have been bootstrapped.</p>
+					<p class="text-sm text-slate-400">
+						Write down these credentials. The database records have been bootstrapped.
+					</p>
 				</div>
 
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 					<!-- Pin display (Critical UX) -->
-					<div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 flex flex-col items-center justify-center text-center space-y-2">
-						<span class="text-xs font-bold text-slate-500 uppercase tracking-widest">Arrival PIN</span>
-						<span class="text-4xl font-black text-amber-500 tracking-widest">{form.arrival_pin}</span>
-						<span class="text-xs font-bold text-amber-500/80 bg-amber-500/5 border border-amber-500/10 px-3 py-1 rounded-full">
+					<div
+						class="bg-slate-950 border border-slate-800 rounded-2xl p-6 flex flex-col items-center justify-center text-center space-y-2"
+					>
+						<span class="text-xs font-bold text-slate-500 uppercase tracking-widest"
+							>Arrival PIN</span
+						>
+						<span class="text-4xl font-black text-amber-500 tracking-widest"
+							>{form.arrival_pin}</span
+						>
+						<span
+							class="text-xs font-bold text-amber-500/80 bg-amber-500/5 border border-amber-500/10 px-3 py-1 rounded-full"
+						>
 							Shown once — laminate on the counter
 						</span>
 					</div>
 
 					<!-- Onboarding details -->
-					<div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 flex flex-col justify-center space-y-3">
-						<span class="text-xs font-bold text-slate-500 uppercase tracking-widest">Shop Domain</span>
+					<div
+						class="bg-slate-950 border border-slate-800 rounded-2xl p-6 flex flex-col justify-center space-y-3"
+					>
+						<span class="text-xs font-bold text-slate-500 uppercase tracking-widest"
+							>Shop Domain</span
+						>
 						<a
 							href="https://barberbase.in{form.public_path}"
 							target="_blank"
 							class="text-sm font-bold text-amber-400 hover:text-amber-300 underline break-all flex items-center space-x-1.5"
 						>
 							<span>barberbase.in{form.public_path}</span>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								class="h-4 w-4 shrink-0"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke="currentColor"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+								/>
 							</svg>
 						</a>
 						<span class="text-xs text-slate-400 mt-1 block">
-							Owner can now log in at <a href="/login" class="text-amber-500 hover:underline">/login</a> with <span class="font-bold text-slate-300">{form.owner_phone}</span>
+							Owner can now log in at <a href="/login" class="text-amber-500 hover:underline"
+								>/login</a
+							>
+							with <span class="font-bold text-slate-300">{form.owner_phone}</span>
 						</span>
 					</div>
 				</div>
 
 				<!-- Identity mappings -->
 				<div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4">
-					<span class="text-xs font-bold text-slate-400 uppercase tracking-widest block border-b border-slate-800 pb-2">
+					<span
+						class="text-xs font-bold text-slate-400 uppercase tracking-widest block border-b border-slate-800 pb-2"
+					>
 						System Identifiers
 					</span>
-					
+
 					<div class="space-y-3">
 						<div class="flex justify-between items-center gap-4">
 							<span class="text-xs text-slate-500 font-semibold">Tenant ID</span>
 							<div class="flex items-center space-x-2">
-								<code class="text-xs font-mono text-slate-300 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg select-all">
+								<code
+									class="text-xs font-mono text-slate-300 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg select-all"
+								>
 									{form.tenant_id}
 								</code>
 								<button
@@ -180,7 +222,9 @@
 						<div class="flex justify-between items-center gap-4">
 							<span class="text-xs text-slate-500 font-semibold">Location ID</span>
 							<div class="flex items-center space-x-2">
-								<code class="text-xs font-mono text-slate-300 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg select-all">
+								<code
+									class="text-xs font-mono text-slate-300 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg select-all"
+								>
 									{form.location_id}
 								</code>
 								<button
@@ -196,7 +240,9 @@
 						<div class="flex justify-between items-center gap-4">
 							<span class="text-xs text-slate-500 font-semibold">Owner Staff ID</span>
 							<div class="flex items-center space-x-2">
-								<code class="text-xs font-mono text-slate-300 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg select-all">
+								<code
+									class="text-xs font-mono text-slate-300 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg select-all"
+								>
 									{form.owner_staff_member_id}
 								</code>
 								<button
@@ -221,10 +267,14 @@
 			</div>
 		{:else}
 			<!-- PROVISIONING FORM -->
-			<div class="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-8 animate-fade-in">
+			<div
+				class="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-8 animate-fade-in"
+			>
 				<div>
 					<h2 class="text-2xl font-extrabold text-slate-100">Onboard New Salon / Shop</h2>
-					<p class="text-sm text-slate-400">Instantly provision database tables, location attributes, and WhatsApp router rules.</p>
+					<p class="text-sm text-slate-400">
+						Instantly provision database tables, location attributes, and WhatsApp router rules.
+					</p>
 				</div>
 
 				<form
@@ -241,10 +291,12 @@
 				>
 					<!-- Tenant section -->
 					<div class="space-y-4">
-						<h3 class="text-xs font-bold text-amber-500 uppercase tracking-wider border-b border-slate-800 pb-2">
+						<h3
+							class="text-xs font-bold text-amber-500 uppercase tracking-wider border-b border-slate-800 pb-2"
+						>
 							1. Tenant Company Info
 						</h3>
-						
+
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 							<div class="space-y-1.5">
 								<label for="tenant_name" class="block text-xs font-medium text-slate-450">
@@ -274,7 +326,7 @@
 									required
 									disabled={loading}
 									bind:value={tenantSlug}
-									oninput={() => isTenantSlugEdited = true}
+									oninput={() => (isTenantSlugEdited = true)}
 									class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm"
 								/>
 							</div>
@@ -283,7 +335,9 @@
 
 					<!-- Location section -->
 					<div class="space-y-4">
-						<h3 class="text-xs font-bold text-amber-500 uppercase tracking-wider border-b border-slate-800 pb-2">
+						<h3
+							class="text-xs font-bold text-amber-500 uppercase tracking-wider border-b border-slate-800 pb-2"
+						>
 							2. First Location Info
 						</h3>
 
@@ -316,7 +370,7 @@
 									required
 									disabled={loading}
 									bind:value={locationSlug}
-									oninput={() => isLocationSlugEdited = true}
+									oninput={() => (isLocationSlugEdited = true)}
 									class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm"
 								/>
 							</div>
@@ -358,7 +412,9 @@
 
 					<!-- Owner section -->
 					<div class="space-y-4">
-						<h3 class="text-xs font-bold text-amber-500 uppercase tracking-wider border-b border-slate-800 pb-2">
+						<h3
+							class="text-xs font-bold text-amber-500 uppercase tracking-wider border-b border-slate-800 pb-2"
+						>
 							3. Owner Staff Profile
 						</h3>
 
@@ -399,9 +455,22 @@
 
 					<!-- Inline Error Display -->
 					{#if form?.error}
-						<div class="bg-red-950/30 border border-red-900/50 rounded-2xl p-4 text-sm text-red-400 flex items-start space-x-3 animate-fade-in">
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+						<div
+							class="bg-red-950/30 border border-red-900/50 rounded-2xl p-4 text-sm text-red-400 flex items-start space-x-3 animate-fade-in"
+						>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								class="h-5 w-5 shrink-0 mt-0.5"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke="currentColor"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+								/>
 							</svg>
 							<div>{form.error}</div>
 						</div>
@@ -413,9 +482,25 @@
 						class="w-full py-4 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-amber-500 text-slate-950 font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
 					>
 						{#if loading}
-							<svg class="animate-spin h-5 w-5 text-slate-950" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+							<svg
+								class="animate-spin h-5 w-5 text-slate-950"
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+							>
+								<circle
+									class="opacity-25"
+									cx="12"
+									cy="12"
+									r="10"
+									stroke="currentColor"
+									stroke-width="4"
+								></circle>
+								<path
+									class="opacity-75"
+									fill="currentColor"
+									d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+								></path>
 							</svg>
 							<span>Provisioning System...</span>
 						{:else}

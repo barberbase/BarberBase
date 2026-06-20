@@ -5,7 +5,7 @@ import { getApiBase } from '$lib/api/client';
 export const actions: Actions = {
 	provision: async (event) => {
 		const data = await event.request.formData();
-		
+
 		const tenant_name = (data.get('tenant_name') as string)?.trim() || '';
 		const tenant_slug = (data.get('tenant_slug') as string)?.trim() || '';
 		const owner_name = (data.get('owner_name') as string)?.trim() || '';
@@ -25,22 +25,32 @@ export const actions: Actions = {
 			return fail(400, { error: 'Tenant name is required.' });
 		}
 		if (!tenant_slug || !/^[a-z0-9-]+$/.test(tenant_slug)) {
-			return fail(400, { error: 'Tenant slug is required and must contain only lowercase letters, numbers, and hyphens.' });
+			return fail(400, {
+				error:
+					'Tenant slug is required and must contain only lowercase letters, numbers, and hyphens.'
+			});
 		}
 		if (!owner_name) {
 			return fail(400, { error: 'Owner name is required.' });
 		}
 		if (!owner_phone || !/^\+91\d{10}$/.test(owner_phone)) {
-			return fail(400, { error: 'Owner phone must be a valid E.164 phone number (e.g. +919876543210).' });
+			return fail(400, {
+				error: 'Owner phone must be a valid E.164 phone number (e.g. +919876543210).'
+			});
 		}
 		if (!location_name) {
 			return fail(400, { error: 'Location name is required.' });
 		}
 		if (!location_slug || !/^[a-z0-9-]+\/[a-z0-9-]+$/.test(location_slug)) {
-			return fail(400, { error: 'Location slug is required and must match "tenant-slug/location-slug" format.' });
+			return fail(400, {
+				error: 'Location slug is required and must match "tenant-slug/location-slug" format.'
+			});
 		}
 		if (!location_slug.startsWith(tenant_slug + '/')) {
-			return fail(400, { error: 'Location slug must start with the tenant slug followed by a slash (e.g. tenant-slug/location-slug).' });
+			return fail(400, {
+				error:
+					'Location slug must start with the tenant slug followed by a slash (e.g. tenant-slug/location-slug).'
+			});
 		}
 
 		const key = event.platform?.env?.PLATFORM_ADMIN_KEY;
@@ -70,7 +80,7 @@ export const actions: Actions = {
 			});
 
 			if (res.status === 201) {
-				const body = await res.json() as any;
+				const body = (await res.json()) as any;
 				return {
 					success: true,
 					tenant_id: body.tenant_id,
@@ -91,7 +101,7 @@ export const actions: Actions = {
 			} else {
 				let errMessage = 'Provisioning failed. Try again.';
 				try {
-					const errBody = await res.json() as any;
+					const errBody = (await res.json()) as any;
 					if (errBody?.message) errMessage = errBody.message;
 				} catch {
 					// Fallback to default message
