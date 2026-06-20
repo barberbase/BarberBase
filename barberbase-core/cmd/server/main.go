@@ -19,6 +19,7 @@ import (
 	"barberbase-core/internal/outbox"
 	"barberbase-core/internal/realtime"
 	"barberbase-core/internal/repository"
+	bbMiddleware "barberbase-core/pkg/middleware"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -67,6 +68,7 @@ func main() {
 
 	// 4. Setup router and middleware
 	r := chi.NewRouter()
+	r.Use(bbMiddleware.CORS)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
@@ -121,7 +123,7 @@ func main() {
 		Addr:         serverAddr,
 		Handler:      r,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		WriteTimeout: 0,
 		IdleTimeout:  30 * time.Second,
 	}
 
