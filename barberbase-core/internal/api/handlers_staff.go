@@ -175,7 +175,7 @@ func (s *Server) RequestStaffOTP(w http.ResponseWriter, r *http.Request) {
 		IdempotencyKey: fmt.Sprintf("barberbase:otp:%s", otpID.String()),
 	}
 
-	_, err = s.Bhejna.SendTemplate(ctx, tenantID, locationID, bhejnaReq)
+	_, err = s.Bhejna.SendTemplate(ctx, uuid.Nil, uuid.Nil, bhejnaReq)
 	if err != nil {
 		// Log but return 200 anyway. Do NOT rollback.
 		log.Printf("[Warning] Bhejna delivery failed: %v", err)

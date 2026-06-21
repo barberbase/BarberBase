@@ -31,6 +31,7 @@ type SendTextReq struct {
 	To             string // E.164, already normalized by caller
 	Body           string
 	IdempotencyKey string // MUST be "barberbase:otp:{staff_otp_id}"
+	SenderClass    SenderClass
 }
 
 type SendTemplateReq struct {
@@ -96,7 +97,11 @@ func NewClient(pool *pgxpool.Pool, aesKey []byte, modeAKey, modeAPhone string) C
 }
 
 // resolveCredentials queries the database for location-specific credentials and decrypts them if necessary
-func (c *bhejnaClient) resolveCredentials(ctx context.Context, tenantID, locationID uuid.UUID) (apiKey string, fromPhone string, err error) {
+func (c *bhejnaClient) resolveCredentials(ctx context.Context, tenantID, locationID uuid.UUID, class SenderClass) (apiKey string, fromPhone string, err error) {
+	if class == SenderPlatform {
+		return c.modeAKey, c.modeAPhone, nil
+	}
+
 	var whatsappMode string
 	var businessWhatsAppNumber sql.NullString
 	var apiKeyEncrypted sql.NullString
@@ -211,7 +216,11 @@ func (c *bhejnaClient) sendHTTPRequest(ctx context.Context, apiKey string, paylo
 }
 
 func (c *bhejnaClient) SendText(ctx context.Context, tenantID, locationID uuid.UUID, req SendTextReq) (*SendResult, error) {
-	apiKey, fromPhone, err := c.resolveCredentials(ctx, tenantID, locationID)
+	class := req.SenderClass
+	if class == "" {
+		class = SenderCustomer
+	}
+	apiKey, fromPhone, err := c.resolveCredentials(ctx, tenantID, locationID, class)
 	if err != nil {
 		return nil, err
 	}
@@ -229,8 +238,15 @@ func (c *bhejnaClient) SendText(ctx context.Context, tenantID, locationID uuid.U
 	return c.sendHTTPRequest(ctx, apiKey, payload)
 }
 
+func (c *bhejnaClient) SendTextPlatform(ctx context.Context, req SendTextReq) (*SendResult, error) {
+	req.SenderClass = SenderPlatform
+	return c.SendText(ctx, uuid.Nil, uuid.Nil, req)
+}
+
+
 func (c *bhejnaClient) SendTemplate(ctx context.Context, tenantID, locationID uuid.UUID, req SendTemplateReq) (*SendResult, error) {
-	apiKey, fromPhone, err := c.resolveCredentials(ctx, tenantID, locationID)
+	class := ClassFor(req.TemplateCode)
+	apiKey, fromPhone, err := c.resolveCredentials(ctx, tenantID, locationID, class)
 	if err != nil {
 		return nil, err
 	}
