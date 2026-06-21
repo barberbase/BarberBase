@@ -207,7 +207,7 @@ func (w *WeeklySummary) RunJob(ctx context.Context, now time.Time) {
 	for _, r := range data {
 		totalRevenueFormatted := formatIndianNumber(r.TotalRevenuePaise / 100)
 
-		avgRatingStr := "N/A"
+		avgRatingStr := "–"
 		if r.AvgRating > 0 {
 			avgRatingStr = fmt.Sprintf("%.1f", r.AvgRating)
 		}
@@ -235,7 +235,6 @@ func (w *WeeklySummary) RunJob(ctx context.Context, now time.Time) {
 				map[string]interface{}{
 					"type": "body",
 					"parameters": []interface{}{
-						map[string]interface{}{"type": "text", "text": weekRange},
 						map[string]interface{}{"type": "text", "text": r.ShopName},
 						map[string]interface{}{"type": "text", "text": totalRevenueFormatted},
 						map[string]interface{}{"type": "text", "text": strconv.Itoa(r.TotalVisits)},
