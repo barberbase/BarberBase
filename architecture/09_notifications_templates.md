@@ -282,42 +282,68 @@ Button 2 — QUICK_REPLY: "Cancel"
 ---
  
 ## Template 8: `bb_weekly_summary`
- 
+
 **Category:** UTILITY | **Cost:** ~₹0.14 (business-initiated)
-**Trigger:** Sunday 10 PM cron → sent to `tenants.owner_phone_number`
+**Trigger:** Sunday 10 PM IST cron → sent to `tenants.owner_phone_number`
 **Quota:** `whatsapp_transactional`
- 
+**Sender class:** PLATFORM — always sent from the BarberBase platform WABA regardless of location `whatsapp_mode` (see C7.1 / sender_class.go).
+
+> **Variable numbering is per-component.** Header, body, and button each have their own `{{1}}` sequence; they are NOT one shared 1..n run. The send payload reflects this — separate `parameters[]` arrays per component block.
+
 ```
-Header: 📊 Weekly Report — {{1}}
- 
+Header: 📊 Weekly Report — {{1}}          (header {{1}} = week_range)
+
 Body:
-Here's how {{2}} performed this week:
-💰 Revenue: ₹{{3}}
-✂️ Customers served: {{4}}
-⭐ Avg rating: {{5}}/5
-⏱ Avg wait: {{6}} min
-❌ No-shows: {{7}}
-{{8}}
- 
+Here's how *{{1}}* did this week:         (body {{1}} = shop_name)
+💰 Revenue ₹*{{2}}* · ✂️ *{{3}}* customers
+⭐ Avg rating *{{4}}*/5 · ⏱ Avg wait *{{5}}* min
+❌ No-shows: *{{6}}*
+
+{{7}} — see full report below
+
 Footer: BarberBase
- 
+
 Button 1 — URL: "View Full Report"
   Static: https://barberbase.in/admin/analytics?t=  Dynamic suffix: ENABLED
 ```
- 
+
+**Header component** — 1 parameter:
+
 | # | Field | Example |
 |---|---|---|
 | {{1}} | week_range | "May 26 – Jun 1" |
-| {{2}} | shop_name | "Star Salon" |
-| {{3}} | total_revenue_formatted | "12,450" |
-| {{4}} | total_visits | "87" |
-| {{5}} | avg_rating | "4.3" |
-| {{6}} | avg_wait_minutes | "22" |
-| {{7}} | no_show_count | "4" |
-| {{8}} | highlight_text | "🏆 Best day: Sunday (28 customers)!" |
+
+**Body component** — 7 parameters (week_range is NOT repeated here; it lives in the header only):
+
+| # | Field | Example |
+|---|---|---|
+| {{1}} | shop_name | "Star Salon" |
+| {{2}} | total_revenue_formatted | "12,450" |
+| {{3}} | total_visits | "87" |
+| {{4}} | avg_rating | "4.3" — renders "–" when no feedback that week (code emits "–", not "N/A") |
+| {{5}} | avg_wait_minutes | "22" |
+| {{6}} | no_show_count | "4" |
+| {{7}} | highlight_text | "🏆 Best day: Sunday (28 customers)!" |
+
+**Button component** (index 0) — 1 parameter:
+
+| # | Field | Example |
+|---|---|---|
 | Button 1 suffix | owner_session_token | "eyJhbGci..." |
- 
+
+**Outbox payload `components` (built by `internal/jobs/weekly_summary.go`):**
+```json
+"components": [
+  { "type": "header", "parameters": [ week_range ] },
+  { "type": "body",   "parameters": [ shop_name, total_revenue_formatted, total_visits,
+                                      avg_rating, avg_wait_minutes, no_show_count, highlight_text ] },
+  { "type": "button", "sub_type": "url", "index": 0, "parameters": [ owner_session_token ] }
+]
+```
+
 **Law 14:** Weekly summary ships in Phase 1. Owner retention mechanism.
+
+**Amended 2026-06-21 (commit 8543ba8):** Header and body variables renumbered to independent per-component sequences (previously documented as a shared `{{1}}`–`{{8}}` run). Body reduced 8 → 7 parameters — `week_range` moved to the header component only. Reflects shipped code after the param-count fix.
  
 ---
  

@@ -170,6 +170,17 @@ func (s *Server) RequestStaffOTP(w http.ResponseWriter, r *http.Request) {
 					},
 				},
 			},
+			{
+				Type:    "button",
+				SubType: "url",
+				Index:   0,
+				Parameters: []bhejna.TemplateParameter{
+					{
+						Type: "text",
+						Text: otpCode,
+					},
+				},
+			},
 		},
 		// Idempotency key scoped to OTP ID
 		IdempotencyKey: fmt.Sprintf("barberbase:otp:%s", otpID.String()),
