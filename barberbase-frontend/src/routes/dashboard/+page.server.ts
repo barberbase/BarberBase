@@ -1,40 +1,6 @@
 import { ApiClient } from '$lib/api/client';
 import type { PageServerLoad } from './$types';
 
-// Global fetch override for test/local environment DNS bypass
-if (typeof globalThis !== 'undefined') {
-	const globalRef = globalThis as any;
-	if (!globalRef.process) {
-		globalRef.process = { env: { PUBLIC_API_BASE: 'http://127.0.0.1:9090' } };
-	} else if (!globalRef.process.env) {
-		globalRef.process.env = { PUBLIC_API_BASE: 'http://127.0.0.1:9090' };
-	} else {
-		globalRef.process.env.PUBLIC_API_BASE = 'http://127.0.0.1:9090';
-	}
-
-	const originalFetch = globalRef.fetch;
-	globalRef.fetch = function (input: any, init: any) {
-		let target = input;
-		if (typeof input === 'string' && input.includes('api.barberbase.in')) {
-			target = input.replace('https://api.barberbase.in', 'http://127.0.0.1:9090');
-		} else if (
-			input &&
-			typeof input === 'object' &&
-			'url' in input &&
-			typeof input.url === 'string' &&
-			input.url.includes('api.barberbase.in')
-		) {
-			try {
-				const newUrl = input.url.replace('https://api.barberbase.in', 'http://127.0.0.1:9090');
-				target = new Request(newUrl, input);
-			} catch (e) {
-				// Fallback if Request constructor is not fully supported or throws
-			}
-		}
-		return originalFetch(target, init);
-	};
-}
-
 export const load: PageServerLoad = async (event) => {
 	const accessToken = event.cookies.get('access_token');
 	const parentData = await event.parent();
