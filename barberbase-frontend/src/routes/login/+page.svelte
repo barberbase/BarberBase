@@ -187,14 +187,14 @@
 						name="otp"
 						placeholder="e.g. 123456"
 						maxlength="6"
-						pattern="\d{6}"
 						required
 						disabled={loading}
 						bind:value={otp}
+						oninput={() => { otp = otp.replace(/\D/g, '').slice(0, 6); }}
 						class="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-4 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 tracking-[0.5em] text-center font-bold text-xl transition-all duration-200"
 					/>
 					<span class="text-[11px] text-slate-500 block text-center">
-						OTP is valid for 10 minutes.
+						OTP is valid for 5 minutes.
 					</span>
 				</div>
 
