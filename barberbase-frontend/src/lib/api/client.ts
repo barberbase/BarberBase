@@ -78,11 +78,8 @@ export class ApiClient {
 			throw { status: response.status, data: errorData };
 		}
 
-		if (response.status === 204) {
-			return {} as T;
-		}
-
-		return response.json() as Promise<T>;
+		const text = await response.text();
+		return (text ? JSON.parse(text) : {}) as T;
 	}
 
 	get<T>(path: string, options?: Omit<RequestInit, 'method'>) {
