@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-23T15:28:00Z",
+  "title": "Design System: BarberBase",
+  "extensions": {
+    "colorMeta": {
+      "canvas": { "role": "neutral", "displayName": "Canvas BG", "canonical": "#080808", "tonalRamp": ["#080808", "#121212", "#1b1b1b", "#272727", "#3b3b3b", "#5c5c5c", "#a0a0a0", "#e0e0e0"] },
+      "matte": { "role": "neutral", "displayName": "Matte Scaffolding", "canonical": "#0E0E0E", "tonalRamp": ["#0E0E0E", "#181818", "#222222", "#313131", "#484848", "#6a6a6a", "#b0b0b0", "#eaeaea"] },
+      "surface": { "role": "neutral", "displayName": "Surface Cards", "canonical": "#141414", "tonalRamp": ["#141414", "#1e1e1e", "#2c2c2c", "#3c3c3c", "#565656", "#7a7a7a", "#c0c0c0", "#f2f2f2"] },
+      "titanium": { "role": "neutral", "displayName": "Titanium Inputs", "canonical": "#1C1C1C", "tonalRamp": ["#1C1C1C", "#262626", "#363636", "#4a4a4a", "#6b6b6b", "#909090", "#d0d0d0", "#fafafa"] },
+      "primary": { "role": "primary", "displayName": "Alabaster Primary", "canonical": "#E5E2D9", "tonalRamp": ["#1f1f1e", "#3a3a38", "#63625f", "#93918d", "#c5c2b9", "#e5e2d9", "#f2f1ed", "#faf9f7"] },
+      "muted": { "role": "neutral", "displayName": "Pebble Grey", "canonical": "#9F9B93", "tonalRamp": ["#151514", "#2c2b29", "#4e4c49", "#72706b", "#9f9b93", "#c1beb7", "#e1dfdb", "#f5f4f2"] },
+      "dim": { "role": "neutral", "displayName": "Neutral Dim", "canonical": "#5A5854", "tonalRamp": ["#0c0c0b", "#1c1b1a", "#302f2e", "#5a5854", "#7e7b77", "#a6a39f", "#d2d0cd", "#f0efee"] },
+      "gold-accent": { "role": "accent", "displayName": "Champagne Gold", "canonical": "#C8A96B", "tonalRamp": ["#1a160e", "#372e1d", "#5b4c30", "#877147", "#b3975f", "#c8a96b", "#dbcbaa", "#f2ebd9"] },
+      "system-success": { "role": "success", "displayName": "System Success", "canonical": "#10B981", "tonalRamp": ["#021b13", "#043725", "#075e40", "#0c9566", "#10b981", "#3cd3a2", "#7be4c2", "#dff9f0"] },
+      "system-warning": { "role": "warning", "displayName": "System Warning", "canonical": "#F59E0B", "tonalRamp": ["#221602", "#472e04", "#7b4f06", "#c37e09", "#f59e0b", "#f8bb46", "#fbd68c", "#fef5e2"] },
+      "system-error": { "role": "error", "displayName": "System Error", "canonical": "#EF4444", "tonalRamp": ["#250404", "#4e0909", "#870f0f", "#cf1818", "#ef4444", "#f47a7a", "#f8b1b1", "#fdeeee"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display Title", "purpose": "Hero headers and large numeric timers." },
+      "body": { "displayName": "Body Copy", "purpose": "Standard paragraphs and form items." },
+      "mono": { "displayName": "Monospace Labels", "purpose": "Strict aligned numeric fields and check-in statuses." }
+    },
+    "shadows": [
+      { "name": "active-glow", "value": "0 0 12px rgba(200, 169, 107, 0.15)", "purpose": "Active queue position highlight." }
+    ],
+    "motion": [
+      { "name": "active-scale", "value": "scale(0.98)", "purpose": "Tactile click feedback shrink animation." }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "600px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card-matte",
+      "description": "Tactile elevated block container representing physical plates.",
+      "html": "<div class=\"ds-card ds-card-matte\"><p>Card Content</p></div>",
+      "css": ".ds-card { border-radius: 12px; border: 1px solid rgba(255,255,255,0.03); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03); padding: 20px; transition: all 0.2s ease-in-out; } .ds-card-matte { background: #0E0E0E; } .ds-card-surface { background: #141414; border-color: rgba(255,255,255,0.04); } .ds-card-titanium { background: #1C1C1C; border-color: rgba(255,255,255,0.05); }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Warm Alabaster primary click wrapper with 80ms active shrink behavior.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">CONTINUE</button>",
+      "css": ".ds-btn { width: 100%; display: inline-flex; align-items: center; justify-content: center; border-radius: 9999px; border: 1px solid transparent; padding: 14px 24px; font-size: 12px; font-family: 'Inter', sans-serif; text-transform: uppercase; letter-spacing: 0.25em; font-weight: 700; transition: all 0.15s ease; user-select: none; cursor: pointer; } .ds-btn:active { transform: scale(0.98); } .ds-btn-primary { background: #E5E2D9; color: #080808; } .ds-btn-primary:hover { background: #D5D2C9; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Ghost bordered action wrapper for secondary controls.",
+      "html": "<button class=\"ds-btn ds-btn-secondary\">CANCEL</button>",
+      "css": ".ds-btn { width: 100%; display: inline-flex; align-items: center; justify-content: center; border-radius: 9999px; border: 1px solid rgba(255, 255, 255, 0.1); padding: 14px 24px; font-size: 12px; font-family: 'Inter', sans-serif; text-transform: uppercase; letter-spacing: 0.25em; font-weight: 600; transition: all 0.15s ease; user-select: none; cursor: pointer; background: transparent; } .ds-btn:active { transform: scale(0.98); } .ds-btn-secondary { color: #E5E2D9; } .ds-btn-secondary:hover { background: rgba(255,255,255,0.02); }"
+    },
+    {
+      "name": "Status Indicator",
+      "kind": "chip",
+      "description": "Tag representing queue nodes and state changes.",
+      "html": "<div class=\"ds-indicator ds-indicator-active\"><span class=\"ds-dot\"></span>YOUR TURN</div>",
+      "css": ".ds-indicator { display: inline-flex; align-items: center; gap: 8px; border-radius: 4px; border: 1px solid transparent; padding: 2px 8px; font-size: 10px; font-family: 'Space Mono', monospace; font-weight: 500; } .ds-dot { width: 4px; height: 4px; border-radius: 50%; } .ds-indicator-active { border-color: #C8A96B; background: #C8A96B; color: #080808; box-shadow: 0 0 12px rgba(200, 169, 107, 0.15); } .ds-indicator-active .ds-dot { background: #080808; animation: ds-pulse 1.5s infinite; } .ds-indicator-success { border-color: #10B981; background: rgba(16, 185, 129, 0.1); color: #10B981; } .ds-indicator-success .ds-dot { background: #10B981; } @keyframes ds-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Machined Barber Tool",
+    "overview": "The BarberBase design system models the visual feel of precision grooming tools—machined metal, tactile micro-textures, and high-contrast indicators. Designed to eliminate waiting area overcrowding, it serves barbershop owners, staff, and customers through frictionless, real-time queues. The UI evokes quality and functional speed, using structural surface elevation to prevent cognitive load.\n\nIt explicitly rejects generic, cluttered SaaS templates with irrelevant widgets and bright, overstimulating neon colors that cause astigmatism halation on mobile screens.",
+    "keyCharacteristics": [
+      "Tactile Hardware Simulation: Simulated machined edges, tight transitions, and physical active scale-shrink responses.",
+      "Anti-Halation Surfaces: Zero pure black and zero pure white to protect against OLED smearing and visual fatigue.",
+      "Ergonomic Density: Focuses on queue states, wait-times, and status checkmarks clearly on a structured grid."
+    ],
+    "rules": [
+      { "name": "The Gold Accent Rule", "body": "Champagne Gold is used strictly for queue verification highlights and the active 'Your Turn' state. Its use must not exceed 5% of any screen surface to maintain its visual weight.", "section": "colors" },
+      { "name": "The Tabular Alignment Rule", "body": "All numbers, queue positions, and time stamps must use the monospace font stack (Space Mono) to ensure strict alignment across cards and tables.", "section": "typography" },
+      { "name": "The Tonal Scaffolding Rule", "body": "Depth is created using solid surface shifts: Canvas (#080808) -> Matte (#0E0E0E) -> Surface (#141414) -> Titanium (#1C1C1C).", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use bg-canvas for layout wrappers and let components stack above it using bg-matte or bg-surface.",
+      "Do align all active timer badges with the Champagne Gold accent to denote real-time responsiveness.",
+      "Do set custom scrollbars in long lists to keep a minimal 4px profile."
+    ],
+    "donts": [
+      "Don't use pure black (#000000) or pure white (#ffffff) anywhere in the application.",
+      "Don't use gradient text or background-clip: text combined with gradients.",
+      "Don't add side-stripe accent borders greater than 1px on cards or alert components."
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "files": [
+    "src/app.html"
+  ],
+  "insertBefore": "%sveltekit.body%",
+  "commentSyntax": "html",
+  "cspChecked": true
+}

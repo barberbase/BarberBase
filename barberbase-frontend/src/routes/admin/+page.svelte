@@ -186,31 +186,31 @@
 						<div
 							class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all {wizardStep >=
 							s
-								? 'bg-amber-500 text-slate-900'
-								: 'bg-slate-700 text-slate-400'}"
+								? 'bg-gold-accent text-canvas'
+								: 'bg-slate-700 text-muted'}"
 						>
 							{s}
 						</div>
 						{#if s < 3}
-							<div class="flex-1 h-0.5 {wizardStep > s ? 'bg-amber-500' : 'bg-slate-700'}"></div>
+							<div class="flex-1 h-0.5 {wizardStep > s ? 'bg-gold-accent' : 'bg-slate-700'}"></div>
 						{/if}
 					</div>
 				{/each}
 			</div>
 
-			<div class="bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-2xl">
+			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-8 shadow-2xl">
 				{#if wizardStep === 1}
 					<h1 class="text-2xl font-bold text-white mb-2">Welcome to BarberBase! 🎉</h1>
-					<p class="text-slate-400 mb-6 text-sm">
+					<p class="text-muted mb-6 text-sm">
 						Step 1: Add your first service so customers can book with you.
 					</p>
 					{#if svcError}
-						<p class="text-red-400 text-sm mb-4 bg-red-900/20 rounded-lg p-3">{svcError}</p>
+						<p class="text-system-error/80 text-sm mb-4 bg-red-900/20 rounded-lg p-3">{svcError}</p>
 					{/if}
 					<div class="space-y-4">
 						<div class="grid grid-cols-2 gap-3">
 							<div>
-								<label for="wz-cat-name" class="block text-xs text-slate-400 mb-1"
+								<label for="wz-cat-name" class="block text-xs text-muted mb-1"
 									>Category (e.g. Hair)</label
 								>
 								<input
@@ -221,7 +221,7 @@
 								/>
 							</div>
 							<div>
-								<label for="wz-cat-gender" class="block text-xs text-slate-400 mb-1">Gender</label>
+								<label for="wz-cat-gender" class="block text-xs text-muted mb-1">Gender</label>
 								<select
 									id="wz-cat-gender"
 									bind:value={svcCategoryGender}
@@ -234,7 +234,7 @@
 							</div>
 						</div>
 						<div>
-							<label for="wz-group" class="block text-xs text-slate-400 mb-1"
+							<label for="wz-group" class="block text-xs text-muted mb-1"
 								>Group (e.g. Fade)</label
 							>
 							<input
@@ -245,7 +245,7 @@
 							/>
 						</div>
 						<div>
-							<label for="wz-variant" class="block text-xs text-slate-400 mb-1"
+							<label for="wz-variant" class="block text-xs text-muted mb-1"
 								>Variant name (e.g. Mid Fade)</label
 							>
 							<input
@@ -257,7 +257,7 @@
 						</div>
 						<div class="grid grid-cols-2 gap-3">
 							<div>
-								<label for="wz-duration" class="block text-xs text-slate-400 mb-1"
+								<label for="wz-duration" class="block text-xs text-muted mb-1"
 									>Duration (min)</label
 								>
 								<input
@@ -270,7 +270,7 @@
 								/>
 							</div>
 							<div>
-								<label for="wz-price" class="block text-xs text-slate-400 mb-1">Price (₹)</label>
+								<label for="wz-price" class="block text-xs text-muted mb-1">Price (₹)</label>
 								<input
 									id="wz-price"
 									type="number"
@@ -288,26 +288,26 @@
 							onclick={submitService}
 							disabled={svcSubmitting}
 							id="wz-add-service-btn"
-							class="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-900 font-bold py-3 rounded-xl transition-all"
+							class="flex-1 bg-gold-accent hover:bg-amber-400 disabled:opacity-50 text-canvas font-bold py-3 rounded-xl transition-all"
 						>
 							{svcSubmitting ? 'Saving…' : 'Add Service →'}
 						</button>
 						<button
 							onclick={() => (wizardStep = 2)}
-							class="px-4 text-slate-400 hover:text-white transition-colors text-sm">Skip</button
+							class="px-4 text-muted hover:text-white transition-colors text-sm">Skip</button
 						>
 					</div>
 				{:else if wizardStep === 2}
 					<h2 class="text-2xl font-bold text-white mb-2">Add your first staff member</h2>
-					<p class="text-slate-400 mb-6 text-sm">
+					<p class="text-muted mb-6 text-sm">
 						Step 2: Add a barber or manager who can log in and take customers.
 					</p>
 					{#if staffError}
-						<p class="text-red-400 text-sm mb-4 bg-red-900/20 rounded-lg p-3">{staffError}</p>
+						<p class="text-system-error/80 text-sm mb-4 bg-red-900/20 rounded-lg p-3">{staffError}</p>
 					{/if}
 					<div class="space-y-4">
 						<div>
-							<label for="wz-staff-name" class="block text-xs text-slate-400 mb-1">Full name</label>
+							<label for="wz-staff-name" class="block text-xs text-muted mb-1">Full name</label>
 							<input
 								id="wz-staff-name"
 								bind:value={staffName}
@@ -316,7 +316,7 @@
 							/>
 						</div>
 						<div>
-							<label for="wz-staff-phone" class="block text-xs text-slate-400 mb-1"
+							<label for="wz-staff-phone" class="block text-xs text-muted mb-1"
 								>WhatsApp number</label
 							>
 							<input
@@ -327,7 +327,7 @@
 							/>
 						</div>
 						<div>
-							<label for="wz-staff-role" class="block text-xs text-slate-400 mb-1">Role</label>
+							<label for="wz-staff-role" class="block text-xs text-muted mb-1">Role</label>
 							<select
 								id="wz-staff-role"
 								bind:value={staffRole}
@@ -343,20 +343,20 @@
 							onclick={submitStaff}
 							disabled={staffSubmitting}
 							id="wz-add-staff-btn"
-							class="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-900 font-bold py-3 rounded-xl transition-all"
+							class="flex-1 bg-gold-accent hover:bg-amber-400 disabled:opacity-50 text-canvas font-bold py-3 rounded-xl transition-all"
 						>
 							{staffSubmitting ? 'Saving…' : 'Add Staff Member →'}
 						</button>
 						<button
 							onclick={() => (wizardStep = 3)}
-							class="px-4 text-slate-400 hover:text-white transition-colors text-sm">Skip</button
+							class="px-4 text-muted hover:text-white transition-colors text-sm">Skip</button
 						>
 					</div>
 				{:else if wizardStep === 3}
 					<h2 class="text-2xl font-bold text-white mb-2">
-						Connect WhatsApp <span class="text-slate-400 text-lg font-normal">(optional)</span>
+						Connect WhatsApp <span class="text-muted text-lg font-normal">(optional)</span>
 					</h2>
-					<p class="text-slate-400 mb-6 text-sm">
+					<p class="text-muted mb-6 text-sm">
 						Step 3: Use your own WhatsApp number so customers see your shop name as the sender.
 					</p>
 					{#if waWebhookUrl}
@@ -368,7 +368,7 @@
 								<input
 									readonly
 									value={waWebhookUrl}
-									class="flex-1 bg-slate-900 rounded-lg px-3 py-2 text-green-300 text-xs font-mono focus:outline-none"
+									class="flex-1 bg-matte rounded-lg px-3 py-2 text-green-300 text-xs font-mono focus:outline-none"
 								/>
 								<button
 									onclick={copyWebhook}
@@ -380,10 +380,10 @@
 						</div>
 					{:else}
 						{#if waError}
-							<p class="text-red-400 text-sm mb-4 bg-red-900/20 rounded-lg p-3">{waError}</p>
+							<p class="text-system-error/80 text-sm mb-4 bg-red-900/20 rounded-lg p-3">{waError}</p>
 						{/if}
 						<div>
-							<label for="wz-wa-json" class="block text-xs text-slate-400 mb-1"
+							<label for="wz-wa-json" class="block text-xs text-muted mb-1"
 								>Paste Bhejna Integration Config JSON</label
 							>
 							<textarea
@@ -400,14 +400,14 @@
 							<button
 								onclick={submitWhatsApp}
 								disabled={waSubmitting}
-								class="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-900 font-bold py-3 rounded-xl transition-all"
+								class="flex-1 bg-gold-accent hover:bg-amber-400 disabled:opacity-50 text-canvas font-bold py-3 rounded-xl transition-all"
 							>
 								{waSubmitting ? 'Connecting…' : 'Connect WhatsApp →'}
 							</button>
 						{/if}
 						<button
 							onclick={() => (wizardDone = true)}
-							class="px-4 text-slate-400 hover:text-white transition-colors text-sm"
+							class="px-4 text-muted hover:text-white transition-colors text-sm"
 						>
 							{waWebhookUrl ? 'Continue →' : 'Skip'}
 						</button>
@@ -423,11 +423,11 @@
 			<div class="flex items-center justify-between mb-8">
 				<div>
 					<h1 class="text-3xl font-bold text-white">Admin Panel</h1>
-					<p class="text-slate-400 mt-1">Manage your shop, services, and staff</p>
+					<p class="text-muted mt-1">Manage your shop, services, and staff</p>
 				</div>
 				<a
 					href="/dashboard"
-					class="flex items-center gap-2 text-slate-400 hover:text-white transition-colors text-sm"
+					class="flex items-center gap-2 text-muted hover:text-white transition-colors text-sm"
 				>
 					<span>←</span> Back to Dashboard
 				</a>
@@ -437,13 +437,13 @@
 				{#each [{ href: '/admin/services', emoji: '✂️', label: 'Services', desc: 'CRUD service catalog', color: 'amber' }, { href: '/admin/staff', emoji: '👥', label: 'Staff', desc: 'Manage team members', color: 'blue' }, { href: '/admin/shop', emoji: '🏪', label: 'Shop Status', desc: 'Open / close the shop', color: 'green' }, { href: '/admin/whatsapp', emoji: '💬', label: 'WhatsApp', desc: 'Connect your number', color: 'emerald' }, { href: '/admin/analytics', emoji: '📊', label: 'Analytics', desc: 'Daily revenue & visits', color: 'violet' }] as section}
 					<a
 						href={section.href}
-						class="group bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-500 rounded-2xl p-6 transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5"
+						class="group bg-slate-800 hover:bg-slate-700 border border-white/[0.05] hover:border-slate-500 rounded-2xl p-6 transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5"
 					>
 						<div class="text-3xl mb-3">{section.emoji}</div>
-						<h2 class="text-lg font-bold text-white group-hover:text-amber-400 transition-colors">
+						<h2 class="text-lg font-bold text-white group-hover:text-gold-accent transition-colors">
 							{section.label}
 						</h2>
-						<p class="text-sm text-slate-400 mt-1">{section.desc}</p>
+						<p class="text-sm text-muted mt-1">{section.desc}</p>
 					</a>
 				{/each}
 			</div>

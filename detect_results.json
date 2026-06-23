@@ -1,0 +1,461 @@
+[
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/lib/components/CheckoutModal.svelte",
+    "line": 372,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/+error.svelte",
+    "line": 14,
+    "snippet": "text-slate-100 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/+error.svelte",
+    "line": 14,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/+error.svelte",
+    "line": 84,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/+page.svelte",
+    "line": 18,
+    "snippet": "text-slate-100 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/+page.svelte",
+    "line": 18,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/+page.svelte",
+    "line": 70,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gradient-text",
+    "name": "Gradient text",
+    "description": "Gradient text is decorative rather than meaningful — a common AI tell, especially on headings and metrics. Use solid colors for text.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/[tenant_slug]/[location_slug]/+page.svelte",
+    "line": 455,
+    "snippet": "background-clip: text + gradient"
+  },
+  {
+    "antipattern": "gradient-text",
+    "name": "Gradient text",
+    "description": "Gradient text is decorative rather than meaningful — a common AI tell, especially on headings and metrics. Use solid colors for text.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/[tenant_slug]/[location_slug]/+page.svelte",
+    "line": 926,
+    "snippet": "background-clip: text + gradient"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/about/+page.svelte",
+    "line": 20,
+    "snippet": "text-slate-100 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/about/+page.svelte",
+    "line": 20,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/admin/+page.svelte",
+    "line": 189,
+    "snippet": "text-slate-900 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/admin/+page.svelte",
+    "line": 291,
+    "snippet": "text-slate-900 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/admin/+page.svelte",
+    "line": 346,
+    "snippet": "text-slate-900 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/admin/+page.svelte",
+    "line": 403,
+    "snippet": "text-slate-900 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/admin/services/+page.svelte",
+    "line": 58,
+    "snippet": "text-slate-900 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/admin/services/+page.svelte",
+    "line": 231,
+    "snippet": "text-slate-900 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/admin/services/+page.svelte",
+    "line": 344,
+    "snippet": "text-slate-900 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/admin/shop/+page.svelte",
+    "line": 140,
+    "snippet": "text-slate-400 on bg-amber-900"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/admin/shop/+page.svelte",
+    "line": 172,
+    "snippet": "text-slate-900 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/admin/staff/+page.svelte",
+    "line": 34,
+    "snippet": "text-slate-900 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/admin/staff/+page.svelte",
+    "line": 107,
+    "snippet": "text-slate-900 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/admin/whatsapp/+page.svelte",
+    "line": 179,
+    "snippet": "text-slate-900 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/contact/+page.svelte",
+    "line": 20,
+    "snippet": "text-slate-100 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/contact/+page.svelte",
+    "line": 20,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/dashboard/+page.svelte",
+    "line": 323,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/dashboard/+page.svelte",
+    "line": 488,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/dashboard/+page.svelte",
+    "line": 682,
+    "snippet": "text-slate-950 on bg-emerald-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/dashboard/+page.svelte",
+    "line": 725,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/dashboard/+page.svelte",
+    "line": 743,
+    "snippet": "text-slate-950 on bg-emerald-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/dashboard/+page.svelte",
+    "line": 784,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/dashboard/+page.svelte",
+    "line": 795,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/login/+page.svelte",
+    "line": 40,
+    "snippet": "text-slate-100 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/login/+page.svelte",
+    "line": 40,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/login/+page.svelte",
+    "line": 126,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/login/+page.svelte",
+    "line": 228,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/platform/+page.svelte",
+    "line": 104,
+    "snippet": "text-slate-100 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/platform/+page.svelte",
+    "line": 104,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/platform/+page.svelte",
+    "line": 482,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/platform/login/+page.svelte",
+    "line": 19,
+    "snippet": "text-slate-100 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/platform/login/+page.svelte",
+    "line": 19,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/platform/login/+page.svelte",
+    "line": 98,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/privacy/+page.svelte",
+    "line": 20,
+    "snippet": "text-slate-100 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/privacy/+page.svelte",
+    "line": 20,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/q/status/+page.svelte",
+    "line": 542,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/q/status/+page.svelte",
+    "line": 649,
+    "snippet": "text-slate-950 on bg-amber-500"
+  },
+  {
+    "antipattern": "bounce-easing",
+    "name": "Bounce or elastic easing",
+    "description": "Bounce and elastic easing feel dated and tacky. Real objects decelerate smoothly — use exponential easing (ease-out-quart/quint/expo) instead.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/q/status/+page.svelte",
+    "line": 404,
+    "snippet": "animate-bounce (Tailwind)"
+  },
+  {
+    "antipattern": "bounce-easing",
+    "name": "Bounce or elastic easing",
+    "description": "Bounce and elastic easing feel dated and tacky. Real objects decelerate smoothly — use exponential easing (ease-out-quart/quint/expo) instead.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/q/status/+page.svelte",
+    "line": 686,
+    "snippet": "animate-bounce (Tailwind)"
+  },
+  {
+    "antipattern": "bounce-easing",
+    "name": "Bounce or elastic easing",
+    "description": "Bounce and elastic easing feel dated and tacky. Real objects decelerate smoothly — use exponential easing (ease-out-quart/quint/expo) instead.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/q/status/+page.svelte",
+    "line": 687,
+    "snippet": "animation: bounce"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/terms/+page.svelte",
+    "line": 20,
+    "snippet": "text-slate-100 on bg-amber-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "/home/rakshitbhai/BarberBase/barberbase-frontend/src/routes/terms/+page.svelte",
+    "line": 20,
+    "snippet": "text-slate-950 on bg-amber-500"
+  }
+]

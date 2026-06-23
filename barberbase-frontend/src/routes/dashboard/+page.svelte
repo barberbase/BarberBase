@@ -198,22 +198,22 @@
 	<title>Staff Queue Dashboard — BarberBase</title>
 </svelte:head>
 
-<div class="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+<div class="min-h-screen bg-canvas text-primary flex flex-col font-manrope">
 	<!-- Top Navigation Header -->
 	<header
-		class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex flex-wrap justify-between items-center gap-4"
+		class="bg-matte border-b border-white/[0.03] px-6 py-4 flex flex-wrap justify-between items-center gap-4"
 	>
 		<div class="flex items-center space-x-3">
-			<span class="text-xl font-extrabold text-amber-500 tracking-wider">BarberBase</span>
-			<span class="text-slate-500">|</span>
-			<span class="text-sm font-semibold text-slate-300">Staff Dashboard</span>
+			<span class="text-xl font-extrabold text-gold-accent tracking-wider">BarberBase</span>
+			<span class="text-dim">|</span>
+			<span class="text-sm font-semibold text-primary">Staff Dashboard</span>
 		</div>
 
 		<!-- Status Indicators -->
 		<div class="flex items-center space-x-4">
 			<!-- SSE Live Sync indicator -->
 			<div
-				class="flex items-center space-x-1.5 text-xs bg-slate-950 border border-slate-800 rounded-full px-3 py-1 font-semibold"
+				class="flex items-center space-x-1.5 text-xs bg-canvas border border-white/[0.03] rounded-full px-3 py-1 font-semibold"
 			>
 				<span class="relative flex h-2.5 w-2.5">
 					<span
@@ -223,11 +223,11 @@
 					></span>
 					<span
 						class="relative inline-flex rounded-full h-2.5 w-2.5 {store.sseConnected
-							? 'bg-emerald-500'
+							? 'bg-system-success'
 							: 'bg-rose-500'}"
 					></span>
 				</span>
-				<span class={store.sseConnected ? 'text-emerald-400' : 'text-rose-400'}>
+				<span class={store.sseConnected ? 'text-system-success/80' : 'text-rose-400'}>
 					{store.sseConnected ? 'Live' : 'SSE Offline'}
 				</span>
 			</div>
@@ -235,13 +235,13 @@
 			<!-- Queue Session Status Badge -->
 			{#if store.snapshot}
 				<div
-					class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-slate-700 bg-slate-850 flex items-center"
+					class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-white/[0.05] bg-slate-850 flex items-center"
 				>
 					Session:
 					<span
 						class="ml-1.5 {store.snapshot.session_status === 'active'
-							? 'text-emerald-400'
-							: 'text-amber-500'}"
+							? 'text-system-success/80'
+							: 'text-gold-accent'}"
 					>
 						{#if store.snapshot.session_status === 'closed'}
 							No active queue
@@ -253,7 +253,7 @@
 			{/if}
 
 			<!-- Barber Name -->
-			<div class="text-sm text-slate-300">
+			<div class="text-sm text-primary">
 				Hello, <span class="font-bold text-white">{data.snapshot ? 'Barber' : 'Staff'}</span>
 			</div>
 		</div>
@@ -287,11 +287,11 @@
 	{/if}
 	{#if store.snapshot && store.snapshot.session_status === 'closed'}
 		<div
-			class="bg-slate-900/40 border-b border-slate-800/40 px-6 py-3.5 text-sm text-slate-400 flex items-center space-x-3"
+			class="bg-matte/40 border-b border-white/[0.01] px-6 py-3.5 text-sm text-muted flex items-center space-x-3"
 		>
 			<svg
 				xmlns="http://www.w3.org/2000/svg"
-				class="h-5 w-5 shrink-0 text-slate-500"
+				class="h-5 w-5 shrink-0 text-dim"
 				fill="none"
 				viewBox="0 0 24 24"
 				stroke="currentColor"
@@ -313,14 +313,14 @@
 		<!-- Left Side: Queue Controls and Add Walk-in -->
 		<section class="w-full lg:w-1/3 flex flex-col space-y-6">
 			<!-- Primary Dispatch Console -->
-			<div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg">
-				<h2 class="text-lg font-bold text-slate-100 mb-4 tracking-wide">Queue Controller</h2>
+			<div class="bg-matte border border-white/[0.03] rounded-2xl p-6 shadow-lg">
+				<h2 class="text-lg font-bold text-primary mb-4 tracking-wide">Queue Controller</h2>
 
 				<div class="space-y-4">
 					<!-- BIG Call Next Button -->
 					<button
 						type="button"
-						class="w-full py-5 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-amber-500 text-slate-950 font-black text-xl rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex flex-col items-center justify-center space-y-1"
+						class="w-full py-5 bg-gold-accent hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-gold-accent text-canvas font-black text-xl rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex flex-col items-center justify-center space-y-1"
 						disabled={activeActions['call-next'] || store.snapshot?.session_status === 'closed'}
 						onclick={() =>
 							runDebouncedAction('call-next', () =>
@@ -335,25 +335,25 @@
 
 					<!-- Total wait & count summary stats -->
 					<div class="grid grid-cols-2 gap-3 pt-2">
-						<div class="bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-center">
-							<div class="text-xs font-medium text-slate-400">Total Active</div>
-							<div class="text-2xl font-black text-slate-200 mt-1">{activeCount}</div>
+						<div class="bg-canvas border border-white/[0.03] rounded-xl p-3.5 text-center">
+							<div class="text-xs font-medium text-muted">Total Active</div>
+							<div class="text-2xl font-black text-primary mt-1">{activeCount}</div>
 						</div>
-						<div class="bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-center">
-							<div class="text-xs font-medium text-slate-400">Version</div>
-							<div class="text-2xl font-black text-slate-200 mt-1">{store.localQueueVersion}</div>
+						<div class="bg-canvas border border-white/[0.03] rounded-xl p-3.5 text-center">
+							<div class="text-xs font-medium text-muted">Version</div>
+							<div class="text-2xl font-black text-primary mt-1">{store.localQueueVersion}</div>
 						</div>
 					</div>
 				</div>
 			</div>
 
 			<!-- Add Walk-in Console Panel -->
-			<div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg">
+			<div class="bg-matte border border-white/[0.03] rounded-2xl p-6 shadow-lg">
 				<div class="flex justify-between items-center">
-					<h2 class="text-lg font-bold text-slate-100 tracking-wide">Add Walk-in Client</h2>
+					<h2 class="text-lg font-bold text-primary tracking-wide">Add Walk-in Client</h2>
 					<button
 						type="button"
-						class="px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-700 hover:bg-slate-800 transition-colors"
+						class="px-3 py-1.5 text-xs font-bold rounded-xl border border-white/[0.05] hover:bg-slate-800 transition-colors"
 						onclick={() => {
 							showWalkInForm = !showWalkInForm;
 						}}
@@ -365,11 +365,11 @@
 				{#if showWalkInForm}
 					<form
 						onsubmit={handleAddWalkIn}
-						class="space-y-4 pt-4 border-t border-slate-800 mt-4 transition-all duration-200"
+						class="space-y-4 pt-4 border-t border-white/[0.03] mt-4 transition-all duration-200"
 					>
 						<!-- Name -->
 						<div>
-							<label for="walk-in-name" class="block text-xs font-medium text-slate-400 mb-1"
+							<label for="walk-in-name" class="block text-xs font-medium text-muted mb-1"
 								>Customer Name (Optional)</label
 							>
 							<input
@@ -377,24 +377,24 @@
 								id="walk-in-name"
 								placeholder="e.g. Rahul, Guest, Uncle"
 								maxlength="80"
-								class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500 placeholder:text-slate-650"
+								class="w-full bg-canvas border border-white/[0.03] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent placeholder:text-slate-650"
 								bind:value={walkInName}
 							/>
 						</div>
 
 						<!-- Phone -->
 						<div>
-							<label for="walk-in-phone" class="block text-xs font-medium text-slate-400 mb-1"
+							<label for="walk-in-phone" class="block text-xs font-medium text-muted mb-1"
 								>Phone Number (Optional)</label
 							>
 							<input
 								type="tel"
 								id="walk-in-phone"
 								placeholder="e.g. 9876543210"
-								class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500 placeholder:text-slate-650"
+								class="w-full bg-canvas border border-white/[0.03] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent placeholder:text-slate-650"
 								bind:value={walkInPhone}
 							/>
-							<span class="text-[10px] text-slate-500 mt-0.5 block"
+							<span class="text-[10px] text-dim mt-0.5 block"
 								>10-digit number will automatically prefix with +91.</span
 							>
 						</div>
@@ -402,7 +402,7 @@
 						<div class="grid grid-cols-2 gap-3">
 							<!-- Party Size -->
 							<div>
-								<label for="party-size" class="block text-xs font-medium text-slate-400 mb-1"
+								<label for="party-size" class="block text-xs font-medium text-muted mb-1"
 									>Party Size</label
 								>
 								<input
@@ -410,19 +410,19 @@
 									id="party-size"
 									min="1"
 									max="10"
-									class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
+									class="w-full bg-canvas border border-white/[0.03] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent"
 									bind:value={walkInPartySize}
 								/>
 							</div>
 
 							<!-- Barber -->
 							<div>
-								<label for="walk-in-barber" class="block text-xs font-medium text-slate-400 mb-1"
+								<label for="walk-in-barber" class="block text-xs font-medium text-muted mb-1"
 									>Assigned Barber</label
 								>
 								<select
 									id="walk-in-barber"
-									class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+									class="w-full bg-canvas border border-white/[0.03] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent"
 									bind:value={walkInBarberId}
 								>
 									<option value="">-- Auto Route --</option>
@@ -435,23 +435,23 @@
 
 						<!-- Services (Variant Checklist) -->
 						<div class="space-y-1">
-							<span class="block text-xs font-medium text-slate-400 mb-1.5"
+							<span class="block text-xs font-medium text-muted mb-1.5"
 								>Select Service Variants (Required)</span
 							>
 							<div
-								class="max-h-48 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2 divide-y divide-slate-800/40"
+								class="max-h-48 overflow-y-auto bg-canvas border border-white/[0.03] rounded-xl p-3 space-y-2 divide-y divide-slate-800/40"
 							>
 								{#each allVariants() as v, idx}
 									<label class="flex items-start space-x-3 pt-2 first:pt-0 cursor-pointer">
 										<input
 											type="checkbox"
 											value={v.id}
-											class="mt-1 rounded text-amber-500 bg-slate-900 border-slate-800 focus:ring-offset-slate-900"
+											class="mt-1 rounded text-gold-accent bg-matte border-white/[0.03] focus:ring-offset-slate-900"
 											bind:group={walkInSelectedVariants}
 										/>
 										<div class="text-xs">
-											<div class="font-bold text-slate-200">{v.name}</div>
-											<div class="text-[10px] text-slate-500">
+											<div class="font-bold text-primary">{v.name}</div>
+											<div class="text-[10px] text-dim">
 												{v.categoryName} • {v.duration} min • {formatCurrency(v.price)}
 											</div>
 										</div>
@@ -463,7 +463,7 @@
 						<!-- Error Display -->
 						{#if walkInError}
 							<div
-								class="bg-red-950/40 border border-red-900/50 rounded-xl p-3 text-xs text-red-400 flex items-start space-x-2"
+								class="bg-red-950/40 border border-system-error/30/50 rounded-xl p-3 text-xs text-system-error/80 flex items-start space-x-2"
 							>
 								<svg
 									xmlns="http://www.w3.org/2000/svg"
@@ -485,7 +485,7 @@
 
 						<button
 							type="submit"
-							class="w-full bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold py-2.5 rounded-xl transition-all duration-150 text-sm cursor-pointer"
+							class="w-full bg-gold-accent hover:bg-amber-400 active:bg-amber-600 text-canvas font-bold py-2.5 rounded-xl transition-all duration-150 text-sm cursor-pointer"
 						>
 							Add Walk-in client
 						</button>
@@ -497,19 +497,19 @@
 		<!-- Right Side: Live Queue Entries -->
 		<section class="w-full lg:w-2/3 flex flex-col space-y-4">
 			<div class="flex justify-between items-center">
-				<h2 class="text-lg font-bold text-slate-200 tracking-wide">Live Queue</h2>
-				<span class="text-xs text-slate-400 font-semibold"
+				<h2 class="text-lg font-bold text-primary tracking-wide">Live Queue</h2>
+				<span class="text-xs text-muted font-semibold"
 					>{sortedEntries().length} active items</span
 				>
 			</div>
 
 			{#if sortedEntries().length === 0}
 				<div
-					class="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-450 flex flex-col items-center justify-center space-y-3"
+					class="bg-matte border border-white/[0.03] rounded-2xl p-12 text-center text-slate-450 flex flex-col items-center justify-center space-y-3"
 				>
 					<svg
 						xmlns="http://www.w3.org/2000/svg"
-						class="h-12 w-12 text-slate-600"
+						class="h-12 w-12 text-dim"
 						fill="none"
 						viewBox="0 0 24 24"
 						stroke="currentColor"
@@ -521,8 +521,8 @@
 							d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
 						/>
 					</svg>
-					<span class="text-sm font-semibold text-slate-400">The queue is currently empty.</span>
-					<span class="text-xs text-slate-500"
+					<span class="text-sm font-semibold text-muted">The queue is currently empty.</span>
+					<span class="text-xs text-dim"
 						>Tap "Call Next" or add a Walk-in to get started.</span
 					>
 				</div>
@@ -531,9 +531,9 @@
 					{#each sortedEntries() as entry (entry.id)}
 						<!-- Queue Entry Card with border styling for stale warnings -->
 						<div
-							class="border rounded-2xl p-4 shadow-md transition-all duration-300 bg-slate-900 border-slate-800 hover:border-slate-700 flex flex-col md:flex-row justify-between gap-4
+							class="border rounded-2xl p-4 shadow-md transition-all duration-300 bg-matte border-white/[0.03] hover:border-white/[0.05] flex flex-col md:flex-row justify-between gap-4
 							{entry.stale_warning === 'called_warning' || entry.stale_warning === 'in_progress_warning'
-								? 'border-amber-500 bg-amber-950/20 ring-1 ring-amber-500/30'
+								? 'border-gold-accent bg-amber-950/20 ring-1 ring-amber-500/30'
 								: ''}
 							{entry.stale_warning === 'called_critical' || entry.stale_warning === 'in_progress_critical'
 								? 'border-red-500 bg-red-950/20 ring-2 ring-red-500/50 animate-pulse-slow'
@@ -544,7 +544,7 @@
 								<div class="flex items-center space-x-2 flex-wrap gap-y-1">
 									<!-- Token Badge -->
 									<span
-										class="bg-slate-950 border border-slate-800 text-amber-500 text-sm font-extrabold px-3 py-1 rounded-xl"
+										class="bg-canvas border border-white/[0.03] text-gold-accent text-sm font-extrabold px-3 py-1 rounded-xl"
 									>
 										#{entry.token_number}
 									</span>
@@ -552,17 +552,17 @@
 									<!-- State Status Badge -->
 									<span
 										class="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md border
-										{entry.state === 'in_progress' ? 'bg-emerald-950/30 border-emerald-800 text-emerald-400' : ''}
-										{entry.state === 'called' ? 'bg-amber-950/30 border-amber-800 text-amber-400 animate-pulse' : ''}
+										{entry.state === 'in_progress' ? 'bg-emerald-950/30 border-emerald-800 text-system-success/80' : ''}
+										{entry.state === 'called' ? 'bg-amber-950/30 border-amber-800 text-gold-accent animate-pulse' : ''}
 										{entry.state === 'waiting' ? 'bg-blue-950/30 border-blue-800 text-blue-400' : ''}
-										{entry.state === 'skipped' ? 'bg-slate-950/50 border-slate-800 text-slate-400' : ''}"
+										{entry.state === 'skipped' ? 'bg-canvas/50 border-white/[0.03] text-muted' : ''}"
 									>
 										{entry.state}
 									</span>
 
 									<!-- Presence Badge -->
 									<span
-										class="text-xs text-slate-300 font-medium bg-slate-950 border border-slate-800/80 rounded-lg px-2 py-0.5"
+										class="text-xs text-primary font-medium bg-canvas border border-white/[0.03] rounded-lg px-2 py-0.5"
 									>
 										{#if entry.presence_state === 'remote'}
 											🌐 Remote
@@ -599,10 +599,10 @@
 
 								<!-- Customer profile details -->
 								<div>
-									<div class="font-extrabold text-base text-slate-100">
+									<div class="font-extrabold text-base text-primary">
 										{entry.customer?.name || 'Walk-in Customer'}
 									</div>
-									<div class="flex items-center space-x-2 text-xs text-slate-400 mt-1">
+									<div class="flex items-center space-x-2 text-xs text-muted mt-1">
 										{#if entry.customer?.phone_masked}
 											<span>{entry.customer.phone_masked}</span>
 											<span>•</span>
@@ -614,10 +614,10 @@
 								<!-- Customer Preferences / Notes -->
 								{#if entry.customer?.notes && entry.customer.notes.length > 0}
 									<div
-										class="bg-slate-950/40 border border-slate-800/40 rounded-xl p-2.5 text-xs text-slate-300 space-y-1"
+										class="bg-canvas/40 border border-white/[0.01] rounded-xl p-2.5 text-xs text-primary space-y-1"
 									>
 										<span
-											class="font-bold text-amber-500 text-[10px] uppercase tracking-wider block"
+											class="font-bold text-gold-accent text-[10px] uppercase tracking-wider block"
 											>Staff Notes:</span
 										>
 										<ul class="list-disc pl-4 space-y-0.5">
@@ -632,7 +632,7 @@
 								<div class="flex flex-wrap gap-2 pt-1">
 									{#each entry.services as svc}
 										<span
-											class="text-[10px] bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-1 text-slate-300"
+											class="text-[10px] bg-canvas border border-slate-850 rounded-lg px-2.5 py-1 text-primary"
 										>
 											{svc.name} ({svc.duration_minutes}m)
 										</span>
@@ -648,11 +648,11 @@
 								<div class="w-full text-right">
 									<label
 										for="barber-select-{entry.id}"
-										class="block text-[10px] font-medium text-slate-500 mb-1">Assigned Barber</label
+										class="block text-[10px] font-medium text-dim mb-1">Assigned Barber</label
 									>
 									<select
 										id="barber-select-{entry.id}"
-										class="bg-slate-950 border border-slate-850 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500 w-full"
+										class="bg-canvas border border-slate-850 rounded-lg px-2 py-1.5 text-xs text-primary focus:outline-none focus:border-gold-accent w-full"
 										value={entry.assigned_barber_id || ''}
 										onchange={(e) => {
 											const barberId = e.currentTarget.value;
@@ -679,7 +679,7 @@
 											<!-- waiting + presence=arrived -->
 											<button
 												type="button"
-												class="px-4 py-2 bg-emerald-500 hover:bg-emerald-450 active:bg-emerald-600 text-slate-950 font-bold text-xs rounded-xl cursor-pointer transition-colors"
+												class="px-4 py-2 bg-system-success hover:bg-emerald-450 active:bg-emerald-600 text-canvas font-bold text-xs rounded-xl cursor-pointer transition-colors"
 												disabled={activeActions[`${entry.id}-start`]}
 												onclick={() =>
 													runDebouncedAction(`${entry.id}-start`, () =>
@@ -694,7 +694,7 @@
 											</button>
 											<button
 												type="button"
-												class="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-650 text-slate-300 font-bold text-xs rounded-xl cursor-pointer transition-colors"
+												class="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-650 text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors"
 												disabled={activeActions[`${entry.id}-skip`]}
 												onclick={() =>
 													runDebouncedAction(`${entry.id}-skip`, () =>
@@ -709,7 +709,7 @@
 											<!-- waiting + presence≠arrived -->
 											<button
 												type="button"
-												class="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-650 text-slate-300 font-bold text-xs rounded-xl cursor-pointer transition-colors"
+												class="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-650 text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors"
 												disabled={activeActions[`${entry.id}-skip`]}
 												onclick={() =>
 													runDebouncedAction(`${entry.id}-skip`, () =>
@@ -722,7 +722,7 @@
 											</button>
 											<button
 												type="button"
-												class="px-4 py-2 bg-amber-500 hover:bg-amber-450 active:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl cursor-pointer transition-colors"
+												class="px-4 py-2 bg-gold-accent hover:bg-amber-450 active:bg-amber-600 text-canvas font-bold text-xs rounded-xl cursor-pointer transition-colors"
 												disabled={activeActions[`${entry.id}-arrive`]}
 												onclick={() =>
 													runDebouncedAction(`${entry.id}-arrive`, () =>
@@ -740,7 +740,7 @@
 										<!-- called -->
 										<button
 											type="button"
-											class="px-4 py-2 bg-emerald-500 hover:bg-emerald-450 active:bg-emerald-600 text-slate-950 font-bold text-xs rounded-xl cursor-pointer transition-colors"
+											class="px-4 py-2 bg-system-success hover:bg-emerald-450 active:bg-emerald-600 text-canvas font-bold text-xs rounded-xl cursor-pointer transition-colors"
 											disabled={activeActions[`${entry.id}-start`]}
 											onclick={() =>
 												runDebouncedAction(`${entry.id}-start`, () =>
@@ -766,7 +766,7 @@
 										</button>
 										<button
 											type="button"
-											class="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-650 text-slate-300 font-bold text-xs rounded-xl cursor-pointer transition-colors"
+											class="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-650 text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors"
 											disabled={activeActions[`${entry.id}-skip`]}
 											onclick={() =>
 												runDebouncedAction(`${entry.id}-skip`, () =>
@@ -781,7 +781,7 @@
 										<!-- in_progress -->
 										<button
 											type="button"
-											class="px-5 py-2.5 bg-amber-500 hover:bg-amber-450 active:bg-amber-600 text-slate-950 font-extrabold text-xs rounded-xl cursor-pointer transition-all shadow"
+											class="px-5 py-2.5 bg-gold-accent hover:bg-amber-450 active:bg-amber-600 text-canvas font-extrabold text-xs rounded-xl cursor-pointer transition-all shadow"
 											onclick={() => {
 												selectedEntryForCheckout = entry;
 											}}
@@ -792,7 +792,7 @@
 										<!-- skipped -->
 										<button
 											type="button"
-											class="px-4 py-2 bg-amber-500 hover:bg-amber-450 active:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl cursor-pointer transition-colors"
+											class="px-4 py-2 bg-gold-accent hover:bg-amber-450 active:bg-amber-600 text-canvas font-bold text-xs rounded-xl cursor-pointer transition-colors"
 											disabled={activeActions[`${entry.id}-reactivate`]}
 											onclick={() =>
 												runDebouncedAction(`${entry.id}-reactivate`, () =>

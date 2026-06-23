@@ -1,3 +1,64 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
+
+@theme {
+  --color-canvas: #080808;
+  --color-matte: #0E0E0E;
+  --color-surface: #141414;
+  --color-titanium: #1C1C1C;
+
+  --color-primary: #E5E2D9;
+  --color-muted: #9F9B93;
+  --color-dim: #5A5854;
+
+  --color-gold-accent: #C8A96B;
+
+  --color-system-success: #10B981;
+  --color-system-warning: #F59E0B;
+  --color-system-error: #EF4444;
+
+  --font-satoshi: "Plus Jakarta Sans", sans-serif;
+  --font-manrope: "Inter", sans-serif;
+  --font-mono: "Space Mono", monospace;
+
+  --tracking-tightest: -0.045em;
+  --tracking-widestUI: 0.25em;
+}
+
+@layer base {
+  body {
+    @apply bg-canvas text-primary font-manrope antialiased select-none min-h-screen flex flex-col;
+    /* Subliminal Micro-Dot Grid Pattern (Visual Texture Reference) */
+    background-image: radial-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+}
+
+@layer components {
+  /* Machined hardware edge highlight simulation */
+  .machined-edge {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  }
+  
+  /* Precision Scrollbar design profiles */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 99px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+}
+
+::selection {
+  background-color: #C8A96B;
+  color: #080808;
+}

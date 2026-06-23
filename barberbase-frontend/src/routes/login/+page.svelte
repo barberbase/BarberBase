@@ -37,12 +37,12 @@
 </svelte:head>
 
 <div
-	class="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4 font-sans selection:bg-amber-500 selection:text-slate-950"
+	class="min-h-screen bg-canvas text-primary flex flex-col justify-center items-center p-4 font-manrope"
 >
 	<!-- Background Decorative Gradients -->
 	<div class="absolute inset-0 overflow-hidden pointer-events-none">
 		<div
-			class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-amber-500/10 blur-[120px]"
+			class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-gold-accent/10 blur-[120px]"
 		></div>
 		<div
 			class="absolute bottom-1/4 left-1/3 w-[400px] h-[400px] rounded-full bg-blue-500/5 blur-[100px]"
@@ -51,12 +51,12 @@
 
 	<!-- Login Card -->
 	<div
-		class="relative w-full max-w-md bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 rounded-3xl p-8 shadow-2xl space-y-8"
+		class="relative w-full max-w-md bg-matte/60 backdrop-blur-xl border border-white/[0.03] rounded-3xl p-8 shadow-2xl space-y-8"
 	>
 		<!-- Header -->
 		<div class="text-center space-y-2">
-			<h1 class="text-3xl font-extrabold text-amber-500 tracking-wider">BarberBase</h1>
-			<p class="text-sm font-semibold text-slate-400">Staff Access Portal</p>
+			<h1 class="text-3xl font-extrabold text-gold-accent tracking-wider">BarberBase</h1>
+			<p class="text-sm font-semibold text-muted">Staff Access Portal</p>
 		</div>
 
 		<!-- Step 1: Phone Number Input -->
@@ -76,7 +76,7 @@
 				<div class="space-y-2">
 					<label
 						for="phone_number"
-						class="block text-xs font-semibold text-slate-400 uppercase tracking-wider"
+						class="block text-xs font-semibold text-muted uppercase tracking-wider"
 					>
 						WhatsApp Phone Number
 					</label>
@@ -89,10 +89,10 @@
 							required
 							disabled={loading}
 							bind:value={phoneNumber}
-							class="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-4 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all duration-200 text-base"
+							class="w-full bg-canvas border border-white/[0.03] rounded-2xl px-4 py-4 text-primary placeholder:text-dim focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500 transition-all duration-200 text-base"
 						/>
 					</div>
-					<span class="text-[11px] text-slate-500 block">
+					<span class="text-[11px] text-dim block">
 						10-digit number will automatically prefix with +91. OTP will be sent via WhatsApp.
 					</span>
 				</div>
@@ -100,7 +100,7 @@
 				<!-- Inline Error Display -->
 				{#if form?.error && step === 'phone'}
 					<div
-						class="bg-red-950/30 border border-red-900/50 rounded-2xl p-4 text-sm text-red-400 flex items-start space-x-3 animate-fade-in"
+						class="bg-red-950/30 border border-system-error/30/50 rounded-2xl p-4 text-sm text-system-error/80 flex items-start space-x-3 animate-fade-in"
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
@@ -123,7 +123,7 @@
 				<button
 					type="submit"
 					disabled={loading || !phoneNumber}
-					class="w-full py-4 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-amber-500 text-slate-950 font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
+					class="w-full py-4 bg-gold-accent hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-gold-accent text-canvas font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
 				>
 					{#if loading}
 						<svg
@@ -175,11 +175,11 @@
 					<div class="flex justify-between items-center">
 						<label
 							for="otp"
-							class="block text-xs font-semibold text-slate-400 uppercase tracking-wider"
+							class="block text-xs font-semibold text-muted uppercase tracking-wider"
 						>
 							Enter 6-Digit OTP
 						</label>
-						<span class="text-xs text-amber-500 font-medium">Sent to {phoneNumber}</span>
+						<span class="text-xs text-gold-accent font-medium">Sent to {phoneNumber}</span>
 					</div>
 					<input
 						type="text"
@@ -191,9 +191,9 @@
 						disabled={loading}
 						bind:value={otp}
 						oninput={() => { otp = otp.replace(/\D/g, '').slice(0, 6); }}
-						class="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-4 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 tracking-[0.5em] text-center font-bold text-xl transition-all duration-200"
+						class="w-full bg-canvas border border-white/[0.03] rounded-2xl px-4 py-4 text-primary placeholder:text-dim focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500 tracking-[0.5em] text-center font-bold text-xl transition-all duration-200"
 					/>
-					<span class="text-[11px] text-slate-500 block text-center">
+					<span class="text-[11px] text-dim block text-center">
 						OTP is valid for 5 minutes.
 					</span>
 				</div>
@@ -201,7 +201,7 @@
 				<!-- Inline Error Display -->
 				{#if form?.error && step === 'otp'}
 					<div
-						class="bg-red-950/30 border border-red-900/50 rounded-2xl p-4 text-sm text-red-400 flex items-start space-x-3 animate-fade-in"
+						class="bg-red-950/30 border border-system-error/30/50 rounded-2xl p-4 text-sm text-system-error/80 flex items-start space-x-3 animate-fade-in"
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
@@ -225,7 +225,7 @@
 					<button
 						type="submit"
 						disabled={loading || otp.length !== 6}
-						class="w-full py-4 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-amber-500 text-slate-950 font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
+						class="w-full py-4 bg-gold-accent hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-gold-accent text-canvas font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
 					>
 						{#if loading}
 							<svg
@@ -258,7 +258,7 @@
 						type="button"
 						disabled={loading}
 						onclick={handleChangeNumber}
-						class="w-full py-3 bg-transparent hover:bg-slate-800/40 text-slate-400 hover:text-slate-200 font-semibold text-sm rounded-2xl transition-all duration-150 cursor-pointer text-center"
+						class="w-full py-3 bg-transparent hover:bg-slate-800/40 text-muted hover:text-primary font-semibold text-sm rounded-2xl transition-all duration-150 cursor-pointer text-center"
 					>
 						Change number
 					</button>

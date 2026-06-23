@@ -49,19 +49,19 @@
 	<div class="max-w-2xl mx-auto p-6">
 		<!-- Header -->
 		<div class="flex items-center gap-3 mb-6">
-			<a href="/admin" class="text-slate-400 hover:text-white transition-colors text-sm">← Admin</a>
-			<span class="text-slate-600">/</span>
+			<a href="/admin" class="text-muted hover:text-white transition-colors text-sm">← Admin</a>
+			<span class="text-dim">/</span>
 			<h1 class="text-2xl font-bold text-white">WhatsApp Settings</h1>
 		</div>
 
 		{#if form?.error}
-			<div class="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6 text-red-400 text-sm">
+			<div class="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6 text-system-error/80 text-sm">
 				{form.error}
 			</div>
 		{/if}
 
 		<!-- Mode info card -->
-		<div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 mb-6 shadow-xl">
+		<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-6 mb-6 shadow-xl">
 			<div class="flex items-start justify-between">
 				<div>
 					{#if isConnected}
@@ -70,27 +70,27 @@
 							<span class="text-green-400 font-semibold text-sm">Mode B — Your Own Number</span>
 						</div>
 						<p class="text-white font-mono text-lg">{connectedPhone}</p>
-						<p class="text-slate-400 text-xs mt-1">
+						<p class="text-muted text-xs mt-1">
 							Customers see your shop name as the WhatsApp sender
 						</p>
 					{:else if isDisconnected}
 						<div class="flex items-center gap-2 mb-2">
 							<span class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
-							<span class="text-slate-400 font-semibold text-sm"
+							<span class="text-muted font-semibold text-sm"
 								>Mode A — Shared BarberBase Number</span
 							>
 						</div>
-						<p class="text-slate-300 text-sm">
+						<p class="text-primary text-sm">
 							Disconnected. You are now using the shared platform number.
 						</p>
 					{:else}
 						<div class="flex items-center gap-2 mb-2">
 							<span class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
-							<span class="text-slate-400 font-semibold text-sm"
+							<span class="text-muted font-semibold text-sm"
 								>Mode A — Shared BarberBase Number</span
 							>
 						</div>
-						<p class="text-slate-300 text-sm mt-1">
+						<p class="text-primary text-sm mt-1">
 							All your customers message BarberBase's number. Upgrade to Mode B to use your own
 							number.
 						</p>
@@ -108,13 +108,13 @@
 				<p class="text-green-400 font-semibold mb-1 text-sm">
 					Step 2: Paste this URL into your Bhejna portal
 				</p>
-				<p class="text-slate-400 text-xs mb-3">Bhejna portal → Developer Settings → Webhook URL</p>
+				<p class="text-muted text-xs mb-3">Bhejna portal → Developer Settings → Webhook URL</p>
 				<div class="flex gap-2 items-center">
 					<input
 						id="webhook-url-display"
 						readonly
 						value={webhookUrl}
-						class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-green-300 text-xs font-mono focus:outline-none"
+						class="flex-1 bg-matte border border-white/[0.05] rounded-lg px-3 py-2 text-green-300 text-xs font-mono focus:outline-none"
 					/>
 					<button
 						id="copy-webhook-btn"
@@ -127,9 +127,9 @@
 			</div>
 
 			<!-- Disconnect -->
-			<div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl">
+			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-6 shadow-xl">
 				<h2 class="text-lg font-bold text-white mb-2">Disconnect Own Number</h2>
-				<p class="text-slate-400 text-sm mb-4">
+				<p class="text-muted text-sm mb-4">
 					This will revert your shop to the shared BarberBase number. All credentials will be
 					cleared.
 				</p>
@@ -148,16 +148,16 @@
 			</div>
 		{:else}
 			<!-- Connect form (Mode A → Mode B) -->
-			<div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl">
+			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-6 shadow-xl">
 				<h2 class="text-lg font-bold text-white mb-2">Connect Your Own WhatsApp Number</h2>
-				<p class="text-slate-400 text-sm mb-4">
+				<p class="text-muted text-sm mb-4">
 					In your Bhejna portal, go to <strong class="text-white">Developer Settings</strong> and
 					click <strong class="text-white">Copy BarberBase Integration Config</strong>. Then paste
 					the JSON here.
 				</p>
 				<form id="connect-whatsapp-form" method="POST" action="?/connect" use:enhance>
 					<div class="mb-4">
-						<label for="config-json-input" class="block text-xs text-slate-400 mb-1"
+						<label for="config-json-input" class="block text-xs text-muted mb-1"
 							>Bhejna Integration Config JSON</label
 						>
 						<textarea
@@ -170,13 +170,13 @@
 							class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none"
 						></textarea>
 						{#if jsonValidationError()}
-							<p class="text-amber-400 text-xs mt-1">{jsonValidationError()}</p>
+							<p class="text-gold-accent text-xs mt-1">{jsonValidationError()}</p>
 						{/if}
 					</div>
 					<button
 						id="submit-connect-whatsapp-btn"
 						type="submit"
-						class="w-full bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold py-3 rounded-xl text-sm transition-all"
+						class="w-full bg-gold-accent hover:bg-amber-400 text-canvas font-bold py-3 rounded-xl text-sm transition-all"
 					>
 						Connect WhatsApp
 					</button>

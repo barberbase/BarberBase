@@ -120,19 +120,19 @@
 	aria-modal="true"
 >
 	<div
-		class="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden text-slate-100 flex flex-col max-h-[90vh]"
+		class="w-full max-w-lg bg-matte border border-slate-800 rounded-2xl shadow-2xl overflow-hidden text-slate-100 flex flex-col max-h-[90vh]"
 	>
 		<!-- Modal Header -->
-		<div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+		<div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-canvas">
 			<div>
 				<h2 class="text-xl font-bold tracking-tight">Complete Service & Checkout</h2>
-				<p class="text-xs text-slate-400">
+				<p class="text-xs text-muted">
 					Token #{entry.token_number} — {entry.customer?.name || 'Walk-in Customer'}
 				</p>
 			</div>
 			<button
 				type="button"
-				class="text-slate-400 hover:text-slate-200 transition-colors p-1"
+				class="text-muted hover:text-primary transition-colors p-1"
 				onclick={onClose}
 				aria-label="Close modal"
 			>
@@ -157,18 +157,18 @@
 		<form onsubmit={handleSubmit} class="flex-1 overflow-y-auto p-6 space-y-6">
 			<!-- Service Line Items (Read-Only) -->
 			<div>
-				<h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+				<h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
 					Rendered Services
 				</h3>
-				<div class="bg-slate-950 border border-slate-800 rounded-xl divide-y divide-slate-800">
+				<div class="bg-canvas border border-slate-800 rounded-xl divide-y divide-slate-800">
 					{#each entry.services as service}
 						<div class="px-4 py-3 flex justify-between text-sm">
-							<span class="font-medium text-slate-200">{service.name}</span>
+							<span class="font-medium text-primary">{service.name}</span>
 							<div class="text-right">
 								<div class="font-bold text-slate-100">
 									₹{(service.price_paise / 100).toFixed(2)}
 								</div>
-								<div class="text-xs text-slate-400">{service.duration_minutes} mins</div>
+								<div class="text-xs text-muted">{service.duration_minutes} mins</div>
 							</div>
 						</div>
 					{/each}
@@ -177,10 +177,10 @@
 
 			<!-- Discount Section -->
 			<div class="space-y-3">
-				<h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Discount</h3>
+				<h3 class="text-xs font-semibold text-muted uppercase tracking-wider">Discount</h3>
 				<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
 					<div>
-						<label for="discount-amt" class="block text-xs font-medium text-slate-400 mb-1"
+						<label for="discount-amt" class="block text-xs font-medium text-muted mb-1"
 							>Discount Amount (₹)</label
 						>
 						<input
@@ -189,12 +189,12 @@
 							step="0.01"
 							min="0"
 							max={(subtotalPaise / 100).toFixed(2)}
-							class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
+							class="w-full bg-canvas border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
 							bind:value={discountAmountINR}
 						/>
 					</div>
 					<div>
-						<label for="discount-reason" class="block text-xs font-medium text-slate-400 mb-1"
+						<label for="discount-reason" class="block text-xs font-medium text-muted mb-1"
 							>Discount Reason</label
 						>
 						<input
@@ -202,7 +202,7 @@
 							id="discount-reason"
 							placeholder="Reason (required for discount)"
 							required={discountAmountPaise > 0}
-							class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500 placeholder:text-slate-600"
+							class="w-full bg-canvas border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500 placeholder:text-dim"
 							bind:value={discountReason}
 						/>
 					</div>
@@ -212,12 +212,12 @@
 			<!-- Split Payment Section -->
 			<div class="space-y-3">
 				<div class="flex justify-between items-center">
-					<h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+					<h3 class="text-xs font-semibold text-muted uppercase tracking-wider">
 						Split Payment Lines
 					</h3>
 					<button
 						type="button"
-						class="text-xs text-amber-400 hover:text-amber-300 font-medium transition-colors"
+						class="text-xs text-gold-accent hover:text-gold-accent/80 font-medium transition-colors"
 						onclick={addPaymentLine}
 					>
 						+ Add Line
@@ -226,11 +226,11 @@
 
 				<div class="space-y-3">
 					{#each paymentLines as line, idx}
-						<div class="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2 relative">
+						<div class="bg-canvas border border-slate-800 rounded-xl p-3 space-y-2 relative">
 							{#if paymentLines.length > 1}
 								<button
 									type="button"
-									class="absolute top-2 right-2 text-slate-500 hover:text-red-400 transition-colors"
+									class="absolute top-2 right-2 text-dim hover:text-red-400 transition-colors"
 									onclick={() => removePaymentLine(idx)}
 									aria-label="Remove payment line"
 								>
@@ -255,11 +255,11 @@
 								<div>
 									<label
 										for="payment-method-{idx}"
-										class="block text-[10px] font-medium text-slate-500 mb-1">Method</label
+										class="block text-[10px] font-medium text-dim mb-1">Method</label
 									>
 									<select
 										id="payment-method-{idx}"
-										class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+										class="w-full bg-matte border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-primary focus:outline-none focus:border-amber-500"
 										bind:value={line.method}
 									>
 										<option value="cash">Cash</option>
@@ -272,14 +272,14 @@
 								<div>
 									<label
 										for="payment-amount-{idx}"
-										class="block text-[10px] font-medium text-slate-500 mb-1">Amount (₹)</label
+										class="block text-[10px] font-medium text-dim mb-1">Amount (₹)</label
 									>
 									<input
 										type="number"
 										id="payment-amount-{idx}"
 										step="0.01"
 										min="0"
-										class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+										class="w-full bg-matte border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-primary focus:outline-none focus:border-amber-500"
 										bind:value={line.amountINR}
 									/>
 								</div>
@@ -289,14 +289,14 @@
 								<div class="pt-1">
 									<label
 										for="payment-upi-ref-{idx}"
-										class="block text-[10px] font-medium text-slate-500 mb-1"
+										class="block text-[10px] font-medium text-dim mb-1"
 										>UPI Provider Ref ID (Optional)</label
 									>
 									<input
 										type="text"
 										id="payment-upi-ref-{idx}"
 										placeholder="e.g. UPI Transaction Reference Number"
-										class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500 placeholder:text-slate-600"
+										class="w-full bg-matte border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-primary focus:outline-none focus:border-amber-500 placeholder:text-dim"
 										bind:value={line.provider_reference_id}
 									/>
 								</div>
@@ -307,10 +307,10 @@
 			</div>
 
 			<!-- Summary / Total Display -->
-			<div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2 text-sm">
+			<div class="bg-canvas border border-slate-800 rounded-xl p-4 space-y-2 text-sm">
 				<div class="flex justify-between">
-					<span class="text-slate-400">Services Subtotal:</span>
-					<span class="font-medium text-slate-200">₹{(subtotalPaise / 100).toFixed(2)}</span>
+					<span class="text-muted">Services Subtotal:</span>
+					<span class="font-medium text-primary">₹{(subtotalPaise / 100).toFixed(2)}</span>
 				</div>
 				{#if discountAmountPaise > 0}
 					<div class="flex justify-between text-emerald-400">
@@ -325,7 +325,7 @@
 					<span>₹{(expectedTotalPaise / 100).toFixed(2)}</span>
 				</div>
 				<div class="flex justify-between text-xs pt-1 border-t border-dashed border-slate-800">
-					<span class="text-slate-400">Entered Payments:</span>
+					<span class="text-muted">Entered Payments:</span>
 					<span class={isMismatch ? 'text-amber-500 font-bold' : 'text-emerald-500 font-bold'}>
 						₹{(sumPaymentsPaise / 100).toFixed(2)}
 					</span>
@@ -362,14 +362,14 @@
 			<div class="flex space-x-3 pt-2">
 				<button
 					type="button"
-					class="w-1/2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 font-semibold py-2.5 rounded-xl transition-all duration-150 text-sm cursor-pointer"
+					class="w-1/2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-primary font-semibold py-2.5 rounded-xl transition-all duration-150 text-sm cursor-pointer"
 					onclick={onClose}
 				>
 					Cancel
 				</button>
 				<button
 					type="submit"
-					class="w-1/2 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-amber-500 text-slate-950 font-bold py-2.5 rounded-xl transition-all duration-150 text-sm cursor-pointer"
+					class="w-1/2 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-amber-500 text-amber-950 font-bold py-2.5 rounded-xl transition-all duration-150 text-sm cursor-pointer"
 					disabled={isMismatch || isSubmitting}
 				>
 					{isSubmitting ? 'Completing...' : 'Complete Checkout'}

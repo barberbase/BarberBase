@@ -101,19 +101,19 @@
 </svelte:head>
 
 <div
-	class="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950"
+	class="min-h-screen bg-canvas text-primary flex flex-col font-manrope"
 >
 	<!-- Top Navigation Header -->
 	<header
-		class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center"
+		class="bg-matte border-b border-white/[0.03] px-6 py-4 flex justify-between items-center"
 	>
 		<div class="flex items-center space-x-3">
-			<span class="text-xl font-extrabold text-amber-500 tracking-wider">BarberBase</span>
-			<span class="text-slate-500">|</span>
-			<span class="text-sm font-semibold text-slate-300">Operator Console</span>
+			<span class="text-xl font-extrabold text-gold-accent tracking-wider">BarberBase</span>
+			<span class="text-dim">|</span>
+			<span class="text-sm font-semibold text-primary">Operator Console</span>
 		</div>
 		<div
-			class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-slate-700 bg-slate-800 text-slate-300"
+			class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-white/[0.05] bg-slate-800 text-primary"
 		>
 			Authorized Session
 		</div>
@@ -123,16 +123,16 @@
 		{#if form?.success}
 			<!-- SUCCESS PANEL -->
 			<div
-				class="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-8 animate-fade-in"
+				class="bg-matte border border-white/[0.03] rounded-3xl p-8 shadow-2xl space-y-8 animate-fade-in"
 			>
 				<div class="text-center space-y-2">
 					<div
-						class="mx-auto w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-3xl"
+						class="mx-auto w-16 h-16 rounded-full bg-system-success/10 border border-system-success/30 flex items-center justify-center text-3xl"
 					>
 						🎉
 					</div>
-					<h2 class="text-2xl font-extrabold text-emerald-400">Shop Successfully Provisioned!</h2>
-					<p class="text-sm text-slate-400">
+					<h2 class="text-2xl font-extrabold text-system-success/80">Shop Successfully Provisioned!</h2>
+					<p class="text-sm text-muted">
 						Write down these credentials. The database records have been bootstrapped.
 					</p>
 				</div>
@@ -140,16 +140,16 @@
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 					<!-- Pin display (Critical UX) -->
 					<div
-						class="bg-slate-950 border border-slate-800 rounded-2xl p-6 flex flex-col items-center justify-center text-center space-y-2"
+						class="bg-canvas border border-white/[0.03] rounded-2xl p-6 flex flex-col items-center justify-center text-center space-y-2"
 					>
-						<span class="text-xs font-bold text-slate-500 uppercase tracking-widest"
+						<span class="text-xs font-bold text-dim uppercase tracking-widest"
 							>Arrival PIN</span
 						>
-						<span class="text-4xl font-black text-amber-500 tracking-widest"
+						<span class="text-4xl font-black text-gold-accent tracking-widest"
 							>{form.arrival_pin}</span
 						>
 						<span
-							class="text-xs font-bold text-amber-500/80 bg-amber-500/5 border border-amber-500/10 px-3 py-1 rounded-full"
+							class="text-xs font-bold text-gold-accent/80 bg-gold-accent/5 border border-gold-accent/10 px-3 py-1 rounded-full"
 						>
 							Shown once — laminate on the counter
 						</span>
@@ -157,15 +157,15 @@
 
 					<!-- Onboarding details -->
 					<div
-						class="bg-slate-950 border border-slate-800 rounded-2xl p-6 flex flex-col justify-center space-y-3"
+						class="bg-canvas border border-white/[0.03] rounded-2xl p-6 flex flex-col justify-center space-y-3"
 					>
-						<span class="text-xs font-bold text-slate-500 uppercase tracking-widest"
+						<span class="text-xs font-bold text-dim uppercase tracking-widest"
 							>Shop Domain</span
 						>
 						<a
 							href="https://barberbase.in{form.public_path}"
 							target="_blank"
-							class="text-sm font-bold text-amber-400 hover:text-amber-300 underline break-all flex items-center space-x-1.5"
+							class="text-sm font-bold text-gold-accent hover:text-gold-accent/80 underline break-all flex items-center space-x-1.5"
 						>
 							<span>barberbase.in{form.public_path}</span>
 							<svg
@@ -183,36 +183,36 @@
 								/>
 							</svg>
 						</a>
-						<span class="text-xs text-slate-400 mt-1 block">
-							Owner can now log in at <a href="/login" class="text-amber-500 hover:underline"
+						<span class="text-xs text-muted mt-1 block">
+							Owner can now log in at <a href="/login" class="text-gold-accent hover:underline"
 								>/login</a
 							>
-							with <span class="font-bold text-slate-300">{form.owner_phone}</span>
+							with <span class="font-bold text-primary">{form.owner_phone}</span>
 						</span>
 					</div>
 				</div>
 
 				<!-- Identity mappings -->
-				<div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4">
+				<div class="bg-canvas border border-white/[0.03] rounded-2xl p-6 space-y-4">
 					<span
-						class="text-xs font-bold text-slate-400 uppercase tracking-widest block border-b border-slate-800 pb-2"
+						class="text-xs font-bold text-muted uppercase tracking-widest block border-b border-white/[0.03] pb-2"
 					>
 						System Identifiers
 					</span>
 
 					<div class="space-y-3">
 						<div class="flex justify-between items-center gap-4">
-							<span class="text-xs text-slate-500 font-semibold">Tenant ID</span>
+							<span class="text-xs text-dim font-semibold">Tenant ID</span>
 							<div class="flex items-center space-x-2">
 								<code
-									class="text-xs font-mono text-slate-300 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg select-all"
+									class="text-xs font-mono text-primary bg-matte border border-white/[0.03] px-2.5 py-1.5 rounded-lg select-all"
 								>
 									{form.tenant_id}
 								</code>
 								<button
 									type="button"
 									onclick={() => handleCopy(form.tenant_id || '', 'tenant')}
-									class="px-2.5 py-1.5 text-[10px] font-bold rounded-lg border border-slate-800 hover:bg-slate-900 transition-colors shrink-0"
+									class="px-2.5 py-1.5 text-[10px] font-bold rounded-lg border border-white/[0.03] hover:bg-matte transition-colors shrink-0"
 								>
 									{copiedMap['tenant'] ? 'Copied' : 'Copy'}
 								</button>
@@ -220,17 +220,17 @@
 						</div>
 
 						<div class="flex justify-between items-center gap-4">
-							<span class="text-xs text-slate-500 font-semibold">Location ID</span>
+							<span class="text-xs text-dim font-semibold">Location ID</span>
 							<div class="flex items-center space-x-2">
 								<code
-									class="text-xs font-mono text-slate-300 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg select-all"
+									class="text-xs font-mono text-primary bg-matte border border-white/[0.03] px-2.5 py-1.5 rounded-lg select-all"
 								>
 									{form.location_id}
 								</code>
 								<button
 									type="button"
 									onclick={() => handleCopy(form.location_id || '', 'location')}
-									class="px-2.5 py-1.5 text-[10px] font-bold rounded-lg border border-slate-800 hover:bg-slate-900 transition-colors shrink-0"
+									class="px-2.5 py-1.5 text-[10px] font-bold rounded-lg border border-white/[0.03] hover:bg-matte transition-colors shrink-0"
 								>
 									{copiedMap['location'] ? 'Copied' : 'Copy'}
 								</button>
@@ -238,17 +238,17 @@
 						</div>
 
 						<div class="flex justify-between items-center gap-4">
-							<span class="text-xs text-slate-500 font-semibold">Owner Staff ID</span>
+							<span class="text-xs text-dim font-semibold">Owner Staff ID</span>
 							<div class="flex items-center space-x-2">
 								<code
-									class="text-xs font-mono text-slate-300 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg select-all"
+									class="text-xs font-mono text-primary bg-matte border border-white/[0.03] px-2.5 py-1.5 rounded-lg select-all"
 								>
 									{form.owner_staff_member_id}
 								</code>
 								<button
 									type="button"
 									onclick={() => handleCopy(form.owner_staff_member_id || '', 'owner')}
-									class="px-2.5 py-1.5 text-[10px] font-bold rounded-lg border border-slate-800 hover:bg-slate-900 transition-colors shrink-0"
+									class="px-2.5 py-1.5 text-[10px] font-bold rounded-lg border border-white/[0.03] hover:bg-matte transition-colors shrink-0"
 								>
 									{copiedMap['owner'] ? 'Copied' : 'Copy'}
 								</button>
@@ -260,7 +260,7 @@
 				<button
 					type="button"
 					onclick={handleReset}
-					class="w-full py-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-650 text-slate-200 font-bold text-base rounded-2xl transition-colors cursor-pointer text-center"
+					class="w-full py-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-650 text-primary font-bold text-base rounded-2xl transition-colors cursor-pointer text-center"
 				>
 					Provision Another Shop
 				</button>
@@ -268,11 +268,11 @@
 		{:else}
 			<!-- PROVISIONING FORM -->
 			<div
-				class="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-8 animate-fade-in"
+				class="bg-matte border border-white/[0.03] rounded-3xl p-8 shadow-2xl space-y-8 animate-fade-in"
 			>
 				<div>
-					<h2 class="text-2xl font-extrabold text-slate-100">Onboard New Salon / Shop</h2>
-					<p class="text-sm text-slate-400">
+					<h2 class="text-2xl font-extrabold text-primary">Onboard New Salon / Shop</h2>
+					<p class="text-sm text-muted">
 						Instantly provision database tables, location attributes, and WhatsApp router rules.
 					</p>
 				</div>
@@ -292,7 +292,7 @@
 					<!-- Tenant section -->
 					<div class="space-y-4">
 						<h3
-							class="text-xs font-bold text-amber-500 uppercase tracking-wider border-b border-slate-800 pb-2"
+							class="text-xs font-bold text-gold-accent uppercase tracking-wider border-b border-white/[0.03] pb-2"
 						>
 							1. Tenant Company Info
 						</h3>
@@ -310,7 +310,7 @@
 									required
 									disabled={loading}
 									bind:value={tenantName}
-									class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm"
+									class="w-full bg-canvas border border-white/[0.03] rounded-xl px-4 py-3 text-primary focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500 text-sm"
 								/>
 							</div>
 
@@ -327,7 +327,7 @@
 									disabled={loading}
 									bind:value={tenantSlug}
 									oninput={() => (isTenantSlugEdited = true)}
-									class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm"
+									class="w-full bg-canvas border border-white/[0.03] rounded-xl px-4 py-3 text-primary focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500 text-sm"
 								/>
 							</div>
 						</div>
@@ -336,7 +336,7 @@
 					<!-- Location section -->
 					<div class="space-y-4">
 						<h3
-							class="text-xs font-bold text-amber-500 uppercase tracking-wider border-b border-slate-800 pb-2"
+							class="text-xs font-bold text-gold-accent uppercase tracking-wider border-b border-white/[0.03] pb-2"
 						>
 							2. First Location Info
 						</h3>
@@ -354,7 +354,7 @@
 									required
 									disabled={loading}
 									bind:value={locationName}
-									class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm"
+									class="w-full bg-canvas border border-white/[0.03] rounded-xl px-4 py-3 text-primary focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500 text-sm"
 								/>
 							</div>
 
@@ -371,7 +371,7 @@
 									disabled={loading}
 									bind:value={locationSlug}
 									oninput={() => (isLocationSlugEdited = true)}
-									class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm"
+									class="w-full bg-canvas border border-white/[0.03] rounded-xl px-4 py-3 text-primary focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500 text-sm"
 								/>
 							</div>
 						</div>
@@ -388,7 +388,7 @@
 									placeholder="e.g. 12, 80 Feet Road, Koramangala"
 									disabled={loading}
 									bind:value={address}
-									class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm"
+									class="w-full bg-canvas border border-white/[0.03] rounded-xl px-4 py-3 text-primary focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500 text-sm"
 								/>
 							</div>
 
@@ -401,7 +401,7 @@
 									name="timezone"
 									disabled={loading}
 									bind:value={timezone}
-									class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm"
+									class="w-full bg-canvas border border-white/[0.03] rounded-xl px-4 py-3 text-primary focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500 text-sm"
 								>
 									<option value="Asia/Kolkata">Asia/Kolkata (India Standard Time)</option>
 									<option value="UTC">UTC (Coordinated Universal Time)</option>
@@ -413,7 +413,7 @@
 					<!-- Owner section -->
 					<div class="space-y-4">
 						<h3
-							class="text-xs font-bold text-amber-500 uppercase tracking-wider border-b border-slate-800 pb-2"
+							class="text-xs font-bold text-gold-accent uppercase tracking-wider border-b border-white/[0.03] pb-2"
 						>
 							3. Owner Staff Profile
 						</h3>
@@ -431,7 +431,7 @@
 									required
 									disabled={loading}
 									bind:value={ownerName}
-									class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm"
+									class="w-full bg-canvas border border-white/[0.03] rounded-xl px-4 py-3 text-primary focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500 text-sm"
 								/>
 							</div>
 
@@ -447,7 +447,7 @@
 									required
 									disabled={loading}
 									bind:value={ownerPhone}
-									class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-sm"
+									class="w-full bg-canvas border border-white/[0.03] rounded-xl px-4 py-3 text-primary focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500 text-sm"
 								/>
 							</div>
 						</div>
@@ -456,7 +456,7 @@
 					<!-- Inline Error Display -->
 					{#if form?.error}
 						<div
-							class="bg-red-950/30 border border-red-900/50 rounded-2xl p-4 text-sm text-red-400 flex items-start space-x-3 animate-fade-in"
+							class="bg-red-950/30 border border-system-error/30/50 rounded-2xl p-4 text-sm text-system-error/80 flex items-start space-x-3 animate-fade-in"
 						>
 							<svg
 								xmlns="http://www.w3.org/2000/svg"
@@ -479,7 +479,7 @@
 					<button
 						type="submit"
 						disabled={loading}
-						class="w-full py-4 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-amber-500 text-slate-950 font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
+						class="w-full py-4 bg-gold-accent hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-gold-accent text-canvas font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
 					>
 						{#if loading}
 							<svg

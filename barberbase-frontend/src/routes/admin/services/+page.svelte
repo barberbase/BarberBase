@@ -46,23 +46,23 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between mb-6">
 			<div class="flex items-center gap-3">
-				<a href="/admin" class="text-slate-400 hover:text-white transition-colors text-sm"
+				<a href="/admin" class="text-muted hover:text-white transition-colors text-sm"
 					>← Admin</a
 				>
-				<span class="text-slate-600">/</span>
+				<span class="text-dim">/</span>
 				<h1 class="text-2xl font-bold text-white">Services</h1>
 			</div>
 			<button
 				id="toggle-create-form-btn"
 				onclick={() => (showCreateForm = !showCreateForm)}
-				class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-4 py-2 rounded-xl text-sm transition-all"
+				class="bg-gold-accent hover:bg-amber-400 text-canvas font-bold px-4 py-2 rounded-xl text-sm transition-all"
 			>
 				{showCreateForm ? '✕ Cancel' : '+ Add Service'}
 			</button>
 		</div>
 
 		{#if form?.error}
-			<div class="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6 text-red-400 text-sm">
+			<div class="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6 text-system-error/80 text-sm">
 				{form.error}
 			</div>
 		{/if}
@@ -76,7 +76,7 @@
 
 		<!-- Create Form -->
 		{#if showCreateForm}
-			<div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 mb-6 shadow-xl">
+			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-6 mb-6 shadow-xl">
 				<h2 class="text-lg font-bold text-white mb-4">New Service Variant</h2>
 				<form
 					id="create-service-form"
@@ -91,7 +91,7 @@
 				>
 					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
 						<div>
-							<label for="category_name" class="block text-xs text-slate-400 mb-1"
+							<label for="category_name" class="block text-xs text-muted mb-1"
 								>Category Name *</label
 							>
 							<input
@@ -104,7 +104,7 @@
 							/>
 						</div>
 						<div>
-							<label for="category_gender" class="block text-xs text-slate-400 mb-1">Gender</label>
+							<label for="category_gender" class="block text-xs text-muted mb-1">Gender</label>
 							<select
 								id="category_gender"
 								name="category_gender"
@@ -117,7 +117,7 @@
 							</select>
 						</div>
 						<div>
-							<label for="group_name" class="block text-xs text-slate-400 mb-1">Group Name *</label>
+							<label for="group_name" class="block text-xs text-muted mb-1">Group Name *</label>
 							<input
 								id="group_name"
 								name="group_name"
@@ -128,7 +128,7 @@
 							/>
 						</div>
 						<div>
-							<label for="variant_name" class="block text-xs text-slate-400 mb-1"
+							<label for="variant_name" class="block text-xs text-muted mb-1"
 								>Variant Name *</label
 							>
 							<input
@@ -141,7 +141,7 @@
 							/>
 						</div>
 						<div>
-							<label for="duration_minutes" class="block text-xs text-slate-400 mb-1"
+							<label for="duration_minutes" class="block text-xs text-muted mb-1"
 								>Duration (minutes) *</label
 							>
 							<input
@@ -156,7 +156,7 @@
 							/>
 						</div>
 						<div>
-							<label for="price_rupees" class="block text-xs text-slate-400 mb-1"
+							<label for="price_rupees" class="block text-xs text-muted mb-1"
 								>Price (₹, whole number) *</label
 							>
 							<input
@@ -173,7 +173,7 @@
 						</div>
 					</div>
 					<div class="flex flex-wrap gap-4 mb-4">
-						<label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+						<label class="flex items-center gap-2 text-sm text-primary cursor-pointer">
 							<input
 								type="checkbox"
 								name="allow_walk_in"
@@ -184,7 +184,7 @@
 							/>
 							Allow walk-in
 						</label>
-						<label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+						<label class="flex items-center gap-2 text-sm text-primary cursor-pointer">
 							<input
 								type="checkbox"
 								name="allow_appointment"
@@ -195,7 +195,7 @@
 							/>
 							Allow appointment
 						</label>
-						<label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+						<label class="flex items-center gap-2 text-sm text-primary cursor-pointer">
 							<input
 								type="checkbox"
 								name="requires_appointment"
@@ -206,7 +206,7 @@
 							/>
 							Requires appointment
 						</label>
-						<label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+						<label class="flex items-center gap-2 text-sm text-primary cursor-pointer">
 							<input
 								type="checkbox"
 								name="is_popular"
@@ -228,7 +228,7 @@
 					<button
 						id="submit-create-service-btn"
 						type="submit"
-						class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-6 py-2 rounded-xl text-sm transition-all"
+						class="bg-gold-accent hover:bg-amber-400 text-canvas font-bold px-6 py-2 rounded-xl text-sm transition-all"
 					>
 						Create Variant
 					</button>
@@ -238,39 +238,39 @@
 
 		<!-- Catalog tree -->
 		{#if !data.catalog.categories || data.catalog.categories.length === 0}
-			<div class="bg-slate-800 border border-slate-700 rounded-2xl p-12 text-center">
-				<p class="text-slate-400 text-lg mb-2">No services yet</p>
-				<p class="text-slate-500 text-sm">
+			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-12 text-center">
+				<p class="text-muted text-lg mb-2">No services yet</p>
+				<p class="text-dim text-sm">
 					Click "+ Add Service" to create your first service variant.
 				</p>
 			</div>
 		{:else}
 			<div class="space-y-6">
 				{#each data.catalog.categories as category}
-					<div class="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden">
+					<div class="bg-slate-800 border border-white/[0.05] rounded-2xl overflow-hidden">
 						<!-- Category header -->
 						<div
-							class="bg-slate-750 border-b border-slate-700 px-6 py-4 flex items-center justify-between"
+							class="bg-slate-750 border-b border-white/[0.05] px-6 py-4 flex items-center justify-between"
 						>
 							<div>
 								<h2 class="text-lg font-bold text-white">{category.name}</h2>
-								<span class="text-xs text-slate-400 capitalize">{category.gender}</span>
+								<span class="text-xs text-muted capitalize">{category.gender}</span>
 							</div>
 						</div>
 
 						{#each category.groups as group}
-							<div class="border-b border-slate-700 last:border-0">
+							<div class="border-b border-white/[0.05] last:border-0">
 								<div class="px-6 py-3 bg-slate-800/50">
-									<h3 class="text-sm font-semibold text-amber-400">{group.name}</h3>
+									<h3 class="text-sm font-semibold text-gold-accent">{group.name}</h3>
 								</div>
 								<table class="w-full">
 									<thead>
 										<tr class="text-left">
-											<th class="px-6 py-2 text-xs text-slate-500 font-medium">Variant</th>
-											<th class="px-4 py-2 text-xs text-slate-500 font-medium">Duration</th>
-											<th class="px-4 py-2 text-xs text-slate-500 font-medium">Price</th>
-											<th class="px-4 py-2 text-xs text-slate-500 font-medium">Flags</th>
-											<th class="px-4 py-2 text-xs text-slate-500 font-medium text-right"
+											<th class="px-6 py-2 text-xs text-dim font-medium">Variant</th>
+											<th class="px-4 py-2 text-xs text-dim font-medium">Duration</th>
+											<th class="px-4 py-2 text-xs text-dim font-medium">Price</th>
+											<th class="px-4 py-2 text-xs text-dim font-medium">Flags</th>
+											<th class="px-4 py-2 text-xs text-dim font-medium text-right"
 												>Actions</th
 											>
 										</tr>
@@ -278,7 +278,7 @@
 									<tbody>
 										{#each group.variants as variant}
 											<tr
-												class="border-t border-slate-700/50 hover:bg-slate-700/20 transition-colors"
+												class="border-t border-white/[0.03] hover:bg-slate-700/20 transition-colors"
 											>
 												{#if editingVariantId === variant.id}
 													<!-- Inline edit row -->
@@ -296,7 +296,7 @@
 														>
 															<input type="hidden" name="variant_id" value={variant.id} />
 															<div>
-																<label class="block text-xs text-slate-400 mb-1">Name</label>
+																<label class="block text-xs text-muted mb-1">Name</label>
 																<input
 																	name="variant_name"
 																	value={variant.name}
@@ -304,7 +304,7 @@
 																/>
 															</div>
 															<div>
-																<label class="block text-xs text-slate-400 mb-1"
+																<label class="block text-xs text-muted mb-1"
 																	>Duration (min)</label
 																>
 																<input
@@ -316,7 +316,7 @@
 																/>
 															</div>
 															<div>
-																<label class="block text-xs text-slate-400 mb-1">Price (₹)</label>
+																<label class="block text-xs text-muted mb-1">Price (₹)</label>
 																<input
 																	name="price_rupees"
 																	type="number"
@@ -328,7 +328,7 @@
 															</div>
 															<div>
 																<label
-																	class="flex items-center gap-1 text-xs text-slate-400 mb-1 cursor-pointer"
+																	class="flex items-center gap-1 text-xs text-muted mb-1 cursor-pointer"
 																>
 																	<input
 																		type="checkbox"
@@ -341,13 +341,13 @@
 																<div class="flex gap-2">
 																	<button
 																		type="submit"
-																		class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-3 py-1.5 rounded-lg text-xs transition-all"
+																		class="bg-gold-accent hover:bg-amber-400 text-canvas font-bold px-3 py-1.5 rounded-lg text-xs transition-all"
 																		>Save</button
 																	>
 																	<button
 																		type="button"
 																		onclick={() => (editingVariantId = null)}
-																		class="text-slate-400 hover:text-white text-xs px-2 transition-colors"
+																		class="text-muted hover:text-white text-xs px-2 transition-colors"
 																		>Cancel</button
 																	>
 																</div>
@@ -357,17 +357,17 @@
 												{:else}
 													<td class="px-6 py-3 text-sm text-white font-medium">
 														{variant.name}
-														{#if variant.is_popular}<span class="ml-1 text-amber-400 text-xs"
+														{#if variant.is_popular}<span class="ml-1 text-gold-accent text-xs"
 																>⭐</span
 															>{/if}
 													</td>
-													<td class="px-4 py-3 text-sm text-slate-300"
+													<td class="px-4 py-3 text-sm text-primary"
 														>{variant.duration_minutes} min</td
 													>
-													<td class="px-4 py-3 text-sm text-slate-300 font-mono"
+													<td class="px-4 py-3 text-sm text-primary font-mono"
 														>{formatPrice(variant.price_paise)}</td
 													>
-													<td class="px-4 py-3 text-xs text-slate-400">
+													<td class="px-4 py-3 text-xs text-muted">
 														{#if variant.allow_walk_in}<span
 																class="bg-blue-900/40 text-blue-400 px-1.5 py-0.5 rounded mr-1"
 																>Walk-in</span
@@ -385,7 +385,7 @@
 														<div class="flex items-center justify-end gap-2">
 															<button
 																onclick={() => (editingVariantId = variant.id)}
-																class="text-slate-400 hover:text-amber-400 text-xs transition-colors"
+																class="text-muted hover:text-gold-accent text-xs transition-colors"
 															>
 																Edit
 															</button>
@@ -393,7 +393,7 @@
 																<input type="hidden" name="variant_id" value={variant.id} />
 																<button
 																	type="submit"
-																	class="text-slate-500 hover:text-red-400 text-xs transition-colors"
+																	class="text-dim hover:text-system-error/80 text-xs transition-colors"
 																	onclick={(e) => {
 																		if (!confirm('Deactivate this service?')) e.preventDefault();
 																	}}

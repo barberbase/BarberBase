@@ -450,9 +450,7 @@
 		font-size: 1.75rem;
 		font-weight: 800;
 		margin: 0 0 0.75rem 0;
-		background: linear-gradient(135deg, #a78bfa, #c084fc);
-		-webkit-background-clip: text;
-		-webkit-text-fill-color: transparent;
+		color: #c8a96b;
 	}
 
 	.badges {
@@ -921,9 +919,7 @@
 		font-size: 1.45rem;
 		font-weight: 800;
 		margin: 0 0 0.85rem 0;
-		background: linear-gradient(135deg, #38bdf8, #818cf8);
-		-webkit-background-clip: text;
-		-webkit-text-fill-color: transparent;
+		color: #38bdf8;
 	}
 
 	.confirmation-card p {
