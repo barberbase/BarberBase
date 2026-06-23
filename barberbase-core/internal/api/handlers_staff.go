@@ -379,6 +379,8 @@ func (s *Server) VerifyStaffOTP(w http.ResponseWriter, r *http.Request) {
 		"role":            role,
 		"location_id":     locationID.String(),
 		"tenant_id":       tenantID.String(),
+		"access_token":    accessToken,
+		"refresh_token":   refreshToken,
 	})
 }
 
