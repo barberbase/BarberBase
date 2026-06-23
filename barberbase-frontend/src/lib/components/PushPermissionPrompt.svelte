@@ -41,9 +41,7 @@
 
 	async function enablePush() {
 		try {
-			const reg = await navigator.serviceWorker.register('/service-worker.js', {
-				scope: '/dashboard/'
-			});
+			const reg = await navigator.serviceWorker.register('/service-worker.js');
 			await navigator.serviceWorker.ready;
 
 			const permission = await Notification.requestPermission();
