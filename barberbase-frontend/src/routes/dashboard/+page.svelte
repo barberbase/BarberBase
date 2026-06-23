@@ -243,7 +243,11 @@
 							? 'text-emerald-400'
 							: 'text-amber-500'}"
 					>
-						{store.snapshot.session_status}
+						{#if store.snapshot.session_status === 'closed'}
+							No active queue
+						{:else}
+							{store.snapshot.session_status}
+						{/if}
 					</span>
 				</div>
 			{/if}
@@ -256,7 +260,7 @@
 	</header>
 
 	<!-- Operational Alert Banners -->
-	{#if store.snapshot && (store.snapshot.session_status === 'closed' || store.snapshot.session_status === 'ending')}
+	{#if store.snapshot && store.snapshot.session_status === 'ending'}
 		<div
 			class="bg-amber-950/40 border-b border-amber-900/40 px-6 py-3.5 text-sm text-amber-300 flex items-center space-x-3"
 		>
@@ -277,12 +281,30 @@
 			<div>
 				<strong>Attention:</strong> The queue session is currently in
 				<span class="font-extrabold uppercase">{store.snapshot.session_status}</span>
-				status.
-				{#if store.snapshot.session_status === 'ending'}
-					New online registrations are blocked; please serve the remaining customers.
-				{:else}
-					The queue session is closed for the day. No further check-ins or dispatches will process.
-				{/if}
+				status. New online registrations are blocked; please serve the remaining customers.
+			</div>
+		</div>
+	{/if}
+	{#if store.snapshot && store.snapshot.session_status === 'closed'}
+		<div
+			class="bg-slate-900/40 border-b border-slate-800/40 px-6 py-3.5 text-sm text-slate-400 flex items-center space-x-3"
+		>
+			<svg
+				xmlns="http://www.w3.org/2000/svg"
+				class="h-5 w-5 shrink-0 text-slate-500"
+				fill="none"
+				viewBox="0 0 24 24"
+				stroke="currentColor"
+			>
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					stroke-width="2"
+					d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+				/>
+			</svg>
+			<div>
+				No active queue yet. The first check-in will start today's queue.
 			</div>
 		</div>
 	{/if}
