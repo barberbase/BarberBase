@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -41,3 +42,65 @@ RETURNING id`
 
 	return id, nil
 }
+
+// StaffMemberRow holds selected staff member details.
+type StaffMemberRow struct {
+	ID             string
+	Name           string
+	Role           string
+	Status         string
+	CurrentEntryID *string // nullable UUID string, nil if no active entry
+}
+
+// ListStaffMembers retrieves active staff members for a given tenant and location,
+// along with any active queue entry currently assigned to them.
+func ListStaffMembers(ctx context.Context, pool *pgxpool.Pool, tenantID, locationID string) ([]StaffMemberRow, error) {
+	tenantUUID, err := uuid.Parse(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tenant ID: %w", err)
+	}
+	locationUUID, err := uuid.Parse(locationID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid location ID: %w", err)
+	}
+
+	query := `
+		SELECT
+			sm.id::text,
+			sm.name,
+			sm.role,
+			sm.status,
+			qe.id::text AS current_entry_id
+		FROM staff_members sm
+		LEFT JOIN queue_entries qe
+			ON qe.assigned_barber_id = sm.id
+			AND qe.state IN ('called', 'in_progress')
+		WHERE sm.tenant_id = $1
+		  AND sm.location_id = $2
+		  AND sm.is_active = true
+		ORDER BY sm.created_at ASC
+	`
+
+	var members []StaffMemberRow = []StaffMemberRow{}
+	rows, err := pool.Query(ctx, query, tenantUUID, locationUUID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var r StaffMemberRow
+		err := rows.Scan(&r.ID, &r.Name, &r.Role, &r.Status, &r.CurrentEntryID)
+		if err != nil {
+			return nil, err
+		}
+		members = append(members, r)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return members, nil
+}
+

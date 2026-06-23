@@ -643,7 +643,49 @@ func (s *Server) GetDailyAnalytics(w http.ResponseWriter, r *http.Request, param
 }
 
 func (s *Server) GetStaffMembers(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
+	ctx := r.Context()
+	tenantID := auth.TenantIDFromCtx(ctx)
+	locationID := auth.LocationIDFromCtx(ctx)
+
+	if tenantID == "" || locationID == "" {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code": "UNAUTHORIZED", "message": "unauthorized",
+		})
+		return
+	}
+
+	members, err := repository.ListStaffMembers(ctx, s.Pool, tenantID, locationID)
+	if err != nil {
+		log.Printf("[Error] ListStaffMembers failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code": "INTERNAL_ERROR", "message": "internal server error",
+		})
+		return
+	}
+
+	// Map to OpenAPI response shape
+	staffList := make([]StaffMember, 0, len(members))
+	for _, row := range members {
+		id, err := uuid.Parse(row.ID)
+		if err != nil {
+			log.Printf("[Warn] skipping staff row with bad id %q: %v", row.ID, err)
+			continue
+		}
+		m := StaffMember{
+			Id:     id,
+			Name:   row.Name,
+			Role:   StaffMemberRole(row.Role),
+			Status: StaffMemberStatus(row.Status),
+		}
+		if row.CurrentEntryID != nil {
+			if eid, err := uuid.Parse(*row.CurrentEntryID); err == nil {
+				m.CurrentEntryId = &eid
+			}
+			// bad entry id: leave CurrentEntryId nil rather than failing the row
+		}
+		staffList = append(staffList, m)
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{"staff": staffList})
 }
 
 func (s *Server) UpdateBarberStatus(w http.ResponseWriter, r *http.Request, staffId UUIDv7) {

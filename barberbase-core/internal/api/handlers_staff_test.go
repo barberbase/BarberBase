@@ -70,11 +70,8 @@ func setupTestServer(t *testing.T) (*Server, *pgxpool.Pool, uuid.UUID, uuid.UUID
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
 	// Clean tables
-	_, _ = pool.Exec(ctx, "DELETE FROM webhook_events")
+	_, _ = pool.Exec(ctx, "TRUNCATE tenants CASCADE")
 	_, _ = pool.Exec(ctx, "DELETE FROM staff_otps")
-	_, _ = pool.Exec(ctx, "DELETE FROM staff_members")
-	_, _ = pool.Exec(ctx, "DELETE FROM locations")
-	_, _ = pool.Exec(ctx, "DELETE FROM tenants")
 
 	// Seed data
 	tenantID := uuid.New()
@@ -854,5 +851,135 @@ func TestGetDailyAnalytics(t *testing.T) {
 		t.Errorf("Sum of barber revenue (%d) does not match total revenue (%d)", revenueSum, resp.TotalRevenuePaise)
 	}
 }
+
+func TestGetStaffMembers(t *testing.T) {
+	s, pool, tenantID, locationID, staffID, _ := setupTestServer(t)
+	defer pool.Close()
+
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM queue_entries")
+		_, _ = pool.Exec(ctx, "DELETE FROM visits")
+		_, _ = pool.Exec(ctx, "DELETE FROM queue_sessions")
+		_, _ = pool.Exec(ctx, "DELETE FROM staff_members")
+		_, _ = pool.Exec(ctx, "DELETE FROM locations")
+		_, _ = pool.Exec(ctx, "DELETE FROM tenants")
+	})
+
+	// Seed another active staff member in the same location
+	staffID2 := uuid.New()
+	_, err := pool.Exec(ctx, "INSERT INTO staff_members (id, tenant_id, location_id, name, phone_number, role, is_active) VALUES ($1, $2, $3, 'Active Staff 2', '+919999999998', 'barber', true)", staffID2, tenantID, locationID)
+	if err != nil {
+		t.Fatalf("Failed to seed active staff member 2: %v", err)
+	}
+
+	// Seed an inactive staff member in the same location
+	staffID3 := uuid.New()
+	_, err = pool.Exec(ctx, "INSERT INTO staff_members (id, tenant_id, location_id, name, phone_number, role, is_active) VALUES ($1, $2, $3, 'Inactive Staff 3', '+919999999997', 'barber', false)", staffID3, tenantID, locationID)
+	if err != nil {
+		t.Fatalf("Failed to seed inactive staff member 3: %v", err)
+	}
+
+	// Seed a staff member in another tenant/location for isolation check
+	otherTenantID := uuid.New()
+	otherLocationID := uuid.New()
+	otherStaffID := uuid.New()
+	_, err = pool.Exec(ctx, "INSERT INTO tenants (id, name, slug, owner_phone_number) VALUES ($1, 'Other Tenant', 'other-tenant', $2)", otherTenantID, "+918888888888")
+	if err != nil {
+		t.Fatalf("Failed to seed other tenant: %v", err)
+	}
+	_, err = pool.Exec(ctx, "INSERT INTO locations (id, tenant_id, name, slug) VALUES ($1, $2, 'Other Location', 'other-location')", otherLocationID, otherTenantID)
+	if err != nil {
+		t.Fatalf("Failed to seed other location: %v", err)
+	}
+	_, err = pool.Exec(ctx, "INSERT INTO staff_members (id, tenant_id, location_id, name, phone_number, role, is_active) VALUES ($1, $2, $3, 'Other Tenant Staff', '+918888888887', 'barber', true)", otherStaffID, otherTenantID, otherLocationID)
+	if err != nil {
+		t.Fatalf("Failed to seed other tenant staff: %v", err)
+	}
+
+	// Seed a queue session for location
+	var sessionID uuid.UUID
+	err = pool.QueryRow(ctx, "INSERT INTO queue_sessions (tenant_id, location_id, business_date, status) VALUES ($1, $2, NOW()::date, 'active') RETURNING id", tenantID, locationID).Scan(&sessionID)
+	if err != nil {
+		t.Fatalf("Failed to seed queue session: %v", err)
+	}
+
+	// Seed active queue entry for staffID (called status)
+	var visitID1 uuid.UUID
+	err = pool.QueryRow(ctx, "INSERT INTO visits (tenant_id, location_id, entry_type, total_duration_minutes) VALUES ($1, $2, 'walk_in', 30) RETURNING id", tenantID, locationID).Scan(&visitID1)
+	if err != nil {
+		t.Fatalf("Failed to seed visit 1: %v", err)
+	}
+	var entryID1 uuid.UUID
+	err = pool.QueryRow(ctx, "INSERT INTO queue_entries (queue_session_id, visit_id, state, token_number, assigned_barber_id) VALUES ($1, $2, 'called', 1, $3) RETURNING id", sessionID, visitID1, staffID).Scan(&entryID1)
+	if err != nil {
+		t.Fatalf("Failed to seed active queue entry: %v", err)
+	}
+
+	// Seed terminal queue entry for staffID2 (completed status)
+	var visitID2 uuid.UUID
+	err = pool.QueryRow(ctx, "INSERT INTO visits (tenant_id, location_id, entry_type, total_duration_minutes) VALUES ($1, $2, 'walk_in', 30) RETURNING id", tenantID, locationID).Scan(&visitID2)
+	if err != nil {
+		t.Fatalf("Failed to seed visit 2: %v", err)
+	}
+	_, err = pool.Exec(ctx, "INSERT INTO queue_entries (queue_session_id, visit_id, state, token_number, assigned_barber_id) VALUES ($1, $2, 'completed', 2, $3)", sessionID, visitID2, staffID2)
+	if err != nil {
+		t.Fatalf("Failed to seed completed queue entry: %v", err)
+	}
+
+	t.Run("200 OK with matching staff members and current_entry_id verification", func(t *testing.T) {
+		req := newStaffRequestWithRole(http.MethodGet, "/v1/staff/members", tenantID, locationID, staffID, "manager")
+		rec := httptest.NewRecorder()
+
+		s.GetStaffMembers(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected 200 OK, got %d. Response: %s", rec.Code, rec.Body.String())
+		}
+
+		var resp struct {
+			Staff []StaffMember `json:"staff"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
+
+		// Active staff member 1 and 2 should be returned, inactive 3 and other tenant staff should be excluded
+		if len(resp.Staff) != 2 {
+			t.Fatalf("Expected exactly 2 staff members, got %d", len(resp.Staff))
+		}
+
+		// First staff member (seeded by setupTestServer) should have the active entryID1
+		if resp.Staff[0].Id != staffID {
+			t.Errorf("Expected first staff member ID %s, got %s", staffID, resp.Staff[0].Id)
+		}
+		if resp.Staff[0].CurrentEntryId == nil {
+			t.Errorf("Expected first staff member to have an active queue entry")
+		} else if *resp.Staff[0].CurrentEntryId != entryID1 {
+			t.Errorf("Expected current_entry_id %s, got %s", entryID1, *resp.Staff[0].CurrentEntryId)
+		}
+
+		// Second staff member (staffID2) has completed entry, should have nil CurrentEntryId
+		if resp.Staff[1].Id != staffID2 {
+			t.Errorf("Expected second staff member ID %s, got %s", staffID2, resp.Staff[1].Id)
+		}
+		if resp.Staff[1].CurrentEntryId != nil {
+			t.Errorf("Expected second staff member CurrentEntryId to be nil, got %s", *resp.Staff[1].CurrentEntryId)
+		}
+	})
+
+	t.Run("401 Unauthorized on missing context claims", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/staff/members", nil)
+		rec := httptest.NewRecorder()
+
+		s.GetStaffMembers(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("Expected 401 Unauthorized, got %d. Response: %s", rec.Code, rec.Body.String())
+		}
+	})
+}
+
 
 
