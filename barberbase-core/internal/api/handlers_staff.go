@@ -352,6 +352,16 @@ func (s *Server) VerifyStaffOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	streamToken, err := auth.GenerateStreamToken(secret, tenantID.String(), locationID.String(), staffID.String(), role)
+	if err != nil {
+		log.Printf("[Error] failed to generate stream token: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "internal server error",
+		})
+		return
+	}
+
 	// Set Cookies
 	http.SetCookie(w, &http.Cookie{
 		Name:     "bb_access",
@@ -381,6 +391,7 @@ func (s *Server) VerifyStaffOTP(w http.ResponseWriter, r *http.Request) {
 		"tenant_id":       tenantID.String(),
 		"access_token":    accessToken,
 		"refresh_token":   refreshToken,
+		"stream_token":    streamToken,
 	})
 }
 
@@ -434,6 +445,16 @@ func (s *Server) RefreshStaffToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	streamToken, err := auth.GenerateStreamToken(secret, tenantID.String(), locationID.String(), staffID, role)
+	if err != nil {
+		log.Printf("[Error] failed to generate stream token on refresh: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "internal server error",
+		})
+		return
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "bb_access",
 		Value:    accessToken,
@@ -444,7 +465,9 @@ func (s *Server) RefreshStaffToken(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 
-	w.WriteHeader(http.StatusOK)
+	respondJSON(w, http.StatusOK, map[string]string{
+		"stream_token": streamToken,
+	})
 }
 
 func respondJSON(w http.ResponseWriter, status int, data interface{}) {

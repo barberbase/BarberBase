@@ -34,6 +34,11 @@ func RequireStaffJWT(secret []byte, scopeKey any) func(http.Handler) http.Handle
 				return
 			}
 
+			if claims.Scope == "stream" {
+				respondUnauthorized(w)
+				return
+			}
+
 			// Inject values into the request context using the defined contextKeys
 			ctx := r.Context()
 			ctx = context.WithValue(ctx, CtxTenantID, claims.TenantID)

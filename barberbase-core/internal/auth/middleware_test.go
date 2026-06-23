@@ -18,6 +18,11 @@ func TestRequireStaffJWT(t *testing.T) {
 		t.Fatalf("failed to generate token: %v", err)
 	}
 
+	streamToken, err := GenerateStreamToken(secret, "tenant-123", "location-456", "staff-789", "owner")
+	if err != nil {
+		t.Fatalf("failed to generate stream token: %v", err)
+	}
+
 	tests := []struct {
 		name           string
 		withMarker     bool
@@ -45,6 +50,13 @@ func TestRequireStaffJWT(t *testing.T) {
 			authHeader:     "Bearer " + validToken,
 			expectedStatus: http.StatusOK,
 			expectContext:  true,
+		},
+		{
+			name:           "Request WITH marker and valid stream-scoped token",
+			withMarker:     true,
+			authHeader:     "Bearer " + streamToken,
+			expectedStatus: http.StatusUnauthorized,
+			expectContext:  false,
 		},
 		{
 			name:           "Request WITH marker and invalid token",

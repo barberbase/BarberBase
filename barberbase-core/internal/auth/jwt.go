@@ -15,6 +15,7 @@ type StaffClaims struct {
 	LocationID    string `json:"location_id"`
 	StaffMemberID string `json:"staff_member_id"`
 	Role          string `json:"role"`
+	Scope         string `json:"scope,omitempty"`
 }
 
 type RefreshClaims struct {
@@ -45,6 +46,7 @@ func GenerateAccessAndRefreshTokens(secret []byte, tenantID, locationID, staffMe
 		LocationID:    locationID,
 		StaffMemberID: staffMemberID,
 		Role:          role,
+		Scope:         "",
 	}
 
 	refreshClaims := RefreshClaims{
@@ -66,6 +68,31 @@ func GenerateAccessAndRefreshTokens(secret []byte, tenantID, locationID, staffMe
 	}
 
 	return accessToken, refreshToken, nil
+}
+
+// GenerateStreamToken signs and generates a long-lived StaffClaims token for SSE stream.
+func GenerateStreamToken(secret []byte, tenantID, locationID, staffMemberID, role string) (string, error) {
+	now := time.Now()
+
+	claims := StaffClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(now.Add(12 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			ID:        uuid.New().String(),
+		},
+		TenantID:      tenantID,
+		LocationID:    locationID,
+		StaffMemberID: staffMemberID,
+		Role:          role,
+		Scope:         "stream",
+	}
+
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(secret)
+	if err != nil {
+		return "", fmt.Errorf("failed to sign stream token: %w", err)
+	}
+
+	return token, nil
 }
 
 // ParseAndVerifyToken validates an Access JWT using HS256 and the provided secret.
