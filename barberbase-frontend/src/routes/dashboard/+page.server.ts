@@ -1,8 +1,15 @@
 import { ApiClient } from '$lib/api/client';
+import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async (event) => {
 	const accessToken = event.cookies.get('access_token');
+
+	// If no token reached this load, the cookie didn't persist — bounce to login rather than 500
+	if (!accessToken) {
+		throw redirect(303, '/login');
+	}
+
 	const parentData = await event.parent();
 	const staff = parentData.staff;
 	const locationId = staff?.location_id;
@@ -14,15 +21,12 @@ export const load: PageServerLoad = async (event) => {
 
 	// Fetch snapshot, staff list, and service catalog in parallel
 	const [snapshot, staffMembersRes, catalog] = await Promise.all([
-		client.get<any>('/v1/staff/queue/snapshot'),
-		client.get<any>('/v1/staff/members').catch((err) => {
-			console.error('[PageLoad] Failed to fetch staff members:', err);
-			return { staff: [] };
+		client.get<any>('/v1/staff/queue/snapshot').catch((err) => {
+			console.error('[PageLoad] snapshot failed:', JSON.stringify(err));
+			return { entries: [], session: null };
 		}),
-		client.get<any>(`/v1/public/locations/${locationId}/service-catalog`).catch((err) => {
-			console.error('[PageLoad] Failed to fetch service catalog:', err);
-			return { categories: [] };
-		})
+		client.get<any>('/v1/staff/members').catch(() => ({ staff: [] })),
+		client.get<any>(`/v1/public/locations/${locationId}/service-catalog`).catch(() => ({ categories: [] }))
 	]);
 
 	return {
