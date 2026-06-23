@@ -2,10 +2,6 @@ import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { decodeToken, isTokenExpired, getApiBase } from '$lib/api/client';
 
-function parseCookie(cookieString: string, name: string): string | null {
-	const matches = cookieString.match(new RegExp(`(^|;)\\s*${name}\\s*=\\s*([^;]+)`));
-	return matches ? matches[2].trim() : null;
-}
 
 export const load: PageServerLoad = async ({ cookies }) => {
 	const accessToken = cookies.get('access_token');
@@ -104,13 +100,17 @@ export const actions: Actions = {
 			});
 
 			if (res.status === 200) {
-				const setCookies = res.headers.getSetCookie();
-				for (const cookieStr of setCookies) {
-					const accessVal = parseCookie(cookieStr, 'bb_access');
-					if (accessVal) bbAccess = accessVal;
-					const refreshVal = parseCookie(cookieStr, 'bb_refresh');
-					if (refreshVal) bbRefresh = refreshVal;
-				}
+				const body = await res.json() as {
+					access_token: string;
+					refresh_token: string;
+					staff_member_id: string;
+					name: string;
+					role: string;
+					location_id: string;
+					tenant_id: string;
+				};
+				bbAccess = body.access_token ?? null;
+				bbRefresh = body.refresh_token ?? null;
 
 				if (!bbAccess || !bbRefresh) {
 					errorResponse = fail(500, {

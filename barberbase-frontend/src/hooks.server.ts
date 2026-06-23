@@ -33,7 +33,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 					const refreshRes = await event.fetch(`${apiBase}/v1/auth/staff/refresh`, {
 						method: 'POST',
 						headers: {
-							Cookie: `refresh_token=${refreshToken}`,
+							Cookie: `bb_refresh=${refreshToken}`,
 							'x-bff-retry': 'true'
 						}
 					});
@@ -110,7 +110,7 @@ export const handleFetch: HandleFetch = async ({ event, request, fetch }) => {
 			const refreshRes = await fetch(`${apiBase}/v1/auth/staff/refresh`, {
 				method: 'POST',
 				headers: {
-					Cookie: `refresh_token=${refreshToken}`,
+					Cookie: `bb_refresh=${refreshToken}`,
 					'x-bff-retry': 'true'
 				}
 			});
