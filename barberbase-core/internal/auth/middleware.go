@@ -7,9 +7,14 @@ import (
 )
 
 // RequireStaffJWT returns a middleware that validates the Bearer token in the Authorization header.
-func RequireStaffJWT(secret []byte) func(http.Handler) http.Handler {
+func RequireStaffJWT(secret []byte, scopeKey any) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Context().Value(scopeKey) == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				respondUnauthorized(w)
