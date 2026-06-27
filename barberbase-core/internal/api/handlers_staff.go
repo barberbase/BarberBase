@@ -1428,7 +1428,9 @@ func (s *Server) ReactivateEntry(w http.ResponseWriter, r *http.Request, entryId
 					},
 				},
 			}
-			// Add button only when we have data to regenerate the magic link
+			// Add button only when we have data to regenerate the magic link.
+			// A phone-reachable remote customer always has all three — if any is nil/zero,
+			// something minted the entry wrong upstream; log it and send without the button.
 			if displaced.customerID != nil && displaced.visitID != uuid.Nil && displaced.magicLinkExpiry != nil {
 				mlToken := queue.GenerateMagicLinkToken(
 					displaced.customerID.String(),
@@ -1443,6 +1445,8 @@ func (s *Server) ReactivateEntry(w http.ResponseWriter, r *http.Request, entryId
 					Index:   0,
 					Parameters: []compParam{{Type: "text", Text: mlToken}},
 				})
+			} else {
+				log.Printf("[Warn] ReactivateEntry: phone-reachable displaced entry %s has no customer/visit data — bb_queue_delayed sent without button (data integrity check needed)", displaced.id)
 			}
 
 			notifPayload := map[string]interface{}{
