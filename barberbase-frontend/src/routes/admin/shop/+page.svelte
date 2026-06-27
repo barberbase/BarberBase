@@ -27,7 +27,7 @@
 				closed: 'bg-red-900/40 text-system-error/80 border-red-700',
 				temporarily_closed: 'bg-yellow-900/40 text-yellow-400 border-yellow-700',
 				closing_soon: 'bg-orange-900/40 text-orange-400 border-orange-700'
-			}[s] || 'bg-slate-700 text-muted border-slate-600'
+			}[s] || 'bg-surface text-muted border-white/[0.05]'
 		);
 	}
 </script>
@@ -37,13 +37,13 @@
 	<meta name="description" content="Control shop open/close status and manage queue entries" />
 </svelte:head>
 
-<div class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+<div class="min-h-screen bg-canvas">
 	<div class="max-w-2xl mx-auto p-6">
 		<!-- Header -->
 		<div class="flex items-center gap-3 mb-6">
-			<a href="/admin" class="text-muted hover:text-white transition-colors text-sm">← Admin</a>
+			<a href="/admin" class="text-muted hover:text-primary transition-colors text-sm">← Admin</a>
 			<span class="text-dim">/</span>
-			<h1 class="text-2xl font-bold text-white">Shop Status</h1>
+			<h1 class="text-2xl font-bold text-primary">Shop Status</h1>
 		</div>
 
 		{#if form?.error}
@@ -61,9 +61,9 @@
 
 		<!-- Current Status Card -->
 		{#if data.shopStatus}
-			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-6 mb-6 shadow-xl">
+			<div class="bg-matte border border-white/[0.05] rounded-2xl p-6 mb-6 shadow-xl">
 				<div class="flex items-center justify-between mb-4">
-					<h2 class="text-lg font-bold text-white">Current Status</h2>
+					<h2 class="text-lg font-bold text-primary">Current Status</h2>
 					<span
 						class="px-3 py-1 rounded-full border text-sm font-medium {statusBadge(
 							data.shopStatus.shop_status
@@ -75,14 +75,14 @@
 				<div class="grid grid-cols-2 gap-4 text-sm">
 					<div>
 						<p class="text-muted text-xs mb-1">Manual Override</p>
-						<p class="text-white">
+						<p class="text-primary">
 							{data.shopStatus.manual_override_active ? '✓ Active' : '— None'}
 						</p>
 					</div>
 					{#if data.shopStatus.override_expires_at}
 						<div>
 							<p class="text-muted text-xs mb-1">Expires At</p>
-							<p class="text-white text-xs">
+							<p class="text-primary text-xs">
 								{new Date(data.shopStatus.override_expires_at).toLocaleString('en-IN')}
 							</p>
 						</div>
@@ -91,7 +91,7 @@
 
 				<!-- Counter PIN -->
 				{#if data.shopStatus.arrival_pin}
-					<div class="mt-4 p-4 bg-gold-accent/10/20 border border-amber-700/50 rounded-xl">
+					<div class="mt-4 p-4 bg-gold-accent/10 border border-amber-700/50 rounded-xl">
 						<p class="text-xs text-gold-accent font-semibold mb-1">
 							Counter PIN — show this to customers for arrival verification
 						</p>
@@ -123,8 +123,8 @@
 		{/if}
 
 		<!-- Change Status Form -->
-		<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-6 shadow-xl">
-			<h2 class="text-lg font-bold text-white mb-4">Change Status</h2>
+		<div class="bg-matte border border-white/[0.05] rounded-2xl p-6 shadow-xl">
+			<h2 class="text-lg font-bold text-primary mb-4">Change Status</h2>
 			<form id="set-shop-status-form" method="POST" action="?/setStatus" use:enhance>
 				<div class="grid grid-cols-3 gap-3 mb-4">
 					{#each ['open', 'closed', 'temporarily_closed'] as s}
@@ -137,7 +137,7 @@
 								class="sr-only peer"
 							/>
 							<div
-								class="border rounded-xl p-3 text-center text-sm font-medium transition-all border-slate-600 text-gold-accent/80/60 peer-checked:border-gold-accent peer-checked:text-gold-accent peer-checked:bg-gold-accent/10/20 hover:border-slate-500 hover:text-white"
+								class="border rounded-xl p-3 text-center text-sm font-medium transition-all border-white/[0.05] text-dim peer-checked:border-gold-accent peer-checked:text-gold-accent peer-checked:bg-gold-accent/10 hover:border-slate-500 hover:text-primary"
 							>
 								{#if s === 'open'}🟢 Open{:else if s === 'closed'}🔴 Closed{:else}⏸ Temp Closed{/if}
 							</div>
@@ -155,7 +155,7 @@
 							id="expires-select"
 							name="expires_in_minutes"
 							bind:value={expiresInMinutes}
-							class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+							class="w-full bg-titanium border border-white/[0.05] rounded-lg px-3 py-2 text-primary text-sm focus:outline-none focus:ring-2 focus:ring-gold-accent"
 						>
 							<option value="15">15 minutes</option>
 							<option value="30">30 minutes</option>
@@ -183,12 +183,12 @@
 	<div class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
 		<div
 			id="shop-status-conflict-modal"
-			class="bg-slate-800 border border-white/[0.05] rounded-2xl p-6 max-w-md w-full shadow-2xl"
+			class="bg-matte border border-white/[0.05] rounded-2xl p-6 max-w-md w-full shadow-2xl"
 		>
-			<h3 class="text-xl font-bold text-white mb-2">⚠️ Active Customers Waiting</h3>
+			<h3 class="text-xl font-bold text-primary mb-2">⚠️ Active Customers Waiting</h3>
 			<p class="text-primary mb-6 text-sm">
 				There {activeEntryCount === 1 ? 'is' : 'are'}
-				<strong class="text-white">{activeEntryCount}</strong>
+				<strong class="text-primary">{activeEntryCount}</strong>
 				customer{activeEntryCount !== 1 ? 's' : ''} waiting. What would you like to do?
 			</p>
 			<div class="grid grid-cols-1 gap-3">
@@ -204,7 +204,7 @@
 					<button
 						id="modal-finish-remaining-btn"
 						type="submit"
-						class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all text-sm"
+						class="w-full bg-blue-600 hover:bg-blue-500 text-primary font-bold py-3 rounded-xl transition-all text-sm"
 					>
 						Serve them first, then close
 					</button>
@@ -221,7 +221,7 @@
 					<button
 						id="modal-expire-remaining-btn"
 						type="submit"
-						class="w-full bg-red-700 hover:bg-red-600 text-white font-bold py-3 rounded-xl transition-all text-sm"
+						class="w-full bg-red-700 hover:bg-red-600 text-primary font-bold py-3 rounded-xl transition-all text-sm"
 					>
 						Cancel all waiting customers
 					</button>

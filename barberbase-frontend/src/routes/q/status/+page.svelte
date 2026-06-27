@@ -51,7 +51,7 @@
 		if (!token || !locationId) return;
 
 		const apiBase = getClientApiBase();
-		const url = `${apiBase}/v1/stream/${locationId}?t=${encodeURIComponent(token)}`;
+		const url = `${apiBase}/v1/stream/${locationId}?token=${encodeURIComponent(token)}`;
 		let es: EventSource | null = null;
 		let reconnectDelay = 1000;
 		let idleTimer: ReturnType<typeof setTimeout>;
@@ -68,7 +68,14 @@
 			); // 4 hours idle timeout
 		};
 
+		// pendingVersion = highest queue_version seen on the SSE stream. The gate
+		// (localQueueVersion) only advances to it after a successful canonical refetch,
+		// so a fetch that drops on spotty 4G leaves the gate open and the next
+		// heartbeat (which also carries queue_version) retries within 30s. my-status's
+		// body has no queue_version, so the version must come from the event payload.
+		let pendingVersion = localQueueVersion;
 		const refetch = async () => {
+			const versionAtFetch = pendingVersion;
 			try {
 				const apiBaseUrl = getClientApiBase();
 				const res = await fetch(`${apiBaseUrl}/v1/queue/my-status`, {
@@ -77,14 +84,23 @@
 				if (res.ok) {
 					const freshData = await res.json();
 					currentEntry = freshData;
-					localQueueVersion = freshData.queue_version ?? localQueueVersion;
+					localQueueVersion = Math.max(localQueueVersion, versionAtFetch);
 					resetIdle();
+					// A burst of events during this in-flight fetch may have advanced
+					// pendingVersion past what we just confirmed — chase it now instead of
+					// waiting for the next event/heartbeat.
+					if (pendingVersion > localQueueVersion) {
+						scheduleRefetch?.();
+					}
 				}
 			} catch (err) {
 				console.error('[SSE Client] Refetch failed:', err);
 			}
 		};
 
+		// The 500ms debounce is load-bearing: refetch's in-flight chase reschedules through
+		// here, so on a sustained burst the chase coalesces instead of firing per event. If this
+		// is ever changed to fire immediately, the chase becomes a tight refetch loop on 4G.
 		let debounceTimer: ReturnType<typeof setTimeout>;
 		scheduleRefetch = () => {
 			clearTimeout(debounceTimer);
@@ -99,10 +115,17 @@
 
 			es = new EventSource(url);
 
+			// Resync canonical state on every (re)connect — recovers any mutation missed
+			// while the stream was down, independent of the version gate.
+			es.onopen = () => {
+				scheduleRefetch?.();
+			};
+
 			es.addEventListener('queue_changed', (e) => {
 				try {
 					const eventData = JSON.parse(e.data);
 					if (eventData.queue_version > localQueueVersion) {
+						pendingVersion = Math.max(pendingVersion, eventData.queue_version);
 						scheduleRefetch?.();
 					}
 				} catch (err) {
@@ -114,6 +137,7 @@
 				try {
 					const eventData = JSON.parse(e.data);
 					if (eventData.queue_version && eventData.queue_version > localQueueVersion) {
+						pendingVersion = Math.max(pendingVersion, eventData.queue_version);
 						scheduleRefetch?.();
 					}
 				} catch (err) {
@@ -343,10 +367,11 @@
 </svelte:head>
 
 <div
-	class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-zinc-950 text-primary flex flex-col items-center justify-center p-4 md:p-6 font-manrope"
+	class="min-h-screen bg-canvas text-primary flex flex-col items-center justify-center p-4 md:p-6 font-manrope"
 >
 	<div
 		class="w-full max-w-md bg-matte/60 backdrop-blur-xl border border-white/[0.03] rounded-3xl p-6 shadow-2xl space-y-6 relative overflow-hidden"
+		aria-live="polite" aria-atomic="true"
 	>
 		<!-- Subtle ambient backdrop light glow -->
 		<div
@@ -434,11 +459,11 @@
 			{:else if currentEntry.state === 'called'}
 				<!-- STATE 4 — Called -->
 				<div
-					class="text-center py-8 space-y-4 bg-gold-accent/10 border border-gold-accent/30 rounded-3xl p-6 ring-2 ring-amber-500/20"
+					class="text-center py-8 space-y-4 bg-gold-accent/10 border border-gold-accent/30 rounded-3xl p-6 ring-2 ring-gold-accent/20"
 				>
-					<div class="text-5xl animate-pulse">🔔</div>
+					<div class="text-5xl motion-safe:animate-pulse">🔔</div>
 					<h1 class="text-2xl font-black text-gold-accent">It's Your Turn!</h1>
-					<p class="text-sm text-gold-accent/80">Please go to the barber chair now.</p>
+					<p class="text-sm text-gold-accent">Please go to the barber chair now.</p>
 				</div>
 			{:else if currentEntry.state === 'in_progress'}
 				<!-- STATE 5 — In Progress -->
@@ -447,7 +472,18 @@
 				>
 					<div class="text-5xl">✂️</div>
 					<h1 class="text-2xl font-black text-system-success/80">In Progress</h1>
-					<p class="text-sm text-emerald-200">Enjoy your service!</p>
+					<p class="text-sm text-system-success">Enjoy your service!</p>
+				</div>
+			{:else if currentEntry.state === 'cancelled' || currentEntry.state === 'expired'}
+				<!-- STATE — Terminal / Cancelled -->
+				<div class="text-center py-6 space-y-4">
+					<div class="text-5xl">🚫</div>
+					<h1 class="text-2xl font-black text-primary">Queue Entry Ended</h1>
+					<p class="text-sm text-muted">
+						{currentEntry.state === 'cancelled'
+							? 'Your spot was cancelled. Visit the shop to rejoin.'
+							: 'This session has ended. Please ask staff for assistance.'}
+					</p>
 				</div>
 			{:else if currentEntry.presence_state === 'snoozed' || currentEntry.state === 'skipped' || currentEntry.state === 'no_show'}
 				<!-- STATE 7 — Spot Paused -->
@@ -476,7 +512,7 @@
 						Please wait inside the shop. We will call you when it is your turn.
 					</p>
 					<div
-						class="pt-2 flex justify-between items-center text-xs text-dim border-t border-white/[0.02] mt-4"
+						class="pt-2 flex justify-between items-center text-xs text-muted border-t border-white/[0.03] mt-4"
 					>
 						<span
 							>Position ahead: <strong class="text-primary">{currentEntry.position_ahead}</strong
@@ -494,19 +530,19 @@
 				<div class="space-y-6">
 					<!-- Queue info card -->
 					<div
-						class="bg-canvas/50 border border-slate-850 rounded-2xl p-4 flex justify-around text-center"
+						class="bg-canvas/50 border border-white/[0.05] rounded-2xl p-4 flex justify-around text-center"
 					>
 						<div>
-							<div class="text-[10px] text-dim font-bold uppercase tracking-wider">
+							<div class="text-[10px] text-muted font-bold uppercase tracking-wider">
 								Ahead of You
 							</div>
 							<div class="text-xl font-black text-primary mt-0.5">
 								{currentEntry.position_ahead}
 							</div>
 						</div>
-						<div class="w-px bg-slate-850"></div>
+						<div class="w-px bg-white/[0.05]"></div>
 						<div>
-							<div class="text-[10px] text-dim font-bold uppercase tracking-wider">
+							<div class="text-[10px] text-muted font-bold uppercase tracking-wider">
 								Est. Wait
 							</div>
 							<div class="text-xl font-black text-primary mt-0.5">
@@ -533,13 +569,13 @@
 										inputmode="numeric"
 										maxlength="6"
 										placeholder="PIN on counter card"
-										class="flex-1 bg-canvas border border-white/[0.03] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500/50 placeholder:text-slate-650 min-h-[48px]"
+										class="flex-1 bg-canvas border border-white/[0.03] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-gold-accent/30 placeholder:text-dim min-h-[48px]"
 										bind:value={pinInput}
 										disabled={pinAttemptsRemaining === 0 || isSubmitting}
 									/>
 									<button
 										type="submit"
-										class="px-5 bg-gold-accent hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-gold-accent text-canvas font-extrabold text-sm rounded-xl cursor-pointer transition-colors min-h-[48px]"
+										class="px-5 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] disabled:opacity-40 disabled:hover:brightness-100 text-canvas font-bold text-sm rounded-xl cursor-pointer transition-all min-h-[48px]"
 										disabled={!pinInput || pinAttemptsRemaining === 0 || isSubmitting}
 									>
 										Confirm
@@ -549,7 +585,7 @@
 
 							{#if pinError}
 								<p
-									class="text-xs text-rose-400 mt-1 text-center font-medium bg-rose-950/20 border border-rose-900/40 rounded-lg py-2 px-3"
+									class="text-xs text-system-error mt-1 text-center font-medium bg-system-error/10 border border-system-error/20 rounded-lg py-2 px-3"
 								>
 									{pinError}
 								</p>
@@ -557,7 +593,7 @@
 
 							{#if pinAttemptsRemaining === 0}
 								<p
-									class="text-xs text-rose-400 mt-1 text-center font-bold bg-rose-950/30 border border-rose-900/60 rounded-lg py-2 px-3"
+									class="text-xs text-system-error mt-1 text-center font-bold bg-system-error/10 border border-system-error/30 rounded-lg py-2 px-3"
 								>
 									Too many attempts. Ask staff to confirm your arrival.
 								</p>
@@ -565,24 +601,24 @@
 						</form>
 
 						<div class="relative flex py-2 items-center">
-							<div class="flex-grow border-t border-slate-850"></div>
+							<div class="flex-grow border-t border-white/[0.05]"></div>
 							<span
 								class="flex-shrink mx-4 text-xs font-bold text-dim uppercase tracking-widest"
 								>or</span
 							>
-							<div class="flex-grow border-t border-slate-850"></div>
+							<div class="flex-grow border-t border-white/[0.05]"></div>
 						</div>
 
 						<!-- GPS Option -->
 						<div class="space-y-2">
 							<button
 								type="button"
-								class="w-full py-3 bg-slate-800 hover:bg-slate-700 active:bg-slate-750 border border-slate-750 disabled:opacity-50 text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors flex items-center justify-center space-x-2 min-h-[48px]"
+								class="w-full py-3 bg-surface hover:bg-titanium active:bg-matte border border-white/[0.06] disabled:opacity-50 text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors flex items-center justify-center space-x-2 min-h-[48px]"
 								onclick={handleConfirmArrivalGps}
 								disabled={gpsLoading || isSubmitting}
 							>
 								{#if gpsLoading}
-									<span class="animate-spin text-xs">⏳</span>
+									<span class="inline-block w-3.5 h-3.5 border-2 border-white/20 border-t-gold-accent rounded-full animate-spin motion-reduce:animate-none"></span>
 									<span>Retrieving GPS...</span>
 								{:else}
 									<span>📍 Auto-Confirm using GPS</span>
@@ -591,7 +627,7 @@
 
 							{#if gpsError}
 								<p
-									class="text-xs text-rose-400 text-center font-medium bg-rose-950/20 border border-rose-900/40 rounded-lg py-2 px-3"
+									class="text-xs text-system-error text-center font-medium bg-system-error/10 border border-system-error/20 rounded-lg py-2 px-3"
 								>
 									{gpsError}
 								</p>
@@ -604,19 +640,19 @@
 				<div class="space-y-6">
 					<!-- Queue info card -->
 					<div
-						class="bg-canvas/50 border border-slate-850 rounded-2xl p-4 flex justify-around text-center"
+						class="bg-canvas/50 border border-white/[0.05] rounded-2xl p-4 flex justify-around text-center"
 					>
 						<div>
-							<div class="text-[10px] text-dim font-bold uppercase tracking-wider">
+							<div class="text-[10px] text-muted font-bold uppercase tracking-wider">
 								Ahead of You
 							</div>
 							<div class="text-xl font-black text-primary mt-0.5">
 								{currentEntry.position_ahead}
 							</div>
 						</div>
-						<div class="w-px bg-slate-850"></div>
+						<div class="w-px bg-white/[0.05]"></div>
 						<div>
-							<div class="text-[10px] text-dim font-bold uppercase tracking-wider">
+							<div class="text-[10px] text-muted font-bold uppercase tracking-wider">
 								Est. Wait
 							</div>
 							<div class="text-xl font-black text-primary mt-0.5">
@@ -631,7 +667,7 @@
 							>Requested Services</span
 						>
 						<div
-							class="bg-canvas/30 border border-slate-850 rounded-2xl p-4 divide-y divide-slate-850/60"
+							class="bg-canvas/30 border border-white/[0.05] rounded-2xl p-4 divide-y divide-white/[0.04]"
 						>
 							{#each currentEntry.services as svc}
 								<div class="flex justify-between items-center py-2 first:pt-0 last:pb-0 text-xs">
@@ -646,7 +682,7 @@
 					<div class="space-y-3 pt-2">
 						<button
 							type="button"
-							class="w-full py-4 bg-gold-accent hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-gold-accent text-canvas font-black text-sm rounded-xl cursor-pointer transition-all shadow-lg flex items-center justify-center space-x-1 min-h-[48px]"
+							class="w-full py-4 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] disabled:opacity-40 disabled:hover:brightness-100 text-canvas font-black text-sm rounded-xl cursor-pointer transition-all shadow-[0_0_20px_rgba(200,169,107,0.15)] flex items-center justify-center space-x-1 min-h-[48px]"
 							onclick={handleOnTheWay}
 							disabled={isSubmitting}
 						>
@@ -656,7 +692,7 @@
 
 						<button
 							type="button"
-							class="w-full py-3 bg-canvas/40 hover:bg-slate-800/40 active:bg-matte/40 border border-white/[0.03] text-muted hover:text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors min-h-[48px]"
+							class="w-full py-3 bg-canvas/40 hover:bg-surface/40 active:bg-matte/40 border border-white/[0.03] text-muted hover:text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors min-h-[48px]"
 							onclick={handleCancel}
 							disabled={isSubmitting}
 						>
@@ -666,7 +702,7 @@
 
 					{#if actionError}
 						<p
-							class="text-xs text-rose-400 text-center font-medium bg-rose-950/20 border border-rose-900/40 rounded-lg py-2 px-3"
+							class="text-xs text-system-error text-center font-medium bg-system-error/10 border border-system-error/20 rounded-lg py-2 px-3"
 						>
 							{actionError}
 						</p>
@@ -675,7 +711,7 @@
 			{/if}
 		{:else}
 			<div class="text-center py-10 space-y-4">
-				<span class="animate-spin text-4xl block">⏳</span>
+				<span class="inline-block w-8 h-8 border-2 border-white/10 border-t-gold-accent/60 rounded-full animate-spin motion-reduce:animate-none mx-auto"></span>
 				<p class="text-sm text-muted font-medium">Fetching status details...</p>
 			</div>
 		{/if}
@@ -693,6 +729,12 @@
 		}
 		50% {
 			transform: translateY(-6px);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		:global(.animate-float-slow) {
+			animation: none;
 		}
 	}
 </style>

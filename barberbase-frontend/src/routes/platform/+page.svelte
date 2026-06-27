@@ -456,7 +456,7 @@
 					<!-- Inline Error Display -->
 					{#if form?.error}
 						<div
-							class="bg-red-950/30 border border-system-error/30/50 rounded-2xl p-4 text-sm text-system-error/80 flex items-start space-x-3 animate-fade-in"
+							class="bg-red-950/30 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error/80 flex items-start space-x-3 animate-fade-in"
 						>
 							<svg
 								xmlns="http://www.w3.org/2000/svg"

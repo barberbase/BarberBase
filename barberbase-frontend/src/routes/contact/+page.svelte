@@ -1,7 +1,6 @@
 <script lang="ts">
+	import SiteHeader from '$lib/components/SiteHeader.svelte';
 	import SiteFooter from '$lib/components/SiteFooter.svelte';
-	import { resolve } from '$app/paths';
-	import logo from '$lib/assets/favicon.svg';
 	import {
 		LEGAL_ENTITY_NAME,
 		UDYAM_NUMBER,
@@ -16,172 +15,58 @@
 	<title>Contact Us — {BRAND}</title>
 </svelte:head>
 
-<div
-	class="min-h-screen bg-canvas text-primary font-manrope flex flex-col relative overflow-hidden"
->
-	<!-- Background Decorative Gradients -->
-	<div class="absolute inset-0 overflow-hidden pointer-events-none z-0">
-		<div
-			class="absolute top-[-10%] left-[10%] w-[600px] h-[600px] rounded-full bg-gold-accent/5 blur-[130px]"
-		></div>
-		<div
-			class="absolute bottom-[10%] right-[10%] w-[500px] h-[500px] rounded-full bg-blue-500/5 blur-[120px]"
-		></div>
-	</div>
+<div class="min-h-screen bg-canvas text-primary font-manrope flex flex-col">
+	<SiteHeader activePage="/contact" />
 
-	<!-- Navigation Bar -->
-	<header
-		class="w-full max-w-6xl mx-auto px-6 py-6 flex justify-between items-center relative z-10 border-b border-white/[0.03]"
-	>
-		<a
-			href={resolve('/')}
-			class="flex items-center space-x-3 font-manrope font-extrabold text-2xl tracking-wider text-gold-accent"
-		>
-			<img src={logo} alt="BarberBase Logo" class="h-8 w-8" />
-			<span>{BRAND}</span>
-		</a>
-		<a
-			href={resolve('/')}
-			class="text-sm font-semibold text-muted hover:text-primary transition-colors"
-		>
-			&larr; Back
-		</a>
-	</header>
-
-	<main class="flex-grow relative z-10 w-full max-w-3xl mx-auto px-6 py-12 md:py-16 space-y-12">
-		<!-- Page Header -->
-		<div class="space-y-4">
-			<h1 class="font-manrope font-extrabold text-4xl md:text-5xl text-primary tracking-tight">
+	<main id="main-content" class="flex-grow w-full max-w-3xl mx-auto px-6 py-12 md:py-20 space-y-10">
+		<div class="space-y-3">
+			<h1 class="font-satoshi font-extrabold text-3xl md:text-4xl tracking-[-0.03em]" style="text-wrap: balance;">
 				Contact Us
 			</h1>
-			<p class="text-lg text-muted font-light leading-relaxed">
-				Have questions about BarberBase? Get in touch with our team.
-			</p>
+			<p class="text-muted leading-relaxed">Have questions about {BRAND}? Get in touch.</p>
 		</div>
 
-		<!-- Direct Action Cards -->
-		<section class="grid grid-cols-1 md:grid-cols-2 gap-6">
-			<!-- Email Card -->
-			<a
-				href="mailto:{CONTACT_EMAIL}"
-				class="bg-matte/50 backdrop-blur border border-white/[0.03] rounded-3xl p-6 md:p-8 flex items-start space-x-5 hover:border-gold-accent/40 hover:bg-matte/70 transition-all duration-300 group"
-			>
-				<div
-					class="w-12 h-12 bg-gold-accent/10 rounded-2xl flex items-center justify-center text-gold-accent shrink-0 group-hover:bg-gold-accent/20 transition-all"
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-6 w-6"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-						/>
+		<div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-white/[0.03] rounded-xl overflow-hidden">
+			<a href="mailto:{CONTACT_EMAIL}" class="bg-canvas p-6 md:p-8 space-y-3 hover:bg-white/[0.01] transition-colors group">
+				<div class="flex items-center gap-3">
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-gold-accent shrink-0">
+						<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 01-2.06 0L2 7"/>
 					</svg>
+					<span class="font-satoshi font-semibold text-sm group-hover:text-gold-accent transition-colors">Email</span>
+				</div>
+				<p class="font-mono text-sm text-gold-accent">{CONTACT_EMAIL}</p>
+				<p class="text-xs text-muted">General inquiries, sales, and support.</p>
+			</a>
+			<a href="tel:{CONTACT_PHONE.replace(/\s+/g, '')}" class="bg-canvas p-6 md:p-8 space-y-3 hover:bg-white/[0.01] transition-colors group">
+				<div class="flex items-center gap-3">
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-gold-accent shrink-0">
+						<path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.11 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/>
+					</svg>
+					<span class="font-satoshi font-semibold text-sm group-hover:text-gold-accent transition-colors">Call or WhatsApp</span>
+				</div>
+				<p class="font-mono text-sm text-gold-accent">{CONTACT_PHONE}</p>
+				<p class="text-xs text-muted">Mon–Sat, 10 AM – 7 PM IST.</p>
+			</a>
+		</div>
+
+		<section class="bg-matte border border-white/[0.03] rounded-xl machined-edge p-6 md:p-8 space-y-5">
+			<h2 class="font-satoshi font-bold text-lg">Business registration</h2>
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm">
+				<div class="space-y-1">
+					<span class="block text-xs text-dim font-mono uppercase tracking-widestUI">Legal Entity</span>
+					<span class="font-medium">{LEGAL_ENTITY_NAME}</span>
 				</div>
 				<div class="space-y-1">
-					<span class="block text-[11px] uppercase tracking-wider text-dim font-semibold"
-						>Email Support</span
-					>
-					<span
-						class="block text-lg font-bold font-manrope text-primary group-hover:text-gold-accent transition-colors"
-						>{CONTACT_EMAIL}</span
-					>
-					<span class="block text-xs text-muted"
-						>For general inquiries, sales, and support.</span
-					>
+					<span class="block text-xs text-dim font-mono uppercase tracking-widestUI">Udyam No.</span>
+					<span class="font-mono">{UDYAM_NUMBER}</span>
 				</div>
-			</a>
-
-			<!-- Phone Card -->
-			<a
-				href="tel:{CONTACT_PHONE.replace(/\s+/g, '')}"
-				class="bg-matte/50 backdrop-blur border border-white/[0.03] rounded-3xl p-6 md:p-8 flex items-start space-x-5 hover:border-gold-accent/40 hover:bg-matte/70 transition-all duration-300 group"
-			>
-				<div
-					class="w-12 h-12 bg-gold-accent/10 rounded-2xl flex items-center justify-center text-gold-accent shrink-0 group-hover:bg-gold-accent/20 transition-all"
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-6 w-6"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M3 5a2 2 0 012-2h3.28a1 1 0 01.94.725l.548 2.2a1 1 0 01-.321.988l-1.305.98a10.582 10.582 0 004.872 4.872l.98-1.305a1 1 0 01.988-.321l2.2.548a1 1 0 01.725.94V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
-						/>
-					</svg>
-				</div>
-				<div class="space-y-1">
-					<span class="block text-[11px] uppercase tracking-wider text-dim font-semibold"
-						>Call or WhatsApp</span
-					>
-					<span
-						class="block text-lg font-bold font-manrope text-primary group-hover:text-gold-accent transition-colors"
-						>{CONTACT_PHONE}</span
-					>
-					<span class="block text-xs text-muted">Available Mon-Sat, 10 AM to 7 PM IST.</span>
-				</div>
-			</a>
-		</section>
-
-		<!-- Identity & Verification Block -->
-		<section
-			class="bg-matte/60 backdrop-blur-xl border border-white/[0.03] rounded-3xl p-6 md:p-8 space-y-4"
-		>
-			<h2 class="text-lg font-bold font-manrope text-gold-accent">Business Registration Information</h2>
-			<div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-primary">
-				<div>
-					<span class="block text-[11px] uppercase tracking-wider text-dim font-semibold"
-						>Legal Entity Name</span
-					>
-					<span class="font-medium text-primary">{LEGAL_ENTITY_NAME}</span>
-				</div>
-				<div>
-					<span class="block text-[11px] uppercase tracking-wider text-dim font-semibold"
-						>Udyam Registration No.</span
-					>
-					<span class="font-mono text-primary">{UDYAM_NUMBER}</span>
-				</div>
-				<div class="md:col-span-2">
-					<span class="block text-[11px] uppercase tracking-wider text-dim font-semibold"
-						>Registered Address</span
-					>
-					<span class="text-primary">{REGISTERED_ADDRESS}</span>
-				</div>
-				<div>
-					<span class="block text-[11px] uppercase tracking-wider text-dim font-semibold"
-						>Contact Email</span
-					>
-					<a
-						href="mailto:{CONTACT_EMAIL}"
-						class="text-gold-accent hover:text-gold-accent/80 font-medium transition-colors"
-						>{CONTACT_EMAIL}</a
-					>
-				</div>
-				<div>
-					<span class="block text-[11px] uppercase tracking-wider text-dim font-semibold"
-						>Contact Phone</span
-					>
-					<a
-						href="tel:{CONTACT_PHONE.replace(/\s+/g, '')}"
-						class="text-gold-accent hover:text-gold-accent/80 font-medium transition-colors"
-						>{CONTACT_PHONE}</a
-					>
+				<div class="space-y-1 md:col-span-2">
+					<span class="block text-xs text-dim font-mono uppercase tracking-widestUI">Address</span>
+					<span>{REGISTERED_ADDRESS}</span>
 				</div>
 			</div>
 		</section>
 	</main>
 
-	<!-- Footer -->
 	<SiteFooter />
 </div>

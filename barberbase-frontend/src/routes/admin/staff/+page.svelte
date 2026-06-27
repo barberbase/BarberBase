@@ -17,16 +17,16 @@
 	<meta name="description" content="Manage your team: add barbers and managers" />
 </svelte:head>
 
-<div class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+<div class="min-h-screen bg-canvas">
 	<div class="max-w-3xl mx-auto p-6">
 		<!-- Header -->
 		<div class="flex items-center justify-between mb-6">
 			<div class="flex items-center gap-3">
-				<a href="/admin" class="text-muted hover:text-white transition-colors text-sm"
+				<a href="/admin" class="text-muted hover:text-primary transition-colors text-sm"
 					>← Admin</a
 				>
 				<span class="text-dim">/</span>
-				<h1 class="text-2xl font-bold text-white">Staff</h1>
+				<h1 class="text-2xl font-bold text-primary">Staff</h1>
 			</div>
 			<button
 				id="toggle-add-staff-btn"
@@ -52,8 +52,8 @@
 
 		<!-- Add Staff Form -->
 		{#if showAddForm}
-			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-6 mb-6 shadow-xl">
-				<h2 class="text-lg font-bold text-white mb-4">Add Staff Member</h2>
+			<div class="bg-matte border border-white/[0.05] rounded-2xl p-6 mb-6 shadow-xl">
+				<h2 class="text-lg font-bold text-primary mb-4">Add Staff Member</h2>
 				<form
 					id="add-staff-form"
 					method="POST"
@@ -73,7 +73,7 @@
 								name="name"
 								required
 								placeholder="Ravi Kumar"
-								class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+								class="w-full bg-titanium border border-white/[0.05] rounded-lg px-3 py-2 text-primary text-sm focus:outline-none focus:ring-2 focus:ring-gold-accent"
 							/>
 						</div>
 						<div>
@@ -85,7 +85,7 @@
 								name="phone_number"
 								required
 								placeholder="9876543210"
-								class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+								class="w-full bg-titanium border border-white/[0.05] rounded-lg px-3 py-2 text-primary text-sm focus:outline-none focus:ring-2 focus:ring-gold-accent"
 							/>
 							<p class="text-xs text-dim mt-1">Will prepend +91 if not provided</p>
 						</div>
@@ -94,7 +94,7 @@
 							<select
 								id="staff-role"
 								name="role"
-								class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+								class="w-full bg-titanium border border-white/[0.05] rounded-lg px-3 py-2 text-primary text-sm focus:outline-none focus:ring-2 focus:ring-gold-accent"
 							>
 								<option value="barber">Barber</option>
 								<option value="manager">Manager</option>
@@ -114,12 +114,12 @@
 
 		<!-- Staff Table -->
 		{#if data.staffMembers.length === 0}
-			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-12 text-center">
+			<div class="bg-matte border border-white/[0.05] rounded-2xl p-12 text-center">
 				<p class="text-muted text-lg mb-2">No staff members yet</p>
 				<p class="text-dim text-sm">Click "+ Add Staff" to add your first team member.</p>
 			</div>
 		{:else}
-			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl overflow-hidden shadow-xl">
+			<div class="bg-matte border border-white/[0.05] rounded-2xl overflow-hidden shadow-xl">
 				<table class="w-full">
 					<thead>
 						<tr class="border-b border-white/[0.05]">
@@ -137,10 +137,10 @@
 							>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-slate-700/50">
+					<tbody class="divide-y divide-white/[0.03]">
 						{#each data.staffMembers as member}
-							<tr class="hover:bg-slate-700/20 transition-colors">
-								<td class="px-6 py-4 text-white font-medium text-sm">{member.name}</td>
+							<tr class="hover:bg-titanium/20 transition-colors">
+								<td class="px-6 py-4 text-primary font-medium text-sm">{member.name}</td>
 								<td class="px-4 py-4 text-sm text-primary">{roleLabel(member.role)}</td>
 								<td class="px-4 py-4 text-sm text-primary">{statusLabel(member.status)}</td>
 							</tr>

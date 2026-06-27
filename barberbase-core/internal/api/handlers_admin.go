@@ -803,4 +803,51 @@ func (s *Server) DisconnectWhatsAppModeB(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// RegenerateArrivalPin implements POST /admin/locations/{location_id}/arrival-pin/regenerate
+func (s *Server) RegenerateArrivalPin(w http.ResponseWriter, r *http.Request, locationId UUIDv7) {
+	ctx := r.Context()
 
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondAdminJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid tenant claim"})
+		return
+	}
+
+	locationID := uuid.UUID(locationId)
+
+	plainPin, err := generateArrivalPIN()
+	if err != nil {
+		log.Printf("[Error] RegenerateArrivalPin: failed to generate PIN: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "failed to generate PIN"})
+		return
+	}
+
+	pinHashBytes, err := bcrypt.GenerateFromPassword([]byte(plainPin), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("[Error] RegenerateArrivalPin: bcrypt failed: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "failed to hash PIN"})
+		return
+	}
+
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE locations
+		SET arrival_pin_plain = $1,
+		    arrival_pin_hash  = $2,
+		    updated_at        = NOW()
+		WHERE id = $3
+		  AND tenant_id = $4`,
+		plainPin, string(pinHashBytes), locationID, tenantID,
+	)
+	if err != nil {
+		log.Printf("[Error] RegenerateArrivalPin: db update failed: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		respondAdminJSON(w, http.StatusNotFound, map[string]string{"code": "NOT_FOUND", "message": "location not found or wrong tenant"})
+		return
+	}
+
+	respondAdminJSON(w, http.StatusOK, map[string]string{"arrival_pin": plainPin})
+}

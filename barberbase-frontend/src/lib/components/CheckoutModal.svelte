@@ -64,6 +64,9 @@
 
 	const isMismatch = $derived(sumPaymentsPaise !== expectedTotalPaise);
 
+	// ponytail: default to quick-cash, split payment only when toggled
+	let showSplitPayment = $state<boolean>(false);
+
 	let isSubmitting = $state<boolean>(false);
 	let errorMessage = $state<string>('');
 	let attemptedSubmit = $state<boolean>(false);
@@ -80,6 +83,25 @@
 
 	function removePaymentLine(index: number) {
 		paymentLines.splice(index, 1);
+	}
+
+	async function handleQuickCash() {
+		errorMessage = '';
+		isSubmitting = true;
+		try {
+			await store.completeService(entry.id, {
+				queue_entry_id: entry.id,
+				discount_amount_paise: discountAmountPaise,
+				discount_reason: discountAmountPaise > 0 ? discountReason || 'Discount applied' : null,
+				product_line_items: [],
+				payment_lines: [{ method: 'cash', amount_paise: expectedTotalPaise, provider_reference_id: null }]
+			});
+			onClose();
+		} catch (err: any) {
+			errorMessage = err?.data?.message || 'An error occurred during checkout submission.';
+		} finally {
+			isSubmitting = false;
+		}
 	}
 
 	async function handleSubmit(e: Event) {
@@ -120,10 +142,10 @@
 	aria-modal="true"
 >
 	<div
-		class="w-full max-w-lg bg-matte border border-slate-800 rounded-2xl shadow-2xl overflow-hidden text-slate-100 flex flex-col max-h-[90vh]"
+		class="w-full max-w-lg bg-matte border border-white/[0.05] rounded-2xl shadow-2xl overflow-hidden text-primary flex flex-col max-h-[90vh]"
 	>
 		<!-- Modal Header -->
-		<div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-canvas">
+		<div class="px-6 py-4 border-b border-white/[0.05] flex justify-between items-center bg-canvas">
 			<div>
 				<h2 class="text-xl font-bold tracking-tight">Complete Service & Checkout</h2>
 				<p class="text-xs text-muted">
@@ -154,18 +176,18 @@
 		</div>
 
 		<!-- Modal Body -->
-		<form onsubmit={handleSubmit} class="flex-1 overflow-y-auto p-6 space-y-6">
+		<div class="flex-1 overflow-y-auto p-6 space-y-6">
 			<!-- Service Line Items (Read-Only) -->
 			<div>
 				<h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
 					Rendered Services
 				</h3>
-				<div class="bg-canvas border border-slate-800 rounded-xl divide-y divide-slate-800">
+				<div class="bg-canvas border border-white/[0.05] rounded-xl divide-y divide-slate-800">
 					{#each entry.services as service}
 						<div class="px-4 py-3 flex justify-between text-sm">
 							<span class="font-medium text-primary">{service.name}</span>
 							<div class="text-right">
-								<div class="font-bold text-slate-100">
+								<div class="font-bold text-primary">
 									₹{(service.price_paise / 100).toFixed(2)}
 								</div>
 								<div class="text-xs text-muted">{service.duration_minutes} mins</div>
@@ -175,206 +197,156 @@
 				</div>
 			</div>
 
-			<!-- Discount Section -->
-			<div class="space-y-3">
-				<h3 class="text-xs font-semibold text-muted uppercase tracking-wider">Discount</h3>
-				<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-					<div>
-						<label for="discount-amt" class="block text-xs font-medium text-muted mb-1"
-							>Discount Amount (₹)</label
-						>
-						<input
-							type="number"
-							id="discount-amt"
-							step="0.01"
-							min="0"
-							max={(subtotalPaise / 100).toFixed(2)}
-							class="w-full bg-canvas border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
-							bind:value={discountAmountINR}
-						/>
-					</div>
-					<div>
-						<label for="discount-reason" class="block text-xs font-medium text-muted mb-1"
-							>Discount Reason</label
-						>
-						<input
-							type="text"
-							id="discount-reason"
-							placeholder="Reason (required for discount)"
-							required={discountAmountPaise > 0}
-							class="w-full bg-canvas border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500 placeholder:text-dim"
-							bind:value={discountReason}
-						/>
-					</div>
-				</div>
-			</div>
-
-			<!-- Split Payment Section -->
-			<div class="space-y-3">
-				<div class="flex justify-between items-center">
-					<h3 class="text-xs font-semibold text-muted uppercase tracking-wider">
-						Split Payment Lines
-					</h3>
-					<button
-						type="button"
-						class="text-xs text-gold-accent hover:text-gold-accent/80 font-medium transition-colors"
-						onclick={addPaymentLine}
-					>
-						+ Add Line
-					</button>
-				</div>
-
-				<div class="space-y-3">
-					{#each paymentLines as line, idx}
-						<div class="bg-canvas border border-slate-800 rounded-xl p-3 space-y-2 relative">
-							{#if paymentLines.length > 1}
-								<button
-									type="button"
-									class="absolute top-2 right-2 text-dim hover:text-red-400 transition-colors"
-									onclick={() => removePaymentLine(idx)}
-									aria-label="Remove payment line"
-								>
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										class="h-4 w-4"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-										/>
-									</svg>
-								</button>
-							{/if}
-
-							<div class="grid grid-cols-2 gap-2 pr-6">
-								<div>
-									<label
-										for="payment-method-{idx}"
-										class="block text-[10px] font-medium text-dim mb-1">Method</label
-									>
-									<select
-										id="payment-method-{idx}"
-										class="w-full bg-matte border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-primary focus:outline-none focus:border-amber-500"
-										bind:value={line.method}
-									>
-										<option value="cash">Cash</option>
-										<option value="upi">UPI</option>
-										<option value="card">Card</option>
-										<option value="unpaid">Unpaid</option>
-										<option value="complimentary">Complimentary</option>
-									</select>
-								</div>
-								<div>
-									<label
-										for="payment-amount-{idx}"
-										class="block text-[10px] font-medium text-dim mb-1">Amount (₹)</label
-									>
-									<input
-										type="number"
-										id="payment-amount-{idx}"
-										step="0.01"
-										min="0"
-										class="w-full bg-matte border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-primary focus:outline-none focus:border-amber-500"
-										bind:value={line.amountINR}
-									/>
-								</div>
-							</div>
-
-							{#if line.method === 'upi'}
-								<div class="pt-1">
-									<label
-										for="payment-upi-ref-{idx}"
-										class="block text-[10px] font-medium text-dim mb-1"
-										>UPI Provider Ref ID (Optional)</label
-									>
-									<input
-										type="text"
-										id="payment-upi-ref-{idx}"
-										placeholder="e.g. UPI Transaction Reference Number"
-										class="w-full bg-matte border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-primary focus:outline-none focus:border-amber-500 placeholder:text-dim"
-										bind:value={line.provider_reference_id}
-									/>
-								</div>
-							{/if}
-						</div>
-					{/each}
-				</div>
-			</div>
-
-			<!-- Summary / Total Display -->
-			<div class="bg-canvas border border-slate-800 rounded-xl p-4 space-y-2 text-sm">
+			<!-- Summary -->
+			<div class="bg-canvas border border-white/[0.05] rounded-xl p-4 space-y-2 text-sm">
 				<div class="flex justify-between">
 					<span class="text-muted">Services Subtotal:</span>
 					<span class="font-medium text-primary">₹{(subtotalPaise / 100).toFixed(2)}</span>
 				</div>
 				{#if discountAmountPaise > 0}
-					<div class="flex justify-between text-emerald-400">
+					<div class="flex justify-between text-system-success">
 						<span>Discount:</span>
 						<span>-₹{(discountAmountPaise / 100).toFixed(2)}</span>
 					</div>
 				{/if}
 				<div
-					class="border-t border-slate-800 pt-2 flex justify-between font-semibold text-slate-100"
+					class="border-t border-white/[0.05] pt-2 flex justify-between font-semibold text-primary"
 				>
-					<span>Expected Total:</span>
+					<span>Total:</span>
 					<span>₹{(expectedTotalPaise / 100).toFixed(2)}</span>
 				</div>
-				<div class="flex justify-between text-xs pt-1 border-t border-dashed border-slate-800">
-					<span class="text-muted">Entered Payments:</span>
-					<span class={isMismatch ? 'text-amber-500 font-bold' : 'text-emerald-500 font-bold'}>
-						₹{(sumPaymentsPaise / 100).toFixed(2)}
-					</span>
-				</div>
 			</div>
 
-			<!-- Inline Error Message -->
-			{#if errorMessage || (mounted && isMismatch)}
-				<div
-					class="bg-red-950/40 border border-red-900/50 rounded-xl p-3 text-xs text-red-400 flex items-start space-x-2"
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-4 w-4 shrink-0 mt-0.5"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
+			<!-- Quick Cash (default) or Split Payment -->
+			{#if !showSplitPayment}
+				<!-- Quick Cash Mode -->
+				{#if errorMessage}
+					<div class="bg-red-950/40 border border-red-900/50 rounded-xl p-3 text-xs text-red-400">
+						{errorMessage}
+					</div>
+				{/if}
+
+				<div class="space-y-3">
+					<button
+						type="button"
+						class="w-full bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] disabled:opacity-40 text-canvas font-bold py-3.5 rounded-xl transition-all duration-150 text-base cursor-pointer"
+						disabled={isSubmitting}
+						onclick={handleQuickCash}
 					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-						/>
-					</svg>
-					<div>
-						{errorMessage ||
-							'Payment mismatch: Entered payment lines must sum exactly to expected total.'}
+						{isSubmitting ? 'Completing...' : `Complete — ₹${(expectedTotalPaise / 100).toFixed(2)} Cash`}
+					</button>
+
+					<div class="flex items-center justify-between">
+						<button
+							type="button"
+							class="text-xs text-muted hover:text-primary transition-colors cursor-pointer"
+							onclick={() => { showSplitPayment = true; }}
+						>
+							Split payment, UPI, or discount →
+						</button>
+						<button
+							type="button"
+							class="text-xs text-muted hover:text-primary transition-colors cursor-pointer"
+							onclick={onClose}
+						>
+							Cancel
+						</button>
 					</div>
 				</div>
-			{/if}
+			{:else}
+				<!-- Split Payment Mode -->
+				<form onsubmit={handleSubmit} class="space-y-6">
+					<!-- Discount Section -->
+					<div class="space-y-3">
+						<h3 class="text-xs font-semibold text-muted uppercase tracking-wider">Discount</h3>
+						<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+							<div>
+								<label for="discount-amt" class="block text-xs font-medium text-muted mb-1">Discount Amount (₹)</label>
+								<input type="number" id="discount-amt" step="1" min="0" max={subtotalPaise / 100}
+									class="w-full bg-canvas border border-white/[0.05] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent"
+									bind:value={discountAmountINR} />
+							</div>
+							<div>
+								<label for="discount-reason" class="block text-xs font-medium text-muted mb-1">Discount Reason</label>
+								<input type="text" id="discount-reason" placeholder="Reason (required for discount)" required={discountAmountPaise > 0}
+									class="w-full bg-canvas border border-white/[0.05] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent placeholder:text-dim"
+									bind:value={discountReason} />
+							</div>
+						</div>
+					</div>
 
-			<!-- Submit & Cancel Buttons -->
-			<div class="flex space-x-3 pt-2">
-				<button
-					type="button"
-					class="w-1/2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-primary font-semibold py-2.5 rounded-xl transition-all duration-150 text-sm cursor-pointer"
-					onclick={onClose}
-				>
-					Cancel
-				</button>
-				<button
-					type="submit"
-					class="w-1/2 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-amber-500 text-amber-950 font-bold py-2.5 rounded-xl transition-all duration-150 text-sm cursor-pointer"
-					disabled={isMismatch || isSubmitting}
-				>
-					{isSubmitting ? 'Completing...' : 'Complete Checkout'}
-				</button>
-			</div>
-		</form>
+					<!-- Payment Lines -->
+					<div class="space-y-3">
+						<div class="flex justify-between items-center">
+							<h3 class="text-xs font-semibold text-muted uppercase tracking-wider">Payment Lines</h3>
+							<button type="button" class="text-xs text-gold-accent hover:text-gold-accent/80 font-medium transition-colors" onclick={addPaymentLine}>+ Add Line</button>
+						</div>
+						<div class="space-y-3">
+							{#each paymentLines as line, idx}
+								<div class="bg-canvas border border-white/[0.05] rounded-xl p-3 space-y-2 relative">
+									{#if paymentLines.length > 1}
+										<button type="button" class="absolute top-2 right-2 text-dim hover:text-red-400 transition-colors" onclick={() => removePaymentLine(idx)} aria-label="Remove payment line">
+											<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+										</button>
+									{/if}
+									<div class="grid grid-cols-2 gap-2 pr-6">
+										<div>
+											<label for="payment-method-{idx}" class="block text-[10px] font-medium text-dim mb-1">Method</label>
+											<select id="payment-method-{idx}" class="w-full bg-matte border border-white/[0.05] rounded-lg px-2 py-1.5 text-xs text-primary focus:outline-none focus:border-gold-accent" bind:value={line.method}>
+												<option value="cash">Cash</option>
+												<option value="upi">UPI</option>
+												<option value="card">Card</option>
+												<option value="unpaid">Unpaid</option>
+												<option value="complimentary">Complimentary</option>
+											</select>
+										</div>
+										<div>
+											<label for="payment-amount-{idx}" class="block text-[10px] font-medium text-dim mb-1">Amount (₹)</label>
+											<input type="number" id="payment-amount-{idx}" step="1" min="0"
+												class="w-full bg-matte border border-white/[0.05] rounded-lg px-2 py-1.5 text-xs text-primary focus:outline-none focus:border-gold-accent"
+												bind:value={line.amountINR} />
+										</div>
+									</div>
+									{#if line.method === 'upi'}
+										<div class="pt-1">
+											<label for="payment-upi-ref-{idx}" class="block text-[10px] font-medium text-dim mb-1">UPI Ref ID (Optional)</label>
+											<input type="text" id="payment-upi-ref-{idx}" placeholder="Transaction reference"
+												class="w-full bg-matte border border-white/[0.05] rounded-lg px-2 py-1.5 text-xs text-primary focus:outline-none focus:border-gold-accent placeholder:text-dim"
+												bind:value={line.provider_reference_id} />
+										</div>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					</div>
+
+					<!-- Payment validation -->
+					<div class="flex justify-between text-xs">
+						<span class="text-muted">Entered Payments:</span>
+						<span class={isMismatch ? 'text-system-warning font-bold' : 'text-system-success font-bold'}>
+							₹{(sumPaymentsPaise / 100).toFixed(2)}
+						</span>
+					</div>
+
+					{#if errorMessage || (mounted && isMismatch)}
+						<div class="bg-red-950/40 border border-red-900/50 rounded-xl p-3 text-xs text-red-400">
+							{errorMessage || 'Payment lines must sum exactly to the total.'}
+						</div>
+					{/if}
+
+					<div class="flex space-x-3 pt-2">
+						<button type="button" class="w-1/2 bg-surface hover:bg-titanium text-primary font-semibold py-2.5 rounded-xl transition-all duration-150 text-sm cursor-pointer"
+							onclick={() => { showSplitPayment = false; errorMessage = ''; }}>
+							← Quick Cash
+						</button>
+						<button type="submit"
+							class="w-1/2 bg-gold-accent hover:brightness-110 active:brightness-90 disabled:opacity-40 text-canvas font-bold py-2.5 rounded-xl transition-all duration-150 text-sm cursor-pointer"
+							disabled={isMismatch || isSubmitting}>
+							{isSubmitting ? 'Completing...' : 'Complete Checkout'}
+						</button>
+					</div>
+				</form>
+			{/if}
+		</div>
 	</div>
 </div>

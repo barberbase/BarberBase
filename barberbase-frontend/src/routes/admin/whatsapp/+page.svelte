@@ -45,13 +45,13 @@
 	<meta name="description" content="Connect your shop's own WhatsApp number via Bhejna Mode B" />
 </svelte:head>
 
-<div class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+<div class="min-h-screen bg-canvas">
 	<div class="max-w-2xl mx-auto p-6">
 		<!-- Header -->
 		<div class="flex items-center gap-3 mb-6">
-			<a href="/admin" class="text-muted hover:text-white transition-colors text-sm">← Admin</a>
+			<a href="/admin" class="text-muted hover:text-primary transition-colors text-sm">← Admin</a>
 			<span class="text-dim">/</span>
-			<h1 class="text-2xl font-bold text-white">WhatsApp Settings</h1>
+			<h1 class="text-2xl font-bold text-primary">WhatsApp Settings</h1>
 		</div>
 
 		{#if form?.error}
@@ -61,7 +61,7 @@
 		{/if}
 
 		<!-- Mode info card -->
-		<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-6 mb-6 shadow-xl">
+		<div class="bg-matte border border-white/[0.05] rounded-2xl p-6 mb-6 shadow-xl">
 			<div class="flex items-start justify-between">
 				<div>
 					{#if isConnected}
@@ -69,7 +69,7 @@
 							<span class="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"></span>
 							<span class="text-green-400 font-semibold text-sm">Mode B — Your Own Number</span>
 						</div>
-						<p class="text-white font-mono text-lg">{connectedPhone}</p>
+						<p class="text-primary font-mono text-lg">{connectedPhone}</p>
 						<p class="text-muted text-xs mt-1">
 							Customers see your shop name as the WhatsApp sender
 						</p>
@@ -119,7 +119,7 @@
 					<button
 						id="copy-webhook-btn"
 						onclick={copyWebhook}
-						class="bg-slate-700 hover:bg-slate-600 text-white text-sm px-4 py-2 rounded-lg transition-colors font-medium whitespace-nowrap"
+						class="bg-titanium hover:bg-surface text-primary text-sm px-4 py-2 rounded-lg transition-colors font-medium whitespace-nowrap"
 					>
 						{copied ? '✓ Copied!' : 'Copy URL'}
 					</button>
@@ -127,8 +127,8 @@
 			</div>
 
 			<!-- Disconnect -->
-			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-6 shadow-xl">
-				<h2 class="text-lg font-bold text-white mb-2">Disconnect Own Number</h2>
+			<div class="bg-matte border border-white/[0.05] rounded-2xl p-6 shadow-xl">
+				<h2 class="text-lg font-bold text-primary mb-2">Disconnect Own Number</h2>
 				<p class="text-muted text-sm mb-4">
 					This will revert your shop to the shared BarberBase number. All credentials will be
 					cleared.
@@ -137,7 +137,7 @@
 					<button
 						id="disconnect-whatsapp-btn"
 						type="submit"
-						class="bg-red-700/80 hover:bg-red-700 text-white font-bold px-6 py-2 rounded-xl text-sm transition-all"
+						class="bg-red-700/80 hover:bg-red-700 text-primary font-bold px-6 py-2 rounded-xl text-sm transition-all"
 						onclick={(e) => {
 							if (!confirm('Disconnect your own WhatsApp number?')) e.preventDefault();
 						}}
@@ -148,11 +148,11 @@
 			</div>
 		{:else}
 			<!-- Connect form (Mode A → Mode B) -->
-			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-6 shadow-xl">
-				<h2 class="text-lg font-bold text-white mb-2">Connect Your Own WhatsApp Number</h2>
+			<div class="bg-matte border border-white/[0.05] rounded-2xl p-6 shadow-xl">
+				<h2 class="text-lg font-bold text-primary mb-2">Connect Your Own WhatsApp Number</h2>
 				<p class="text-muted text-sm mb-4">
-					In your Bhejna portal, go to <strong class="text-white">Developer Settings</strong> and
-					click <strong class="text-white">Copy BarberBase Integration Config</strong>. Then paste
+					In your Bhejna portal, go to <strong class="text-primary">Developer Settings</strong> and
+					click <strong class="text-primary">Copy BarberBase Integration Config</strong>. Then paste
 					the JSON here.
 				</p>
 				<form id="connect-whatsapp-form" method="POST" action="?/connect" use:enhance>
@@ -167,7 +167,7 @@
 							rows="7"
 							required
 							placeholder={'{\n  "bhejna_config_version": "1",\n  "phone_number": "+91...",\n  "api_key": "nxt_live_...",\n  "webhook_secret": "...",\n  "whatsapp_status": "ACTIVE"\n}'}
-							class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none"
+							class="w-full bg-titanium border border-white/[0.05] rounded-lg px-3 py-2 text-primary text-xs font-mono focus:outline-none focus:ring-2 focus:ring-gold-accent resize-none"
 						></textarea>
 						{#if jsonValidationError()}
 							<p class="text-gold-accent text-xs mt-1">{jsonValidationError()}</p>

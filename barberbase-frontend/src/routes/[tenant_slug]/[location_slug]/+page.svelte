@@ -126,10 +126,13 @@
 		if (typeof window !== 'undefined') {
 			(window as any).onTurnstileSuccess = onTurnstileCallback;
 
+			let attempts = 0;
 			turnstileInterval = setInterval(() => {
 				if ((window as any).turnstile) {
 					clearInterval(turnstileInterval);
 					initTurnstile();
+				} else if (++attempts > 50) {
+					clearInterval(turnstileInterval);
 				}
 			}, 100);
 		}
@@ -395,6 +398,11 @@
 {#if checkinResponse}
 	<div class="modal-overlay">
 		<div class="confirmation-card">
+			<button
+				class="modal-close"
+				onclick={() => (checkinResponse = null)}
+				aria-label="Close"
+			>&times;</button>
 			<div class="modal-icon">📱</div>
 			<h2>WhatsApp will open</h2>
 			<p>
@@ -414,17 +422,6 @@
 {/if}
 
 <style>
-	:global(body) {
-		margin: 0;
-		font-family:
-			'Inter',
-			system-ui,
-			-apple-system,
-			sans-serif;
-		background-color: #0b0f19;
-		color: #f3f4f6;
-	}
-
 	.shop-container {
 		max-width: 800px;
 		margin: 0 auto;
@@ -434,23 +431,25 @@
 	}
 
 	.shop-header {
-		background: rgba(30, 41, 59, 0.45);
-		backdrop-filter: blur(16px);
-		-webkit-backdrop-filter: blur(16px);
-		border: 1px solid rgba(255, 255, 255, 0.08);
+		background: var(--color-matte);
+		border: 1px solid rgba(255, 255, 255, 0.05);
 		border-radius: 1rem;
 		padding: 1.5rem;
 		margin-bottom: 2rem;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+		/* ponytail: uses same micro-dot bg as body via inheritance, machined-edge via inset shadow above */
 	}
 
 	.shop-name {
 		font-size: 1.75rem;
 		font-weight: 800;
 		margin: 0 0 0.75rem 0;
-		color: #c8a96b;
+		color: var(--color-gold-accent);
+		font-family: var(--font-satoshi);
+		letter-spacing: -0.025em;
 	}
 
 	.badges {
@@ -489,22 +488,20 @@
 	}
 
 	.queue-badge {
-		background: rgba(59, 130, 246, 0.15);
-		color: #60a5fa;
-		border-color: rgba(59, 130, 246, 0.25);
+		background: rgba(200, 169, 107, 0.1);
+		color: var(--color-gold-accent);
+		border-color: rgba(200, 169, 107, 0.25);
 	}
 
 	.wait-badge {
-		background: rgba(139, 92, 246, 0.15);
-		color: #a78bfa;
-		border-color: rgba(139, 92, 246, 0.25);
+		background: rgba(159, 155, 147, 0.1);
+		color: var(--color-muted);
+		border-color: rgba(159, 155, 147, 0.2);
 	}
 
 	/* CLOSED SHOP VIEW */
 	.closed-card {
-		background: rgba(30, 41, 59, 0.45);
-		backdrop-filter: blur(16px);
-		-webkit-backdrop-filter: blur(16px);
+		background: var(--color-matte);
 		border: 1px solid rgba(239, 68, 68, 0.2);
 		border-radius: 1rem;
 		padding: 3rem 1.5rem;
@@ -524,7 +521,7 @@
 	}
 
 	.hours-info {
-		color: #9ca3af;
+		color: var(--color-muted);
 		font-size: 1rem;
 		margin: 0;
 	}
@@ -540,14 +537,15 @@
 		font-size: 1.25rem;
 		font-weight: 700;
 		margin: 0 0 1rem 0;
-		color: #e5e7eb;
+		color: var(--color-primary);
+		font-family: var(--font-satoshi);
 	}
 
 	/* TABS */
 	.tabs-container {
 		display: flex;
 		gap: 0.5rem;
-		background: rgba(30, 41, 59, 0.3);
+		background: var(--color-surface);
 		border: 1px solid rgba(255, 255, 255, 0.05);
 		padding: 0.25rem;
 		border-radius: 0.5rem;
@@ -558,7 +556,7 @@
 		flex: 1;
 		background: transparent;
 		border: none;
-		color: #9ca3af;
+		color: var(--color-muted);
 		padding: 0.65rem;
 		font-weight: 600;
 		font-size: 0.9rem;
@@ -568,13 +566,18 @@
 	}
 
 	.tab-btn:hover {
-		color: #e5e7eb;
+		color: var(--color-primary);
+	}
+
+	.tab-btn:focus-visible {
+		outline: 2px solid var(--color-gold-accent);
+		outline-offset: -2px;
 	}
 
 	.tab-btn.active {
-		background: rgba(139, 92, 246, 0.2);
-		color: #c084fc;
-		border: 1px solid rgba(139, 92, 246, 0.3);
+		background: rgba(200, 169, 107, 0.12);
+		color: var(--color-gold-accent);
+		border: 1px solid rgba(200, 169, 107, 0.25);
 	}
 
 	/* CATALOG */
@@ -585,18 +588,19 @@
 	}
 
 	.category-block {
-		background: rgba(30, 41, 59, 0.2);
+		background: var(--color-matte);
 		border: 1px solid rgba(255, 255, 255, 0.04);
 		border-radius: 0.75rem;
 		padding: 1.25rem;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 	}
 
 	.category-name {
 		font-size: 1.15rem;
 		font-weight: 700;
 		margin: 0 0 1.25rem 0;
-		color: #f3f4f6;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+		color: var(--color-primary);
+		border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 		padding-bottom: 0.5rem;
 	}
 
@@ -612,12 +616,12 @@
 		font-size: 1rem;
 		font-weight: 600;
 		margin: 0 0 0.25rem 0;
-		color: #e5e7eb;
+		color: var(--color-primary);
 	}
 
 	.group-desc {
 		font-size: 0.85rem;
-		color: #9ca3af;
+		color: var(--color-muted);
 		margin: 0 0 0.85rem 0;
 	}
 
@@ -634,8 +638,8 @@
 	}
 
 	.variant-card {
-		background: rgba(30, 41, 59, 0.4);
-		border: 1px solid rgba(255, 255, 255, 0.06);
+		background: var(--color-surface);
+		border: 1px solid rgba(255, 255, 255, 0.05);
 		border-radius: 0.5rem;
 		padding: 1rem;
 		text-align: left;
@@ -651,14 +655,19 @@
 
 	.variant-card:hover {
 		transform: translateY(-2px);
-		border-color: rgba(139, 92, 246, 0.4);
-		background: rgba(30, 41, 59, 0.65);
+		border-color: rgba(200, 169, 107, 0.3);
+		background: var(--color-titanium);
+	}
+
+	.variant-card:focus-visible {
+		outline: 2px solid var(--color-gold-accent);
+		outline-offset: 2px;
 	}
 
 	.variant-card.selected {
-		background: rgba(139, 92, 246, 0.12);
-		border-color: #a78bfa;
-		box-shadow: 0 0 15px rgba(139, 92, 246, 0.15);
+		background: rgba(200, 169, 107, 0.08);
+		border-color: var(--color-gold-accent);
+		box-shadow: 0 0 15px rgba(200, 169, 107, 0.1);
 	}
 
 	.variant-meta {
@@ -671,13 +680,13 @@
 	.variant-name {
 		font-weight: 700;
 		font-size: 0.95rem;
-		color: #f3f4f6;
+		color: var(--color-primary);
 	}
 
 	.popular-badge {
-		background: rgba(245, 158, 11, 0.15);
-		color: #fbbf24;
-		border: 1px solid rgba(245, 158, 11, 0.3);
+		background: rgba(200, 169, 107, 0.12);
+		color: var(--color-gold-accent);
+		border: 1px solid rgba(200, 169, 107, 0.25);
 		font-size: 0.7rem;
 		font-weight: 700;
 		padding: 0.15rem 0.4rem;
@@ -688,7 +697,7 @@
 
 	.variant-desc {
 		font-size: 0.8rem;
-		color: #9ca3af;
+		color: var(--color-muted);
 		margin: 0;
 		line-height: 1.35;
 	}
@@ -703,30 +712,30 @@
 	}
 
 	.variant-duration {
-		color: #9ca3af;
+		color: var(--color-muted);
 	}
 
 	.variant-price {
 		font-weight: 700;
-		color: #c084fc;
+		color: var(--color-gold-accent);
+		font-family: var(--font-mono);
 	}
 
 	/* BOOKING OPTIONS PANEL */
 	.booking-panel {
-		background: rgba(30, 41, 59, 0.5);
-		backdrop-filter: blur(16px);
-		-webkit-backdrop-filter: blur(16px);
-		border: 1px solid rgba(255, 255, 255, 0.08);
+		background: var(--color-matte);
+		border: 1px solid rgba(255, 255, 255, 0.06);
 		border-radius: 1rem;
 		padding: 1.5rem;
-		box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 	}
 
 	.panel-title {
 		font-size: 1.25rem;
 		font-weight: 700;
 		margin: 0 0 1.25rem 0;
-		color: #f3f4f6;
+		color: var(--color-primary);
+		font-family: var(--font-satoshi);
 	}
 
 	.loader-container {
@@ -735,7 +744,7 @@
 		justify-content: center;
 		gap: 0.75rem;
 		padding: 1.5rem 0;
-		color: #9ca3af;
+		color: var(--color-muted);
 		font-size: 0.9rem;
 	}
 
@@ -743,7 +752,7 @@
 		width: 1.25rem;
 		height: 1.25rem;
 		border: 2px solid rgba(255, 255, 255, 0.1);
-		border-top-color: #a78bfa;
+		border-top-color: var(--color-gold-accent);
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;
 	}
@@ -768,8 +777,8 @@
 	}
 
 	.total-card {
-		background: rgba(15, 23, 42, 0.3);
-		border: 1px solid rgba(255, 255, 255, 0.05);
+		background: var(--color-canvas);
+		border: 1px solid rgba(255, 255, 255, 0.03);
 		padding: 0.85rem;
 		border-radius: 0.5rem;
 		display: flex;
@@ -779,16 +788,17 @@
 
 	.total-label {
 		font-size: 0.75rem;
-		color: #9ca3af;
+		color: var(--color-muted);
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		font-weight: 500;
+		font-family: var(--font-mono);
 	}
 
 	.total-val {
 		font-size: 1.15rem;
 		font-weight: 800;
-		color: #f3f4f6;
+		color: var(--color-primary);
 	}
 
 	/* CTA JOIN FORM */
@@ -801,39 +811,42 @@
 	.turnstile-wrapper {
 		display: flex;
 		justify-content: center;
-		background: rgba(15, 23, 42, 0.25);
+		background: var(--color-canvas);
 		padding: 0.75rem;
 		border-radius: 0.5rem;
-		border: 1px solid rgba(255, 255, 255, 0.04);
+		border: 1px solid rgba(255, 255, 255, 0.03);
 	}
 
 	.join-btn {
 		width: 100%;
-		background: linear-gradient(135deg, #7c3aed, #4f46e5);
-		color: #ffffff;
+		background: var(--color-gold-accent);
+		color: var(--color-canvas);
 		border: none;
-		border-radius: 0.5rem;
+		border-radius: 9999px;
 		padding: 0.95rem;
-		font-weight: 700;
+		font-weight: 800;
 		font-size: 1rem;
 		cursor: pointer;
-		transition: all 0.2s ease;
+		transition: all 0.15s ease;
 		display: flex;
 		justify-content: center;
 		align-items: center;
 	}
 
 	.join-btn:hover:not(:disabled) {
-		opacity: 0.95;
+		filter: brightness(1.1);
 		transform: translateY(-1px);
-		box-shadow: 0 4px 12px rgba(124, 58, 237, 0.25);
+	}
+
+	.join-btn:active:not(:disabled) {
+		transform: scale(0.98);
 	}
 
 	.join-btn:disabled {
-		background: #1e293b;
-		color: #64748b;
+		background: var(--color-titanium);
+		color: var(--color-dim);
 		cursor: not-allowed;
-		border: 1px solid rgba(255, 255, 255, 0.04);
+		border: 1px solid rgba(255, 255, 255, 0.03);
 	}
 
 	/* BLOCKED STATE */
@@ -870,8 +883,8 @@
 	}
 
 	.retry-btn {
-		background: #ef4444;
-		color: white;
+		background: var(--color-system-error);
+		color: var(--color-canvas);
 		border: none;
 		border-radius: 0.35rem;
 		padding: 0.4rem 0.85rem;
@@ -881,6 +894,13 @@
 		margin-top: 0.5rem;
 	}
 
+	.empty-catalog {
+		color: var(--color-muted);
+		font-size: 0.9rem;
+		text-align: center;
+		padding: 2rem 0;
+	}
+
 	/* CONFIRMATION OVERLAY */
 	.modal-overlay {
 		position: fixed;
@@ -888,7 +908,7 @@
 		left: 0;
 		right: 0;
 		bottom: 0;
-		background: rgba(3, 7, 18, 0.85);
+		background: rgba(8, 8, 8, 0.85);
 		backdrop-filter: blur(8px);
 		-webkit-backdrop-filter: blur(8px);
 		display: flex;
@@ -899,8 +919,9 @@
 	}
 
 	.confirmation-card {
-		background: #1e293b;
-		border: 1px solid rgba(255, 255, 255, 0.1);
+		position: relative;
+		background: var(--color-surface);
+		border: 1px solid rgba(255, 255, 255, 0.08);
 		border-radius: 1.25rem;
 		padding: 2.25rem;
 		max-width: 440px;
@@ -908,6 +929,25 @@
 		text-align: center;
 		box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
 		box-sizing: border-box;
+	}
+
+	.modal-close {
+		position: absolute;
+		top: 1rem;
+		right: 1rem;
+		background: none;
+		border: none;
+		color: var(--color-muted);
+		font-size: 1.5rem;
+		cursor: pointer;
+		padding: 0.25rem 0.5rem;
+		line-height: 1;
+		border-radius: 0.25rem;
+		transition: color 0.15s ease;
+	}
+
+	.modal-close:hover {
+		color: var(--color-primary);
 	}
 
 	.modal-icon {
@@ -919,11 +959,12 @@
 		font-size: 1.45rem;
 		font-weight: 800;
 		margin: 0 0 0.85rem 0;
-		color: #38bdf8;
+		color: var(--color-primary);
+		font-family: var(--font-satoshi);
 	}
 
 	.confirmation-card p {
-		color: #9ca3af;
+		color: var(--color-muted);
 		font-size: 0.95rem;
 		line-height: 1.5;
 		margin: 0 0 1.75rem 0;
@@ -933,19 +974,19 @@
 		display: inline-block;
 		width: 100%;
 		background: #25d366;
-		color: #0b0f19;
+		color: var(--color-canvas);
 		font-weight: 800;
 		font-size: 1rem;
 		text-decoration: none;
-		border-radius: 0.5rem;
+		border-radius: 9999px;
 		padding: 0.95rem;
 		box-sizing: border-box;
-		transition: all 0.2s ease;
+		transition: all 0.15s ease;
 		box-shadow: 0 4px 15px rgba(37, 211, 102, 0.2);
 	}
 
 	.wa-confirm-btn:hover {
-		opacity: 0.95;
+		filter: brightness(1.1);
 		transform: translateY(-1px);
 		box-shadow: 0 6px 20px rgba(37, 211, 102, 0.35);
 	}

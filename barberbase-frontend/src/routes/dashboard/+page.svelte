@@ -50,6 +50,19 @@
 	let walkInSelectedVariants = $state<string[]>([]);
 	let walkInError = $state<string>('');
 
+	// ponytail: two-tap confirm for Call Next — auto-resets after 3s
+	let callNextArmed = $state<boolean>(false);
+	let callNextTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// Toast for action errors (replaces alert())
+	let toastMessage = $state<string>('');
+	let toastTimer: ReturnType<typeof setTimeout> | null = null;
+	function showToast(msg: string) {
+		toastMessage = msg;
+		if (toastTimer) clearTimeout(toastTimer);
+		toastTimer = setTimeout(() => { toastMessage = ''; }, 4000);
+	}
+
 	// Helper to track and debounce staff actions (disable for 1s)
 	function runDebouncedAction(actionKey: string, fn: () => Promise<unknown>) {
 		if (pendingActions.has(actionKey)) return;
@@ -89,6 +102,34 @@
 		}
 		return list;
 	});
+
+	// Next-in-line for Call Next confirmation preview
+	const nextInLine = $derived(() => {
+		if (!store.snapshot?.entries) return null;
+		const waiting = store.snapshot.entries
+			.filter((e: any) => e.state === 'waiting')
+			.sort((a: any, b: any) => {
+				const pgA = typeof a.priority_group === 'number' ? a.priority_group : 100;
+				const pgB = typeof b.priority_group === 'number' ? b.priority_group : 100;
+				if (pgA !== pgB) return pgA - pgB;
+				return new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime();
+			});
+		return waiting[0] || null;
+	});
+
+	function handleCallNext() {
+		if (!callNextArmed) {
+			callNextArmed = true;
+			if (callNextTimer) clearTimeout(callNextTimer);
+			callNextTimer = setTimeout(() => { callNextArmed = false; }, 3000);
+			return;
+		}
+		callNextArmed = false;
+		if (callNextTimer) clearTimeout(callNextTimer);
+		runDebouncedAction('call-next', () =>
+			store.callNext().catch((err: any) => showToast(err?.data?.message || 'Failed to call next customer.'))
+		);
+	}
 
 	// Sorted queue entries: in_progress -> called -> waiting -> skipped -> others
 	const sortedEntries = $derived(() => {
@@ -199,12 +240,18 @@
 </svelte:head>
 
 <div class="min-h-screen bg-canvas text-primary flex flex-col font-manrope">
+	<!-- Error toast -->
+	{#if toastMessage}
+		<div role="alert" aria-live="assertive" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-red-950/90 border border-system-error/30 text-system-error rounded-xl px-5 py-3 text-sm font-medium shadow-lg max-w-md animate-fade-in">
+			{toastMessage}
+		</div>
+	{/if}
 	<!-- Top Navigation Header -->
 	<header
 		class="bg-matte border-b border-white/[0.03] px-6 py-4 flex flex-wrap justify-between items-center gap-4"
 	>
 		<div class="flex items-center space-x-3">
-			<span class="text-xl font-extrabold text-gold-accent tracking-wider">BarberBase</span>
+			<h1 class="text-xl font-extrabold text-gold-accent tracking-wider">BarberBase</h1>
 			<span class="text-dim">|</span>
 			<span class="text-sm font-semibold text-primary">Staff Dashboard</span>
 		</div>
@@ -309,7 +356,7 @@
 		</div>
 	{/if}
 
-	<main class="flex-1 max-w-7xl w-full mx-auto p-6 flex flex-col lg:flex-row gap-6">
+	<main id="main-content" class="flex-1 max-w-7xl w-full mx-auto p-6 flex flex-col lg:flex-row gap-6">
 		<!-- Left Side: Queue Controls and Add Walk-in -->
 		<section class="w-full lg:w-1/3 flex flex-col space-y-6">
 			<!-- Primary Dispatch Console -->
@@ -317,20 +364,26 @@
 				<h2 class="text-lg font-bold text-primary mb-4 tracking-wide">Queue Controller</h2>
 
 				<div class="space-y-4">
-					<!-- BIG Call Next Button -->
+					<!-- BIG Call Next Button (two-tap confirm) -->
 					<button
 						type="button"
-						class="w-full py-5 bg-gold-accent hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-gold-accent text-canvas font-black text-xl rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex flex-col items-center justify-center space-y-1"
+						class="w-full py-5 {callNextArmed ? 'bg-amber-500 hover:bg-amber-400 ring-2 ring-amber-400/50' : 'bg-gold-accent hover:bg-amber-400'} active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-gold-accent text-canvas font-black text-xl rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex flex-col items-center justify-center space-y-1"
 						disabled={activeActions['call-next'] || store.snapshot?.session_status === 'closed'}
-						onclick={() =>
-							runDebouncedAction('call-next', () =>
-								store
-									.callNext()
-									.catch((err) => alert(err?.data?.message || 'Failed to call next customer.'))
-							)}
+						onclick={handleCallNext}
 					>
-						<span>🎙️ CALL NEXT CLIENT</span>
-						<span class="text-xs font-semibold opacity-85">Single-Tap Dispatch</span>
+						{#if callNextArmed}
+							<span>TAP AGAIN TO CONFIRM</span>
+							{#if nextInLine()}
+								<span class="text-xs font-semibold opacity-85">
+									Next: #{nextInLine()?.token_number} — {nextInLine()?.customer?.name || 'Walk-in'}
+								</span>
+							{:else}
+								<span class="text-xs font-semibold opacity-85">No one waiting</span>
+							{/if}
+						{:else}
+							<span>CALL NEXT CLIENT</span>
+							<span class="text-xs font-semibold opacity-85">{activeCount} in queue</span>
+						{/if}
 					</button>
 
 					<!-- Total wait & count summary stats -->
@@ -340,8 +393,8 @@
 							<div class="text-2xl font-black text-primary mt-1">{activeCount}</div>
 						</div>
 						<div class="bg-canvas border border-white/[0.03] rounded-xl p-3.5 text-center">
-							<div class="text-xs font-medium text-muted">Version</div>
-							<div class="text-2xl font-black text-primary mt-1">{store.localQueueVersion}</div>
+							<div class="text-xs font-medium text-muted">Waiting</div>
+							<div class="text-2xl font-black text-primary mt-1">{store.snapshot?.entries?.filter((e: any) => e.state === 'waiting').length || 0}</div>
 						</div>
 					</div>
 				</div>
@@ -463,7 +516,7 @@
 						<!-- Error Display -->
 						{#if walkInError}
 							<div
-								class="bg-red-950/40 border border-system-error/30/50 rounded-xl p-3 text-xs text-system-error/80 flex items-start space-x-2"
+								class="bg-red-950/40 border border-system-error/30 rounded-xl p-3 text-xs text-system-error/80 flex items-start space-x-2"
 							>
 								<svg
 									xmlns="http://www.w3.org/2000/svg"
@@ -527,7 +580,7 @@
 					>
 				</div>
 			{:else}
-				<div class="space-y-4">
+				<div class="space-y-4" aria-live="polite" aria-relevant="additions removals">
 					{#each sortedEntries() as entry (entry.id)}
 						<!-- Queue Entry Card with border styling for stale warnings -->
 						<div
@@ -562,29 +615,26 @@
 
 									<!-- Presence Badge -->
 									<span
-										class="text-xs text-primary font-medium bg-canvas border border-white/[0.03] rounded-lg px-2 py-0.5"
+										class="text-xs font-medium bg-canvas border border-white/[0.03] rounded-lg px-2 py-0.5 flex items-center gap-1.5
+										{entry.presence_state === 'arrived' ? 'text-system-success' : ''}
+										{entry.presence_state === 'on_the_way' ? 'text-gold-accent' : ''}
+										{entry.presence_state === 'snoozed' ? 'text-system-warning' : ''}
+										{entry.presence_state === 'remote' || entry.presence_state === 'notified' ? 'text-muted' : ''}
+										{!entry.presence_state ? 'text-dim' : ''}"
 									>
-										{#if entry.presence_state === 'remote'}
-											🌐 Remote
-										{:else}
-											{#if entry.presence_state === 'notified'}
-												📨 Notified
-											{:else}
-												{#if entry.presence_state === 'on_the_way'}
-													🏃 On the Way
-												{:else}
-													{#if entry.presence_state === 'arrived'}
-														✅ Arrived
-													{:else}
-														{#if entry.presence_state === 'snoozed'}
-															⏸ Snoozed
-														{:else}
-															— Walk-in
-														{/if}
-													{/if}
-												{/if}
-											{/if}
-										{/if}
+										<span class="inline-block w-1.5 h-1.5 rounded-full
+											{entry.presence_state === 'arrived' ? 'bg-system-success' : ''}
+											{entry.presence_state === 'on_the_way' ? 'bg-gold-accent' : ''}
+											{entry.presence_state === 'snoozed' ? 'bg-system-warning' : ''}
+											{entry.presence_state === 'remote' || entry.presence_state === 'notified' ? 'bg-muted' : ''}
+											{!entry.presence_state ? 'bg-dim' : ''}
+										"></span>
+										{#if entry.presence_state === 'remote'}Remote
+										{:else if entry.presence_state === 'notified'}Notified
+										{:else if entry.presence_state === 'on_the_way'}On the Way
+										{:else if entry.presence_state === 'arrived'}Arrived
+										{:else if entry.presence_state === 'snoozed'}Snoozed
+										{:else}Walk-in{/if}
 									</span>
 
 									<!-- Stale Warning urgency banner -->
@@ -592,7 +642,7 @@
 										<span
 											class="text-[10px] font-bold px-2 py-0.5 rounded bg-red-600 text-white animate-pulse"
 										>
-											⚠️ DELAYED
+											DELAYED
 										</span>
 									{/if}
 								</div>
@@ -660,7 +710,7 @@
 												runDebouncedAction(`${entry.id}-reassign`, () =>
 													store
 														.reassignBarber(entry.id, barberId)
-														.catch((err) => alert(err?.data?.message || 'Failed to reassign.'))
+														.catch((err) => showToast(err?.data?.message || 'Failed to reassign.'))
 												);
 											}
 										}}
@@ -686,7 +736,7 @@
 														store
 															.startService(entry.id)
 															.catch((err) =>
-																alert(err?.data?.message || 'Failed to start service.')
+																showToast(err?.data?.message || 'Failed to start service.')
 															)
 													)}
 											>
@@ -700,7 +750,7 @@
 													runDebouncedAction(`${entry.id}-skip`, () =>
 														store
 															.skipEntry(entry.id)
-															.catch((err) => alert(err?.data?.message || 'Failed to skip entry.'))
+															.catch((err) => showToast(err?.data?.message || 'Failed to skip entry.'))
 													)}
 											>
 												Skip
@@ -715,7 +765,7 @@
 													runDebouncedAction(`${entry.id}-skip`, () =>
 														store
 															.skipEntry(entry.id)
-															.catch((err) => alert(err?.data?.message || 'Failed to skip entry.'))
+															.catch((err) => showToast(err?.data?.message || 'Failed to skip entry.'))
 													)}
 											>
 												Skip
@@ -729,7 +779,7 @@
 														store
 															.confirmArrival(entry.id)
 															.catch((err) =>
-																alert(err?.data?.message || 'Failed to confirm arrival.')
+																showToast(err?.data?.message || 'Failed to confirm arrival.')
 															)
 													)}
 											>
@@ -746,7 +796,7 @@
 												runDebouncedAction(`${entry.id}-start`, () =>
 													store
 														.startService(entry.id)
-														.catch((err) => alert(err?.data?.message || 'Failed to start service.'))
+														.catch((err) => showToast(err?.data?.message || 'Failed to start service.'))
 												)}
 										>
 											Start Service
@@ -759,7 +809,7 @@
 												runDebouncedAction(`${entry.id}-noshow`, () =>
 													store
 														.markNoShow(entry.id)
-														.catch((err) => alert(err?.data?.message || 'Failed to mark no-show.'))
+														.catch((err) => showToast(err?.data?.message || 'Failed to mark no-show.'))
 												)}
 										>
 											Mark No-Show
@@ -772,7 +822,7 @@
 												runDebouncedAction(`${entry.id}-skip`, () =>
 													store
 														.skipEntry(entry.id)
-														.catch((err) => alert(err?.data?.message || 'Failed to skip entry.'))
+														.catch((err) => showToast(err?.data?.message || 'Failed to skip entry.'))
 												)}
 										>
 											Skip Back
@@ -786,7 +836,7 @@
 												selectedEntryForCheckout = entry;
 											}}
 										>
-											💳 Complete Service
+											Complete Service
 										</button>
 									{:else if entry.state === 'skipped'}
 										<!-- skipped -->
@@ -798,7 +848,7 @@
 												runDebouncedAction(`${entry.id}-reactivate`, () =>
 													store
 														.reactivateEntry(entry.id)
-														.catch((err) => alert(err?.data?.message || 'Failed to reactivate.'))
+														.catch((err) => showToast(err?.data?.message || 'Failed to reactivate.'))
 												)}
 										>
 											Reactivate

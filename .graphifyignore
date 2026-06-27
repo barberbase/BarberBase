@@ -1,0 +1,24 @@
+# IDE/agent skill duplicates
+.agents/
+.claude/
+.cursor/
+.gemini/
+.codex/
+
+# Build artifacts
+node_modules/
+dist/
+build/
+vendor/
+.wrangler/
+
+# Generated outputs
+graphify-out/
+detect_results.json
+
+# Env/secrets
+.env*
+
+# OS junk
+.DS_Store
+Thumbs.db

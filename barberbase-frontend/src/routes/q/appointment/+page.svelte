@@ -7,10 +7,10 @@
 </svelte:head>
 
 <div
-	class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-zinc-950 text-primary flex flex-col items-center justify-center p-4 md:p-6 font-manrope"
+	class="min-h-screen bg-canvas text-primary flex flex-col items-center justify-center p-4 md:p-6 font-manrope"
 >
 	<div
-		class="w-full max-w-md bg-matte/60 backdrop-blur-xl border border-white/[0.03] rounded-3xl p-8 shadow-2xl space-y-6 text-center relative overflow-hidden"
+		class="w-full max-w-md bg-matte border border-white/[0.03] rounded-3xl p-8 shadow-2xl space-y-6 text-center relative overflow-hidden"
 	>
 		<!-- Subtle ambient backdrop light glow -->
 		<div

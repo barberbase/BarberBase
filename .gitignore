@@ -43,5 +43,8 @@ pnpm-debug.log*
 coverage/
 *.log
 
+# Graphify
+graphify-out/
+
 ./architecture
 ./openspec

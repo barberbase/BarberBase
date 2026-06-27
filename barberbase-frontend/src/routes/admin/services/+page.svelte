@@ -41,16 +41,16 @@
 	/>
 </svelte:head>
 
-<div class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+<div class="min-h-screen bg-canvas">
 	<div class="max-w-4xl mx-auto p-6">
 		<!-- Header -->
 		<div class="flex items-center justify-between mb-6">
 			<div class="flex items-center gap-3">
-				<a href="/admin" class="text-muted hover:text-white transition-colors text-sm"
+				<a href="/admin" class="text-muted hover:text-primary transition-colors text-sm"
 					>← Admin</a
 				>
 				<span class="text-dim">/</span>
-				<h1 class="text-2xl font-bold text-white">Services</h1>
+				<h1 class="text-2xl font-bold text-primary">Services</h1>
 			</div>
 			<button
 				id="toggle-create-form-btn"
@@ -76,8 +76,8 @@
 
 		<!-- Create Form -->
 		{#if showCreateForm}
-			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-6 mb-6 shadow-xl">
-				<h2 class="text-lg font-bold text-white mb-4">New Service Variant</h2>
+			<div class="bg-matte border border-white/[0.05] rounded-2xl p-6 mb-6 shadow-xl">
+				<h2 class="text-lg font-bold text-primary mb-4">New Service Variant</h2>
 				<form
 					id="create-service-form"
 					method="POST"
@@ -100,7 +100,7 @@
 								bind:value={newCategoryName}
 								required
 								placeholder="Hair"
-								class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+								class="w-full bg-titanium border border-white/[0.05] rounded-lg px-3 py-2 text-primary text-sm focus:outline-none focus:ring-2 focus:ring-gold-accent"
 							/>
 						</div>
 						<div>
@@ -109,7 +109,7 @@
 								id="category_gender"
 								name="category_gender"
 								bind:value={newCategoryGender}
-								class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+								class="w-full bg-titanium border border-white/[0.05] rounded-lg px-3 py-2 text-primary text-sm focus:outline-none focus:ring-2 focus:ring-gold-accent"
 							>
 								<option value="men">Men</option>
 								<option value="women">Women</option>
@@ -124,7 +124,7 @@
 								bind:value={newGroupName}
 								required
 								placeholder="Fade"
-								class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+								class="w-full bg-titanium border border-white/[0.05] rounded-lg px-3 py-2 text-primary text-sm focus:outline-none focus:ring-2 focus:ring-gold-accent"
 							/>
 						</div>
 						<div>
@@ -137,7 +137,7 @@
 								bind:value={newVariantName}
 								required
 								placeholder="Mid Fade"
-								class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+								class="w-full bg-titanium border border-white/[0.05] rounded-lg px-3 py-2 text-primary text-sm focus:outline-none focus:ring-2 focus:ring-gold-accent"
 							/>
 						</div>
 						<div>
@@ -152,7 +152,7 @@
 								bind:value={newDuration}
 								required
 								placeholder="30"
-								class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+								class="w-full bg-titanium border border-white/[0.05] rounded-lg px-3 py-2 text-primary text-sm focus:outline-none focus:ring-2 focus:ring-gold-accent"
 							/>
 						</div>
 						<div>
@@ -168,7 +168,7 @@
 								bind:value={newPrice}
 								required
 								placeholder="150"
-								class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+								class="w-full bg-titanium border border-white/[0.05] rounded-lg px-3 py-2 text-primary text-sm focus:outline-none focus:ring-2 focus:ring-gold-accent"
 							/>
 						</div>
 					</div>
@@ -180,7 +180,7 @@
 								value="true"
 								checked={newAllowWalkIn}
 								onchange={(e) => (newAllowWalkIn = (e.target as HTMLInputElement).checked)}
-								class="accent-amber-500"
+								class="accent-gold-accent"
 							/>
 							Allow walk-in
 						</label>
@@ -191,7 +191,7 @@
 								value="true"
 								checked={newAllowAppointment}
 								onchange={(e) => (newAllowAppointment = (e.target as HTMLInputElement).checked)}
-								class="accent-amber-500"
+								class="accent-gold-accent"
 							/>
 							Allow appointment
 						</label>
@@ -202,7 +202,7 @@
 								value="true"
 								checked={newRequiresAppointment}
 								onchange={(e) => (newRequiresAppointment = (e.target as HTMLInputElement).checked)}
-								class="accent-amber-500"
+								class="accent-gold-accent"
 							/>
 							Requires appointment
 						</label>
@@ -213,7 +213,7 @@
 								value="true"
 								checked={newIsPopular}
 								onchange={(e) => (newIsPopular = (e.target as HTMLInputElement).checked)}
-								class="accent-amber-500"
+								class="accent-gold-accent"
 							/>
 							⭐ Popular
 						</label>
@@ -238,7 +238,7 @@
 
 		<!-- Catalog tree -->
 		{#if !data.catalog.categories || data.catalog.categories.length === 0}
-			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-12 text-center">
+			<div class="bg-matte border border-white/[0.05] rounded-2xl p-12 text-center">
 				<p class="text-muted text-lg mb-2">No services yet</p>
 				<p class="text-dim text-sm">
 					Click "+ Add Service" to create your first service variant.
@@ -247,23 +247,23 @@
 		{:else}
 			<div class="space-y-6">
 				{#each data.catalog.categories as category}
-					<div class="bg-slate-800 border border-white/[0.05] rounded-2xl overflow-hidden">
+					<div class="bg-matte border border-white/[0.05] rounded-2xl overflow-hidden">
 						<!-- Category header -->
 						<div
-							class="bg-slate-750 border-b border-white/[0.05] px-6 py-4 flex items-center justify-between"
+							class="bg-surface border-b border-white/[0.05] px-6 py-4 flex items-center justify-between"
 						>
 							<div>
-								<h2 class="text-lg font-bold text-white">{category.name}</h2>
+								<h2 class="text-lg font-bold text-primary">{category.name}</h2>
 								<span class="text-xs text-muted capitalize">{category.gender}</span>
 							</div>
 						</div>
 
 						{#each category.groups as group}
 							<div class="border-b border-white/[0.05] last:border-0">
-								<div class="px-6 py-3 bg-slate-800/50">
+								<div class="px-6 py-3 bg-matte/50">
 									<h3 class="text-sm font-semibold text-gold-accent">{group.name}</h3>
 								</div>
-								<table class="w-full">
+								<div class="overflow-x-auto"><table class="w-full">
 									<thead>
 										<tr class="text-left">
 											<th class="px-6 py-2 text-xs text-dim font-medium">Variant</th>
@@ -278,7 +278,7 @@
 									<tbody>
 										{#each group.variants as variant}
 											<tr
-												class="border-t border-white/[0.03] hover:bg-slate-700/20 transition-colors"
+												class="border-t border-white/[0.03] hover:bg-titanium/20 transition-colors"
 											>
 												{#if editingVariantId === variant.id}
 													<!-- Inline edit row -->
@@ -300,7 +300,7 @@
 																<input
 																	name="variant_name"
 																	value={variant.name}
-																	class="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+																	class="w-full bg-titanium border border-white/[0.05] rounded-lg px-2 py-1.5 text-primary text-sm focus:outline-none focus:ring-1 focus:ring-gold-accent"
 																/>
 															</div>
 															<div>
@@ -312,7 +312,7 @@
 																	type="number"
 																	min="1"
 																	value={variant.duration_minutes}
-																	class="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+																	class="w-full bg-titanium border border-white/[0.05] rounded-lg px-2 py-1.5 text-primary text-sm focus:outline-none focus:ring-1 focus:ring-gold-accent"
 																/>
 															</div>
 															<div>
@@ -323,7 +323,7 @@
 																	min="0"
 																	step="1"
 																	value={variant.price_paise / 100}
-																	class="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+																	class="w-full bg-titanium border border-white/[0.05] rounded-lg px-2 py-1.5 text-primary text-sm focus:outline-none focus:ring-1 focus:ring-gold-accent"
 																/>
 															</div>
 															<div>
@@ -335,7 +335,7 @@
 																		name="is_popular"
 																		value="true"
 																		checked={variant.is_popular}
-																		class="accent-amber-500"
+																		class="accent-gold-accent"
 																	/> Popular
 																</label>
 																<div class="flex gap-2">
@@ -347,7 +347,7 @@
 																	<button
 																		type="button"
 																		onclick={() => (editingVariantId = null)}
-																		class="text-muted hover:text-white text-xs px-2 transition-colors"
+																		class="text-muted hover:text-primary text-xs px-2 transition-colors"
 																		>Cancel</button
 																	>
 																</div>
@@ -355,7 +355,7 @@
 														</form>
 													</td>
 												{:else}
-													<td class="px-6 py-3 text-sm text-white font-medium">
+													<td class="px-6 py-3 text-sm text-primary font-medium">
 														{variant.name}
 														{#if variant.is_popular}<span class="ml-1 text-gold-accent text-xs"
 																>⭐</span
@@ -407,7 +407,7 @@
 											</tr>
 										{/each}
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						{/each}
 					</div>

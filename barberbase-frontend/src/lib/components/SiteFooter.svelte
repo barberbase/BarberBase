@@ -1,7 +1,6 @@
 <script lang="ts">
 	import {
 		LEGAL_ENTITY_NAME,
-		UDYAM_NUMBER,
 		REGISTERED_ADDRESS,
 		CONTACT_EMAIL,
 		CONTACT_PHONE
@@ -15,9 +14,16 @@
 	>
 		<!-- Brand & Entity Bridge -->
 		<div class="space-y-1">
-			<p class="text-primary font-semibold">BarberBase — a product of {LEGAL_ENTITY_NAME}</p>
-			<p class="text-xs text-dim font-mono">
-				{LEGAL_ENTITY_NAME} &middot; Udyam Reg. No. {UDYAM_NUMBER}
+			<p class="text-primary font-semibold">
+				BarberBase — Powered by
+				<a
+					href="https://codenxtlab.tech/"
+					target="_blank"
+					rel="noopener noreferrer"
+					class="text-gold-accent hover:text-gold-accent/80 transition-colors"
+				>
+					{LEGAL_ENTITY_NAME}
+				</a>
 			</p>
 		</div>
 
@@ -40,7 +46,7 @@
 		</div>
 
 		<!-- Navigation Links -->
-		<nav class="flex flex-wrap justify-center gap-x-6 gap-y-2 text-xs font-medium text-primary">
+		<nav aria-label="Footer" class="flex flex-wrap justify-center gap-x-6 gap-y-2 text-xs font-medium text-primary">
 			<a href="/about" class="hover:text-gold-accent transition-colors">About Us</a>
 			<a href="/contact" class="hover:text-gold-accent transition-colors">Contact</a>
 			<a href="/privacy" class="hover:text-gold-accent transition-colors">Privacy Policy</a>

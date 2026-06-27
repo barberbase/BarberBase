@@ -27,16 +27,16 @@
 	/>
 </svelte:head>
 
-<div class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+<div class="min-h-screen bg-canvas">
 	<div class="max-w-4xl mx-auto p-6">
 		<!-- Header -->
 		<div class="flex items-center justify-between mb-6">
 			<div class="flex items-center gap-3">
-				<a href="/admin" class="text-muted hover:text-white transition-colors text-sm"
+				<a href="/admin" class="text-muted hover:text-primary transition-colors text-sm"
 					>← Admin</a
 				>
 				<span class="text-dim">/</span>
-				<h1 class="text-2xl font-bold text-white">Analytics</h1>
+				<h1 class="text-2xl font-bold text-primary">Analytics</h1>
 			</div>
 			<!-- Date picker — changing reloads via goto -->
 			<div>
@@ -46,7 +46,7 @@
 					type="date"
 					value={selectedDate}
 					onchange={handleDateChange}
-					class="bg-slate-700 border border-slate-600 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+					class="bg-titanium border border-white/[0.05] rounded-xl px-3 py-2 text-primary text-sm focus:outline-none focus:ring-2 focus:ring-gold-accent"
 				/>
 			</div>
 		</div>
@@ -60,21 +60,21 @@
 		{#if data.analytics}
 			<!-- Date label -->
 			<p class="text-muted text-sm mb-4">
-				Showing data for <strong class="text-white">{data.analytics.business_date}</strong>
+				Showing data for <strong class="text-primary">{data.analytics.business_date}</strong>
 			</p>
 
 			<!-- Summary cards -->
 			<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
 				<div
 					id="analytics-total-visits"
-					class="bg-slate-800 border border-white/[0.05] rounded-2xl p-5 shadow-lg"
+					class="bg-matte border border-white/[0.05] rounded-2xl p-5 shadow-lg"
 				>
 					<p class="text-xs text-muted mb-1 uppercase tracking-wider">Total Visits</p>
-					<p class="text-3xl font-bold text-white">{data.analytics.total_visits}</p>
+					<p class="text-3xl font-bold text-primary">{data.analytics.total_visits}</p>
 				</div>
 				<div
 					id="analytics-total-revenue"
-					class="bg-slate-800 border border-white/[0.05] rounded-2xl p-5 shadow-lg"
+					class="bg-matte border border-white/[0.05] rounded-2xl p-5 shadow-lg"
 				>
 					<p class="text-xs text-muted mb-1 uppercase tracking-wider">Total Revenue</p>
 					<p class="text-3xl font-bold text-gold-accent">
@@ -83,10 +83,10 @@
 				</div>
 				<div
 					id="analytics-avg-wait"
-					class="bg-slate-800 border border-white/[0.05] rounded-2xl p-5 shadow-lg"
+					class="bg-matte border border-white/[0.05] rounded-2xl p-5 shadow-lg"
 				>
 					<p class="text-xs text-muted mb-1 uppercase tracking-wider">Avg Wait</p>
-					<p class="text-3xl font-bold text-white">
+					<p class="text-3xl font-bold text-primary">
 						{data.analytics.average_wait_minutes ?? 0}<span class="text-base text-muted ml-1"
 							>min</span
 						>
@@ -94,20 +94,20 @@
 				</div>
 				<div
 					id="analytics-no-shows"
-					class="bg-slate-800 border border-white/[0.05] rounded-2xl p-5 shadow-lg"
+					class="bg-matte border border-white/[0.05] rounded-2xl p-5 shadow-lg"
 				>
 					<p class="text-xs text-muted mb-1 uppercase tracking-wider">No-shows</p>
-					<p class="text-3xl font-bold text-white">{data.analytics.no_show_count ?? 0}</p>
+					<p class="text-3xl font-bold text-primary">{data.analytics.no_show_count ?? 0}</p>
 				</div>
 			</div>
 
 			<!-- Barber breakdown table -->
 			{#if data.analytics.barber_breakdown && data.analytics.barber_breakdown.length > 0}
-				<div class="bg-slate-800 border border-white/[0.05] rounded-2xl overflow-hidden shadow-xl">
+				<div class="bg-matte border border-white/[0.05] rounded-2xl overflow-hidden shadow-xl">
 					<div class="px-6 py-4 border-b border-white/[0.05]">
-						<h2 class="text-lg font-bold text-white">Barber Breakdown</h2>
+						<h2 class="text-lg font-bold text-primary">Barber Breakdown</h2>
 					</div>
-					<table class="w-full">
+					<div class="overflow-x-auto"><table class="w-full">
 						<thead>
 							<tr class="border-b border-white/[0.05]">
 								<th
@@ -128,10 +128,10 @@
 								>
 							</tr>
 						</thead>
-						<tbody class="divide-y divide-slate-700/50">
+						<tbody class="divide-y divide-white/[0.03]">
 							{#each data.analytics.barber_breakdown as row}
-								<tr class="hover:bg-slate-700/20 transition-colors">
-									<td class="px-6 py-4 text-white font-medium text-sm">{row.barber_name ?? '—'}</td>
+								<tr class="hover:bg-titanium/20 transition-colors">
+									<td class="px-6 py-4 text-primary font-medium text-sm">{row.barber_name ?? '—'}</td>
 									<td class="px-4 py-4 text-primary text-sm text-right"
 										>{row.visits_completed ?? 0}</td
 									>
@@ -146,15 +146,15 @@
 								</tr>
 							{/each}
 						</tbody>
-					</table>
+					</table></div>
 				</div>
 			{:else}
-				<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-8 text-center">
+				<div class="bg-matte border border-white/[0.05] rounded-2xl p-8 text-center">
 					<p class="text-muted">No barber breakdown available for this date.</p>
 				</div>
 			{/if}
 		{:else if !data.analyticsError}
-			<div class="bg-slate-800 border border-white/[0.05] rounded-2xl p-12 text-center">
+			<div class="bg-matte border border-white/[0.05] rounded-2xl p-12 text-center">
 				<p class="text-muted text-lg">No analytics data for this date.</p>
 			</div>
 		{/if}

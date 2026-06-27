@@ -51,7 +51,7 @@
 
 	<!-- Login Card -->
 	<div
-		class="relative w-full max-w-md bg-matte/60 backdrop-blur-xl border border-white/[0.03] rounded-3xl p-8 shadow-2xl space-y-8"
+		class="relative w-full max-w-md bg-matte border border-white/[0.03] rounded-3xl p-8 shadow-2xl space-y-8"
 	>
 		<!-- Header -->
 		<div class="text-center space-y-2">
@@ -100,7 +100,7 @@
 				<!-- Inline Error Display -->
 				{#if form?.error && step === 'phone'}
 					<div
-						class="bg-red-950/30 border border-system-error/30/50 rounded-2xl p-4 text-sm text-system-error/80 flex items-start space-x-3 animate-fade-in"
+						class="bg-red-950/30 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error/80 flex items-start space-x-3 animate-fade-in"
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
@@ -201,7 +201,7 @@
 				<!-- Inline Error Display -->
 				{#if form?.error && step === 'otp'}
 					<div
-						class="bg-red-950/30 border border-system-error/30/50 rounded-2xl p-4 text-sm text-system-error/80 flex items-start space-x-3 animate-fade-in"
+						class="bg-red-950/30 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error/80 flex items-start space-x-3 animate-fade-in"
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"

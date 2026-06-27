@@ -281,6 +281,18 @@ func (s *Server) JoinQueue(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, response)
 }
 
+// normalizePublicState collapses needs_review (an end-of-day terminal DB state, schema
+// 001_complete_schema.sql:777) to expired for the customer-facing QueueEntryPublic, whose
+// state enum (openapi.yaml) omits needs_review — a customer should never see it. Staff DTOs
+// deliberately keep needs_review: it is the signal that an in_progress entry awaits manual
+// reconciliation. ponytail: only the public surface is normalized; widen only if the public enum drifts.
+func normalizePublicState(state string) string {
+	if state == "needs_review" {
+		return "expired"
+	}
+	return state
+}
+
 func (s *Server) getPublicQueueEntryByID(ctx context.Context, entryID uuid.UUID) (*QueueEntryPublic, error) {
 	query := `
 		SELECT qe.id, qe.token_number, qe.state, qe.presence_state, v.party_size, v.total_duration_minutes,
@@ -336,7 +348,7 @@ func (s *Server) getPublicQueueEntryByID(ctx context.Context, entryID uuid.UUID)
 	}
 
 	pState := QueueEntryPublicPresenceState(presenceState)
-	sState := QueueEntryPublicState(state)
+	sState := QueueEntryPublicState(normalizePublicState(state))
 
 	return &QueueEntryPublic{
 		Id:                   id,
@@ -351,6 +363,108 @@ func (s *Server) getPublicQueueEntryByID(ctx context.Context, entryID uuid.UUID)
 		ShopName:             &shopName,
 		LocationName:         &locationName,
 	}, nil
+}
+
+func (s *Server) GetMyQueueStatus(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	_, _, visitID, err := s.resolveCustomerSession(ctx, r)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid or expired session token"})
+		return
+	}
+
+	var (
+		id                 uuid.UUID
+		tokenNumber        int
+		state              string
+		presenceState      string
+		partySize          int
+		magicLinkExpiresAt *time.Time
+		shopName           string
+		locationName       string
+		queueSessionID     uuid.UUID
+		priorityGroup      int
+		sortKey            int64
+		visitIDRow         uuid.UUID
+	)
+	err = s.Pool.QueryRow(ctx, `
+		SELECT qe.id, qe.token_number, qe.state, qe.presence_state,
+		       v.party_size, v.magic_link_expires_at,
+		       loc.name AS shop_name, loc.name AS location_name,
+		       qe.queue_session_id, qe.priority_group, qe.sort_key, v.id
+		FROM queue_entries qe
+		JOIN visits v ON v.id = qe.visit_id
+		JOIN locations loc ON loc.id = v.location_id
+		WHERE qe.visit_id = $1`, visitID).Scan(
+		&id, &tokenNumber, &state, &presenceState,
+		&partySize, &magicLinkExpiresAt,
+		&shopName, &locationName,
+		&queueSessionID, &priorityGroup, &sortKey, &visitIDRow,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondJSON(w, http.StatusNotFound, map[string]string{"code": "NOT_FOUND"})
+			return
+		}
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR"})
+		return
+	}
+
+	rows, err := s.Pool.Query(ctx, `
+		SELECT variant_name_snapshot, duration_minutes_snapshot
+		FROM visit_services WHERE visit_id = $1 ORDER BY sort_order ASC`, visitIDRow)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR"})
+		return
+	}
+	defer rows.Close()
+
+	var services []struct {
+		DurationMinutes *int    `json:"duration_minutes,omitempty"`
+		Name            *string `json:"name,omitempty"`
+	}
+	for rows.Next() {
+		var name string
+		var dur int
+		if err := rows.Scan(&name, &dur); err != nil {
+			continue
+		}
+		n, d := name, dur
+		services = append(services, struct {
+			DurationMinutes *int    `json:"duration_minutes,omitempty"`
+			Name            *string `json:"name,omitempty"`
+		}{DurationMinutes: &d, Name: &n})
+	}
+	rows.Close()
+
+	// Count dispatchable entries ahead in the same session by dispatch order
+	var positionAhead, estimatedWait int
+	_ = s.Pool.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(v2.total_duration_minutes), 0)
+		FROM queue_entries qe2
+		JOIN visits v2 ON v2.id = qe2.visit_id
+		WHERE qe2.queue_session_id = $1
+		  AND qe2.is_dispatchable = true
+		  AND qe2.state IN ('waiting', 'called', 'in_progress')
+		  AND (qe2.priority_group < $2 OR (qe2.priority_group = $2 AND qe2.sort_key < $3))
+		  AND qe2.id != $4`,
+		queueSessionID, priorityGroup, sortKey, id).Scan(&positionAhead, &estimatedWait)
+
+	pState := QueueEntryPublicPresenceState(presenceState)
+	sState := QueueEntryPublicState(normalizePublicState(state))
+	respondJSON(w, http.StatusOK, &QueueEntryPublic{
+		Id:                   id,
+		TokenNumber:          tokenNumber,
+		State:                sState,
+		PresenceState:        pState,
+		PositionAhead:        positionAhead,
+		EstimatedWaitMinutes: estimatedWait,
+		Services:             services,
+		PartySize:            &partySize,
+		MagicLinkExpiresAt:   magicLinkExpiresAt,
+		ShopName:             &shopName,
+		LocationName:         &locationName,
+	})
 }
 
 func (s *Server) resolveCustomerSession(ctx context.Context, r *http.Request) (uuid.UUID, uuid.UUID, uuid.UUID, error) {
