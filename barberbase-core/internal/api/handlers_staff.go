@@ -694,7 +694,160 @@ func (s *Server) UpdateBarberStatus(w http.ResponseWriter, r *http.Request, staf
 
 
 func (s *Server) AddWalkIn(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
+	// addWalkInBody extends generated AddWalkInJSONBody with optional idempotency_key for dedup
+	var body struct {
+		AddWalkInJSONBody
+		IdempotencyKey *string `json:"idempotency_key,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"code":    "INVALID_BODY",
+			"message": "failed to decode request body",
+		})
+		return
+	}
+	if len(body.VariantIds) == 0 {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"code":    "INVALID_VARIANTS",
+			"message": "at least one variant_id is required",
+		})
+		return
+	}
+
+	ctx := r.Context()
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid tenant id claim"})
+		return
+	}
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid location id claim"})
+		return
+	}
+
+	var maxQueueSize int
+	err = s.Pool.QueryRow(ctx, `
+		SELECT max_total_queue_size FROM locations WHERE id = $1 AND tenant_id = $2
+	`, locationID, tenantID).Scan(&maxQueueSize)
+	if errors.Is(err, pgx.ErrNoRows) {
+		respondJSON(w, http.StatusNotFound, map[string]string{"code": "LOCATION_NOT_FOUND", "message": "location not found"})
+		return
+	}
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "failed to resolve location"})
+		return
+	}
+
+	// ponytail: server-side key if frontend omits; two sequential taps = two entries (correct behavior)
+	idempotencyKey := uuid.New().String()
+	if body.IdempotencyKey != nil && *body.IdempotencyKey != "" {
+		idempotencyKey = *body.IdempotencyKey
+	}
+
+	variantIDs := make([]uuid.UUID, len(body.VariantIds))
+	for i, v := range body.VariantIds {
+		variantIDs[i] = uuid.UUID(v)
+	}
+
+	var normPhone *string
+	if body.PhoneNumber != nil && string(*body.PhoneNumber) != "" {
+		p := repository.NormalizeE164(string(*body.PhoneNumber))
+		normPhone = &p
+	}
+
+	partySize := 1
+	if body.PartySize != nil {
+		partySize = *body.PartySize
+	}
+
+	var requestedBarberID *uuid.UUID
+	if body.RequestedBarberId != nil {
+		bid := uuid.UUID(*body.RequestedBarberId)
+		requestedBarberID = &bid
+	}
+
+	var result *queue.JoinQueueResult
+	errTx := repository.WithTx(ctx, s.Pool, func(tx pgx.Tx) error {
+		var err error
+		result, err = queue.JoinQueue(ctx, tx, queue.JoinQueueParams{
+			TenantID:          tenantID,
+			LocationID:        locationID,
+			VariantIDs:        variantIDs,
+			PartySize:         partySize,
+			CustomerName:      body.CustomerName,
+			PhoneNumber:       normPhone,
+			RequestedBarberID: requestedBarberID,
+			IdempotencyKey:    idempotencyKey,
+			InitiatedVia:      "staff_dashboard",
+			MaxQueueSize:      maxQueueSize,
+			HMACSecret:        []byte(s.Config.HMACSecret),
+		})
+		return err
+	})
+
+	if errTx != nil {
+		var alreadyErr *queue.ErrAlreadyInQueue
+		if errors.As(errTx, &alreadyErr) {
+			respondJSON(w, http.StatusConflict, map[string]string{
+				"code":    "ALREADY_IN_QUEUE",
+				"message": "customer already has an active entry in the queue",
+			})
+			return
+		}
+		if errors.Is(errTx, queue.ErrQueueFull) {
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]string{
+				"code":    "QUEUE_FULL",
+				"message": "queue is at capacity",
+			})
+			return
+		}
+		if errors.Is(errTx, queue.ErrInvalidVariants) || errors.Is(errTx, queue.ErrInactiveVariant) {
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]string{
+				"code":    "INVALID_VARIANTS",
+				"message": errTx.Error(),
+			})
+			return
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(errTx, &pgErr) && pgErr.Code == "55P03" {
+			w.Header().Set("Retry-After", "1")
+			respondJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"code":    "LOCK_TIMEOUT",
+				"message": "lock timeout, retry",
+			})
+			return
+		}
+		log.Printf("[Error] AddWalkIn failed: %v", errTx)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "internal server error",
+		})
+		return
+	}
+
+	entryView, err := repository.GetEntryStaffView(ctx, s.Pool, result.QueueEntryID)
+	if err != nil {
+		log.Printf("[Error] AddWalkIn: failed to fetch entry view: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "internal server error",
+		})
+		return
+	}
+
+	// Law 8: SSE after commit
+	if s.Manager != nil {
+		s.Manager.Broadcast(locationID.String(), realtime.SSEEvent{
+			Type:         "queue_changed",
+			LocationID:   locationID.String(),
+			QueueVersion: result.NewQueueVersion,
+		})
+	}
+
+	respondJSON(w, http.StatusCreated, toQueueEntryStaffJSON(entryView))
 }
 
 func (s *Server) CallNextCustomer(w http.ResponseWriter, r *http.Request) {
@@ -1004,19 +1157,548 @@ func (s *Server) CompleteService(w http.ResponseWriter, r *http.Request, entryId
 }
 
 func (s *Server) MarkNoShow(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {
-	w.WriteHeader(http.StatusNotImplemented)
+	ctx := r.Context()
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid tenant id claim"})
+		return
+	}
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid location id claim"})
+		return
+	}
+	entryID := uuid.UUID(entryId)
+
+	var queueVersion int
+	var alreadyNoShow bool
+	errTx := repository.WithTx(ctx, s.Pool, func(tx pgx.Tx) error {
+		// Resolve session (tenant+location scoped)
+		var sessionID uuid.UUID
+		if err := tx.QueryRow(ctx, `
+			SELECT qs.id FROM queue_entries qe
+			JOIN queue_sessions qs ON qs.id = qe.queue_session_id
+			WHERE qe.id = $1 AND qs.tenant_id = $2 AND qs.location_id = $3
+		`, entryID, tenantID, locationID).Scan(&sessionID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return queue.ErrEntryNotFound
+			}
+			return fmt.Errorf("lookup session: %w", err)
+		}
+		// Law 1: session lock first
+		if _, err := tx.Exec(ctx, `SELECT id FROM queue_sessions WHERE id = $1 FOR UPDATE`, sessionID); err != nil {
+			return fmt.Errorf("lock session: %w", err)
+		}
+		var state string
+		if err := tx.QueryRow(ctx, `SELECT state FROM queue_entries WHERE id = $1 FOR UPDATE`, entryID).Scan(&state); err != nil {
+			return fmt.Errorf("lock entry: %w", err)
+		}
+		if state == "no_show" {
+			alreadyNoShow = true
+			return nil
+		}
+		if state != "called" {
+			return queue.ErrInvalidStateTransition
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE queue_entries SET state = 'no_show', is_dispatchable = false WHERE id = $1
+		`, entryID); err != nil {
+			return fmt.Errorf("mark no_show: %w", err)
+		}
+		return tx.QueryRow(ctx, `
+			UPDATE queue_sessions SET queue_version = queue_version+1 WHERE id = $1 RETURNING queue_version
+		`, sessionID).Scan(&queueVersion)
+	})
+
+	if errTx != nil {
+		if errors.Is(errTx, queue.ErrEntryNotFound) {
+			respondJSON(w, http.StatusNotFound, map[string]string{"code": "NOT_FOUND", "message": "queue entry not found"})
+			return
+		}
+		if errors.Is(errTx, queue.ErrInvalidStateTransition) {
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": "INVALID_STATE_TRANSITION", "message": "entry must be in 'called' state"})
+			return
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(errTx, &pgErr) && pgErr.Code == "55P03" {
+			w.Header().Set("Retry-After", "1")
+			respondJSON(w, http.StatusServiceUnavailable, map[string]string{"code": "LOCK_TIMEOUT", "message": "lock timeout, retry"})
+			return
+		}
+		log.Printf("[Error] MarkNoShow failed: %v", errTx)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	if alreadyNoShow {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	// Law 8
+	if s.Manager != nil {
+		s.Manager.Broadcast(locationID.String(), realtime.SSEEvent{
+			Type:         "queue_changed",
+			LocationID:   locationID.String(),
+			QueueVersion: queueVersion,
+		})
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) ReactivateEntry(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {
-	w.WriteHeader(http.StatusNotImplemented)
+	ctx := r.Context()
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid tenant id claim"})
+		return
+	}
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid location id claim"})
+		return
+	}
+	entryID := uuid.UUID(entryId)
+
+	var queueVersion int
+	var alreadyActive bool
+	errTx := repository.WithTx(ctx, s.Pool, func(tx pgx.Tx) error {
+		var sessionID uuid.UUID
+		if err := tx.QueryRow(ctx, `
+			SELECT qs.id FROM queue_entries qe
+			JOIN queue_sessions qs ON qs.id = qe.queue_session_id
+			WHERE qe.id = $1 AND qs.tenant_id = $2 AND qs.location_id = $3
+		`, entryID, tenantID, locationID).Scan(&sessionID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return queue.ErrEntryNotFound
+			}
+			return fmt.Errorf("lookup session: %w", err)
+		}
+		// Law 1: session lock first
+		if _, err := tx.Exec(ctx, `SELECT id FROM queue_sessions WHERE id = $1 FOR UPDATE`, sessionID); err != nil {
+			return fmt.Errorf("lock session: %w", err)
+		}
+		var state, presenceState string
+		if err := tx.QueryRow(ctx, `
+			SELECT state, presence_state FROM queue_entries WHERE id = $1 FOR UPDATE
+		`, entryID).Scan(&state, &presenceState); err != nil {
+			return fmt.Errorf("lock entry: %w", err)
+		}
+		// Double-tap: already reactivated
+		if state == "waiting" && presenceState == "arrived" {
+			alreadyActive = true
+			return nil
+		}
+		// Source: (waiting+snoozed) OR skipped
+		if !((state == "waiting" && presenceState == "snoozed") || state == "skipped") {
+			return queue.ErrInvalidStateTransition
+		}
+
+		// Read notify_when_people_ahead from location
+		var N int
+		if err := tx.QueryRow(ctx, `SELECT notify_when_people_ahead FROM locations WHERE id = $1`, locationID).Scan(&N); err != nil {
+			return fmt.Errorf("read notify_when_people_ahead: %w", err)
+		}
+
+		// Fetch reactivated entry's duration for wait-minutes calculation below
+		var reactivatedDurationMinutes int
+		if err := tx.QueryRow(ctx, `
+			SELECT v.total_duration_minutes FROM visits v
+			JOIN queue_entries qe ON v.id = qe.visit_id
+			WHERE qe.id = $1
+		`, entryID).Scan(&reactivatedDurationMinutes); err != nil {
+			return fmt.Errorf("read reactivated duration: %w", err)
+		}
+
+		// W-list: ordered dispatchable waiting entries excluding the entry being reactivated.
+		// Extended to include visit data needed to build the bb_queue_delayed notification.
+		type wEntry struct {
+			id              uuid.UUID
+			sortKey         int64
+			priorityGroup   int
+			tokenNumber     int
+			presenceState   string
+			phone           *string
+			customerID      *uuid.UUID
+			visitID         uuid.UUID
+			magicLinkExpiry *time.Time
+			durationMinutes int
+		}
+		rows, err := tx.Query(ctx, `
+			SELECT qe.id, qe.sort_key, qe.priority_group, qe.token_number, qe.presence_state,
+			       c.phone_number, qe.customer_id, v.id, v.magic_link_expires_at,
+			       v.total_duration_minutes
+			FROM queue_entries qe
+			LEFT JOIN customers c ON c.id = qe.customer_id
+			LEFT JOIN visits v ON v.id = qe.visit_id
+			WHERE qe.queue_session_id = $1
+			  AND qe.is_dispatchable = true AND qe.state = 'waiting'
+			  AND qe.id != $2
+			ORDER BY qe.priority_group ASC, qe.sort_key ASC, qe.token_number ASC
+		`, sessionID, entryID)
+		if err != nil {
+			return fmt.Errorf("build W list: %w", err)
+		}
+		defer rows.Close()
+		var W []wEntry
+		for rows.Next() {
+			var e wEntry
+			if err := rows.Scan(&e.id, &e.sortKey, &e.priorityGroup, &e.tokenNumber, &e.presenceState,
+				&e.phone, &e.customerID, &e.visitID, &e.magicLinkExpiry, &e.durationMinutes); err != nil {
+				return err
+			}
+			W = append(W, e)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		// Compute placement — sort_key stays in same unit as existing entries (MAX+1 is unit-agnostic)
+		var newSortKey int64
+		newPriorityGroup := 100
+		var displaced *wEntry
+		if len(W) <= N {
+			// Back of queue: sort after last dispatchable entry, unit-agnostic
+			if len(W) > 0 {
+				newSortKey = W[len(W)-1].sortKey + 1
+			} else {
+				newSortKey = time.Now().Unix()
+			}
+		} else {
+			t := W[N] // 0-indexed: position N+1 in the current W
+			displaced = &t
+			newSortKey = t.sortKey - 1
+			newPriorityGroup = t.priorityGroup
+		}
+
+		// Reactivate entry
+		if _, err := tx.Exec(ctx, `
+			UPDATE queue_entries
+			SET state = 'waiting', presence_state = 'arrived', is_dispatchable = true,
+			    sort_key = $2, priority_group = $3, reactivated_at = NOW()
+			WHERE id = $1
+		`, entryID, newSortKey, newPriorityGroup); err != nil {
+			return fmt.Errorf("reactivate entry: %w", err)
+		}
+
+		// Law 6: audit staff arrival
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO arrival_attempts (tenant_id, location_id, queue_entry_id, method, success)
+			VALUES ($1, $2, $3, 'staff', true)
+		`, tenantID, locationID, entryID); err != nil {
+			return fmt.Errorf("insert arrival attempt: %w", err)
+		}
+
+		// Notify displaced entry T (Law 7: inside tx)
+		if displaced != nil && displaced.phone != nil &&
+			(displaced.presenceState == "remote" || displaced.presenceState == "notified" || displaced.presenceState == "on_the_way") {
+
+			var locationName string
+			_ = tx.QueryRow(ctx, `SELECT name FROM locations WHERE id = $1`, locationID).Scan(&locationName)
+
+			// new_estimated_wait_minutes = reactivated entry + W[0..N-1] (entries now ahead of displaced T)
+			waitMinutes := reactivatedDurationMinutes
+			for i := 0; i < N && i < len(W); i++ {
+				waitMinutes += W[i].durationMinutes
+			}
+
+			type compParam struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}
+			type bodyComp struct {
+				Type       string      `json:"type"`
+				Parameters []compParam `json:"parameters"`
+			}
+			type btnComp struct {
+				Type       string      `json:"type"`
+				SubType    string      `json:"sub_type"`
+				Index      int         `json:"index"`
+				Parameters []compParam `json:"parameters"`
+			}
+			components := []interface{}{
+				bodyComp{
+					Type: "body",
+					Parameters: []compParam{
+						{Type: "text", Text: locationName},                               // {{1}} shop_name
+						{Type: "text", Text: fmt.Sprintf("%d", displaced.tokenNumber)},  // {{2}} token_number
+						{Type: "text", Text: fmt.Sprintf("%d", waitMinutes)},            // {{3}} estimated_wait_minutes
+					},
+				},
+			}
+			// Add button only when we have data to regenerate the magic link
+			if displaced.customerID != nil && displaced.visitID != uuid.Nil && displaced.magicLinkExpiry != nil {
+				mlToken := queue.GenerateMagicLinkToken(
+					displaced.customerID.String(),
+					locationID.String(),
+					displaced.visitID.String(),
+					*displaced.magicLinkExpiry,
+					[]byte(s.Config.HMACSecret),
+				)
+				components = append(components, btnComp{
+					Type:    "button",
+					SubType: "url",
+					Index:   0,
+					Parameters: []compParam{{Type: "text", Text: mlToken}},
+				})
+			}
+
+			notifPayload := map[string]interface{}{
+				"template_code":     "bb_queue_delayed",
+				"to":                *displaced.phone,
+				"location_id":       locationID.String(),
+				"language":          "en",
+				"notification_type": "queue_delayed",
+				"components":        components,
+			}
+			payloadBytes, err := json.Marshal(notifPayload)
+			if err != nil {
+				return fmt.Errorf("marshal delayed notification: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO outbox_events (tenant_id, type, payload, process_after)
+				VALUES ($1, 'notification.send', $2, NOW())
+			`, tenantID, payloadBytes); err != nil {
+				return fmt.Errorf("insert delayed notification outbox: %w", err)
+			}
+		}
+
+		return tx.QueryRow(ctx, `
+			UPDATE queue_sessions SET queue_version = queue_version+1 WHERE id = $1 RETURNING queue_version
+		`, sessionID).Scan(&queueVersion)
+	})
+
+	if errTx != nil {
+		if errors.Is(errTx, queue.ErrEntryNotFound) {
+			respondJSON(w, http.StatusNotFound, map[string]string{"code": "NOT_FOUND", "message": "queue entry not found"})
+			return
+		}
+		if errors.Is(errTx, queue.ErrInvalidStateTransition) {
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]string{
+				"code":    "INVALID_STATE_TRANSITION",
+				"message": "entry must be in (waiting+snoozed) or skipped state",
+			})
+			return
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(errTx, &pgErr) && pgErr.Code == "55P03" {
+			w.Header().Set("Retry-After", "1")
+			respondJSON(w, http.StatusServiceUnavailable, map[string]string{"code": "LOCK_TIMEOUT", "message": "lock timeout, retry"})
+			return
+		}
+		log.Printf("[Error] ReactivateEntry failed: %v", errTx)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	if alreadyActive {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	// Law 8
+	if s.Manager != nil {
+		s.Manager.Broadcast(locationID.String(), realtime.SSEEvent{
+			Type:         "queue_changed",
+			LocationID:   locationID.String(),
+			QueueVersion: queueVersion,
+		})
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) ReassignBarber(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {
-	w.WriteHeader(http.StatusNotImplemented)
+	var body ReassignBarberJSONBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"code": "INVALID_BODY", "message": "failed to decode request body"})
+		return
+	}
+	newBarberID := uuid.UUID(body.NewBarberId)
+	if newBarberID == uuid.Nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"code": "INVALID_BARBER", "message": "new_barber_id is required"})
+		return
+	}
+
+	ctx := r.Context()
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid tenant id claim"})
+		return
+	}
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid location id claim"})
+		return
+	}
+	entryID := uuid.UUID(entryId)
+
+	// Validate barber is active in this tenant+location (outside tx — read-only check)
+	var barberExists bool
+	err = s.Pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM staff_members WHERE id = $1 AND tenant_id = $2 AND location_id = $3 AND is_active = true)
+	`, newBarberID, tenantID, locationID).Scan(&barberExists)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	if !barberExists {
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": "INVALID_BARBER", "message": "barber not found or inactive in this location"})
+		return
+	}
+
+	var queueVersion int
+	errTx := repository.WithTx(ctx, s.Pool, func(tx pgx.Tx) error {
+		var sessionID uuid.UUID
+		if err := tx.QueryRow(ctx, `
+			SELECT qs.id FROM queue_entries qe
+			JOIN queue_sessions qs ON qs.id = qe.queue_session_id
+			WHERE qe.id = $1 AND qs.tenant_id = $2 AND qs.location_id = $3
+		`, entryID, tenantID, locationID).Scan(&sessionID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return queue.ErrEntryNotFound
+			}
+			return fmt.Errorf("lookup session: %w", err)
+		}
+		// Law 1: session lock first
+		if _, err := tx.Exec(ctx, `SELECT id FROM queue_sessions WHERE id = $1 FOR UPDATE`, sessionID); err != nil {
+			return fmt.Errorf("lock session: %w", err)
+		}
+		var state string
+		if err := tx.QueryRow(ctx, `SELECT state FROM queue_entries WHERE id = $1 FOR UPDATE`, entryID).Scan(&state); err != nil {
+			return fmt.Errorf("lock entry: %w", err)
+		}
+		if state != "waiting" && state != "called" {
+			return queue.ErrInvalidStateTransition
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE queue_entries SET assigned_barber_id = $2 WHERE id = $1
+		`, entryID, newBarberID); err != nil {
+			return fmt.Errorf("reassign barber: %w", err)
+		}
+		return tx.QueryRow(ctx, `
+			UPDATE queue_sessions SET queue_version = queue_version+1 WHERE id = $1 RETURNING queue_version
+		`, sessionID).Scan(&queueVersion)
+	})
+
+	if errTx != nil {
+		if errors.Is(errTx, queue.ErrEntryNotFound) {
+			respondJSON(w, http.StatusNotFound, map[string]string{"code": "NOT_FOUND", "message": "queue entry not found"})
+			return
+		}
+		if errors.Is(errTx, queue.ErrInvalidStateTransition) {
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": "INVALID_STATE_TRANSITION", "message": "entry must be in waiting or called state"})
+			return
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(errTx, &pgErr) && pgErr.Code == "55P03" {
+			w.Header().Set("Retry-After", "1")
+			respondJSON(w, http.StatusServiceUnavailable, map[string]string{"code": "LOCK_TIMEOUT", "message": "lock timeout, retry"})
+			return
+		}
+		log.Printf("[Error] ReassignBarber failed: %v", errTx)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	// Law 8
+	if s.Manager != nil {
+		s.Manager.Broadcast(locationID.String(), realtime.SSEEvent{
+			Type:         "queue_changed",
+			LocationID:   locationID.String(),
+			QueueVersion: queueVersion,
+		})
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) SkipEntry(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {
-	w.WriteHeader(http.StatusNotImplemented)
+	ctx := r.Context()
+	tenantIDStr := auth.TenantIDFromCtx(ctx)
+	locationIDStr := auth.LocationIDFromCtx(ctx)
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid tenant id claim"})
+		return
+	}
+	locationID, err := uuid.Parse(locationIDStr)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid location id claim"})
+		return
+	}
+	entryID := uuid.UUID(entryId)
+
+	var queueVersion int
+	var alreadySkipped bool
+	errTx := repository.WithTx(ctx, s.Pool, func(tx pgx.Tx) error {
+		var sessionID uuid.UUID
+		if err := tx.QueryRow(ctx, `
+			SELECT qs.id FROM queue_entries qe
+			JOIN queue_sessions qs ON qs.id = qe.queue_session_id
+			WHERE qe.id = $1 AND qs.tenant_id = $2 AND qs.location_id = $3
+		`, entryID, tenantID, locationID).Scan(&sessionID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return queue.ErrEntryNotFound
+			}
+			return fmt.Errorf("lookup session: %w", err)
+		}
+		// Law 1: session lock first
+		if _, err := tx.Exec(ctx, `SELECT id FROM queue_sessions WHERE id = $1 FOR UPDATE`, sessionID); err != nil {
+			return fmt.Errorf("lock session: %w", err)
+		}
+		var state string
+		if err := tx.QueryRow(ctx, `SELECT state FROM queue_entries WHERE id = $1 FOR UPDATE`, entryID).Scan(&state); err != nil {
+			return fmt.Errorf("lock entry: %w", err)
+		}
+		if state == "skipped" {
+			alreadySkipped = true
+			return nil
+		}
+		if state != "waiting" && state != "called" {
+			return queue.ErrInvalidStateTransition
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE queue_entries SET state = 'skipped', is_dispatchable = false WHERE id = $1
+		`, entryID); err != nil {
+			return fmt.Errorf("skip entry: %w", err)
+		}
+		return tx.QueryRow(ctx, `
+			UPDATE queue_sessions SET queue_version = queue_version+1 WHERE id = $1 RETURNING queue_version
+		`, sessionID).Scan(&queueVersion)
+	})
+
+	if errTx != nil {
+		if errors.Is(errTx, queue.ErrEntryNotFound) {
+			respondJSON(w, http.StatusNotFound, map[string]string{"code": "NOT_FOUND", "message": "queue entry not found"})
+			return
+		}
+		if errors.Is(errTx, queue.ErrInvalidStateTransition) {
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": "INVALID_STATE_TRANSITION", "message": "entry must be in waiting or called state"})
+			return
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(errTx, &pgErr) && pgErr.Code == "55P03" {
+			w.Header().Set("Retry-After", "1")
+			respondJSON(w, http.StatusServiceUnavailable, map[string]string{"code": "LOCK_TIMEOUT", "message": "lock timeout, retry"})
+			return
+		}
+		log.Printf("[Error] SkipEntry failed: %v", errTx)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	if alreadySkipped {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	// Law 8
+	if s.Manager != nil {
+		s.Manager.Broadcast(locationID.String(), realtime.SSEEvent{
+			Type:         "queue_changed",
+			LocationID:   locationID.String(),
+			QueueVersion: queueVersion,
+		})
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) StartService(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {
@@ -1227,6 +1909,11 @@ func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN customers c ON c.id = qe.customer_id
 							 AND c.merged_into_customer_id IS NULL
 		WHERE qe.queue_session_id = $1
+		  -- needs_review is NOT filtered here, but the session select above (status <> 'archived')
+		  -- keeps it off the wire: needs_review is only ever written by end-of-day in the same tx
+		  -- that archives the session (end_of_day.go:143,153). It is absent from the QueueEntryStaff
+		  -- state enum (openapi.yaml). Before loosening that archived gate, add needs_review to the
+		  -- enum and a dashboard reconciliation branch — otherwise it renders as an unhandled state.
 		  AND qe.state NOT IN ('completed', 'cancelled', 'expired')
 		ORDER BY
 			CASE qe.state

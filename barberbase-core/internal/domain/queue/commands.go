@@ -168,6 +168,12 @@ func generateMagicLinkToken(customerIDStr, locationIDStr, visitIDStr string, exp
 	return base64.RawURLEncoding.EncodeToString(hashed)
 }
 
+// GenerateMagicLinkToken rebuilds the HMAC token for a known customer entry.
+// Use when re-notifying a customer who already joined (e.g. bb_queue_delayed).
+func GenerateMagicLinkToken(customerID, locationID, visitID string, expiresAt time.Time, secret []byte) string {
+	return generateMagicLinkToken(customerID, locationID, visitID, expiresAt, secret)
+}
+
 func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQueueResult, error) {
 	// ── STEP 0: IDEMPOTENCY GATE (first op in tx) ──
 	var idempotencyRowID uuid.UUID
@@ -476,8 +482,12 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 	}
 
 	presenceState := "remote"
-	if params.InitiatedVia == "staff_dashboard" && (params.PhoneNumber == nil || *params.PhoneNumber == "") {
-		presenceState = "unknown"
+	if params.InitiatedVia == "staff_dashboard" {
+		if params.PhoneNumber == nil || *params.PhoneNumber == "" {
+			presenceState = "unknown"
+		} else {
+			presenceState = "arrived"
+		}
 	}
 
 	sessionChannel := "web"
@@ -515,6 +525,17 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 			return nil, &ErrAlreadyInQueue{}
 		}
 		return nil, fmt.Errorf("insert queue entry: %w", err)
+	}
+
+	// Law 6: staff walk-in with phone = arrived; audit arrival
+	if presenceState == "arrived" {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO arrival_attempts (tenant_id, location_id, queue_entry_id, method, success)
+			VALUES ($1, $2, $3, 'staff', true)`,
+			params.TenantID, params.LocationID, entryID)
+		if err != nil {
+			return nil, fmt.Errorf("insert arrival attempt: %w", err)
+		}
 	}
 
 	// ── STEP 9: UPDATE QUEUE SESSION ──

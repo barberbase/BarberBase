@@ -57,6 +57,7 @@ var TemplateToNotificationType = map[string]string{
 	"bb_marketing_broadcast":   "marketing_broadcast",
 	"bb_queue_cancelled":       "queue_cancelled",
 	"bb_queue_snoozed":         "queue_snoozed",
+	"bb_queue_delayed":         "queue_delayed",
 	"bb_shop_closing_early":    "shop_closing_early",
 }
 

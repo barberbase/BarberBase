@@ -85,7 +85,10 @@ export class QueueStore {
 		party_size?: number;
 		requested_barber_id?: string;
 	}) {
-		const res = await this.client.post<QueueEntryStaff>('/v1/staff/queue/add-walkin', body);
+		const res = await this.client.post<QueueEntryStaff>('/v1/staff/queue/add-walkin', {
+			...body,
+			idempotency_key: crypto.randomUUID()
+		});
 		await this.fetchSnapshot();
 		return res;
 	}
