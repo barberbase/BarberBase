@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
+	import { tick } from 'svelte';
 
 	let { data }: { data: any } = $props();
 
@@ -148,6 +149,15 @@
 				}
 			}
 		};
+	});
+
+	// Re-render Turnstile when the walk_in join form becomes visible.
+	// initTurnstile() fires once on script load but #turnstile-container doesn't
+	// exist yet (it's inside {#if walk_in allowed}). tick() waits for Svelte to
+	// paint the container before calling render.
+	$effect(() => {
+		if (!bookingOptions?.allowed_entry_methods?.includes('walk_in')) return;
+		tick().then(() => initTurnstile());
 	});
 
 	// Join Queue CTA
