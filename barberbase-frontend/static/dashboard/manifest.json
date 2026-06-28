@@ -2,7 +2,7 @@
   "name": "BarberBase",
   "short_name": "BarberBase",
   "description": "Barbershop queue management",
-  "start_url": "/dashboard",
+  "start_url": "/dashboard/",
   "scope": "/dashboard/",
   "display": "standalone",
   "background_color": "#ffffff",

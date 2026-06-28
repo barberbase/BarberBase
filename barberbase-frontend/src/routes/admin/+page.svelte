@@ -6,6 +6,18 @@
 	let wizardStep = $state(1);
 	let wizardDone = $state(false);
 
+	let linkCopied = $state(false);
+	const publicUrl = $derived(
+		data.tenantSlug && data.locationSlug
+			? `https://barberbase.in/${data.tenantSlug}/${data.locationSlug}`
+			: ''
+	);
+	function copyPublicUrl() {
+		navigator.clipboard.writeText(publicUrl);
+		linkCopied = true;
+		setTimeout(() => (linkCopied = false), 2000);
+	}
+
 	// Wizard sub-form state
 	// Step 1: Service create
 	let svcCategoryName = $state('');
@@ -420,6 +432,30 @@
 					</a>
 				{/each}
 			</div>
+
+			{#if publicUrl}
+				<div class="mt-6 bg-matte border border-gold-accent/20 rounded-xl p-5 machined-edge">
+					<div class="flex items-start justify-between gap-4">
+						<div class="min-w-0">
+							<h2 class="text-sm font-bold text-primary mb-1">Public Join Link</h2>
+							<p class="text-xs text-muted mb-3">Share this with customers to join the queue remotely.</p>
+							<a
+								href={publicUrl}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="text-xs text-gold-accent hover:underline font-mono break-all"
+							>{publicUrl}</a>
+						</div>
+						<button
+							type="button"
+							onclick={copyPublicUrl}
+							class="shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg border border-gold-accent/30 text-gold-accent hover:bg-gold-accent/10 transition-colors"
+						>
+							{linkCopied ? 'Copied!' : 'Copy'}
+						</button>
+					</div>
+				</div>
+			{/if}
 		</div>
 	</div>
 {/if}

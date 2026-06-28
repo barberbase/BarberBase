@@ -82,13 +82,13 @@
 		return `₹${(paise / 100).toFixed(2)}`;
 	}
 
-	// Flatten catalog variants
+	// Flatten catalog variants (contract shape: lowercase groups/variants per openapi.yaml ServiceCatalog)
 	const allVariants = $derived(() => {
-		if (!data.catalog || !data.catalog.categories) return [];
+		if (!data.catalog || !Array.isArray(data.catalog.categories)) return [];
 		const list: any[] = [];
 		for (const cat of data.catalog.categories) {
-			for (const grp of cat.groups) {
-				for (const vr of grp.variants) {
+			for (const grp of Array.isArray(cat.groups) ? cat.groups : []) {
+				for (const vr of Array.isArray(grp.variants) ? grp.variants : []) {
 					list.push({
 						id: vr.id,
 						name: vr.name,
@@ -494,7 +494,10 @@
 							<div
 								class="max-h-48 overflow-y-auto bg-canvas border border-white/[0.03] rounded-xl p-3 space-y-2 divide-y divide-slate-800/40"
 							>
-								{#each allVariants() as v, idx}
+								{#if allVariants().length === 0}
+								<p class="text-xs text-dim py-2 text-center">No services configured. Add services in <a href="/admin/services" class="text-gold-accent hover:underline">Admin → Services</a>.</p>
+							{:else}
+								{#each allVariants() as v}
 									<label class="flex items-start space-x-3 pt-2 first:pt-0 cursor-pointer">
 										<input
 											type="checkbox"
@@ -510,6 +513,7 @@
 										</div>
 									</label>
 								{/each}
+							{/if}
 							</div>
 						</div>
 

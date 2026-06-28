@@ -767,16 +767,57 @@ func (s *Server) GetServiceCatalog(w http.ResponseWriter, r *http.Request, locat
 		catID = params.CategoryId.String()
 	}
 
-	catalog, err := repository.GetServiceCatalog(ctx, s.Pool, location.ID, gender, catID)
+	dbCatalog, err := repository.GetServiceCatalog(ctx, s.Pool, location.ID, gender, catID)
 	if err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"location_id":  location.ID,
-		"display_mode": location.ServiceDisplayMode,
-		"categories":   catalog,
+	// Map DB rows → OpenAPI types so the response matches the ServiceCatalog contract
+	// (ServiceCategoryDB has no json tags → PascalCase; ServiceCatalog has tags → lowercase)
+	apiCategories := make([]ServiceCategory, len(dbCatalog))
+	for i, c := range dbCatalog {
+		cID, _ := uuid.Parse(c.ID)
+		apiGroups := make([]ServiceGroup, len(c.Groups))
+		for j, g := range c.Groups {
+			gID, _ := uuid.Parse(g.ID)
+			apiVariants := make([]ServiceVariant, len(g.Variants))
+			for k, v := range g.Variants {
+				vID, _ := uuid.Parse(v.ID)
+				isPopular := v.IsPopular
+				apiVariants[k] = ServiceVariant{
+					Id:                  vID,
+					Name:                v.Name,
+					Description:         v.Description,
+					DurationMinutes:     v.DurationMinutes,
+					PricePaise:          v.PricePaise,
+					AllowWalkIn:         v.AllowWalkIn,
+					AllowAppointment:    v.AllowAppointment,
+					RequiresAppointment: v.RequiresAppointment,
+					IsPopular:           &isPopular,
+				}
+			}
+			apiGroups[j] = ServiceGroup{
+				Id:          gID,
+				Name:        g.Name,
+				Description: g.Description,
+				Variants:    apiVariants,
+			}
+		}
+		sortOrder := c.SortOrder
+		apiCategories[i] = ServiceCategory{
+			Id:        cID,
+			Name:      c.Name,
+			Gender:    ServiceCategoryGender(c.Gender),
+			SortOrder: &sortOrder,
+			Groups:    apiGroups,
+		}
+	}
+
+	respondJSON(w, http.StatusOK, ServiceCatalog{
+		LocationId:  locationId,
+		DisplayMode: ServiceCatalogDisplayMode(location.ServiceDisplayMode),
+		Categories:  apiCategories,
 	})
 }
 

@@ -38,9 +38,21 @@ export const load: PageServerLoad = async (event) => {
 
 	const isFirstTime = !catalog.categories || catalog.categories.length === 0;
 
+	let tenantSlug = '';
+	let locationSlug = '';
+	try {
+		const shopStatus = await client.get<any>('/v1/staff/shop/status');
+		tenantSlug = shopStatus?.tenant_slug ?? '';
+		locationSlug = shopStatus?.location_slug ?? '';
+	} catch {
+		// slugs unavailable — share card stays hidden
+	}
+
 	return {
 		catalog,
 		locationId,
-		isFirstTime
+		isFirstTime,
+		tenantSlug,
+		locationSlug
 	};
 };

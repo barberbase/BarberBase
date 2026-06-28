@@ -2232,10 +2232,22 @@ func (s *Server) GetStaffShopStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	loc, err := repository.GetLocationWithTenantSlug(ctx, s.Pool, locationIDStr)
+	if err != nil || loc == nil {
+		log.Printf("[Error] GetStaffShopStatus: slug lookup failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "failed to fetch location slugs",
+		})
+		return
+	}
+
 	resp := map[string]interface{}{
 		"shop_status":            staffStatus.ShopStatus,
 		"queue_session_status":   staffStatus.QueueSessionStatus,
 		"manual_override_active": staffStatus.ManualOverrideActive,
+		"tenant_slug":            loc.TenantSlug,
+		"location_slug":          loc.Slug,
 	}
 	if staffStatus.OverrideExpiresAt != nil {
 		resp["override_expires_at"] = staffStatus.OverrideExpiresAt.Format(time.RFC3339)
