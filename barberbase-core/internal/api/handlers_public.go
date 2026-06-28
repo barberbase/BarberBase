@@ -921,15 +921,14 @@ func (s *Server) ResolveBookingOptions(w http.ResponseWriter, r *http.Request, l
 	}
 
 	shopStatus := computeShopStatus(override, hours, now)
+	// isOpenToday derives from the effective status (override > hours) so that a
+	// manual "open" override on a no-hours Phase 1 shop still allows walk_in.
+	isOpenToday := shopStatus == "open" || shopStatus == "closing_soon"
 	var closesAt *time.Time
-	isOpenToday := false
-	if hours != nil {
-		isOpenToday = hours.IsOpen
-		if hours.ClosesAt != nil {
-			ca := *hours.ClosesAt
-			caDate := time.Date(now.Year(), now.Month(), now.Day(), ca.Hour(), ca.Minute(), ca.Second(), 0, tz)
-			closesAt = &caDate
-		}
+	if hours != nil && hours.ClosesAt != nil {
+		ca := *hours.ClosesAt
+		caDate := time.Date(now.Year(), now.Month(), now.Day(), ca.Hour(), ca.Minute(), ca.Second(), 0, tz)
+		closesAt = &caDate
 	}
 
 	res := queue.ResolveBookingOptions(queue.BookingResolverInput{
@@ -1049,15 +1048,14 @@ func (s *Server) CreateCheckinIntent(w http.ResponseWriter, r *http.Request, loc
 	}
 
 	shopStatus := computeShopStatus(override, hours, now)
+	// isOpenToday derives from the effective status (override > hours) so that a
+	// manual "open" override on a no-hours Phase 1 shop still allows walk_in.
+	isOpenToday := shopStatus == "open" || shopStatus == "closing_soon"
 	var closesAt *time.Time
-	isOpenToday := false
-	if hours != nil {
-		isOpenToday = hours.IsOpen
-		if hours.ClosesAt != nil {
-			ca := *hours.ClosesAt
-			caDate := time.Date(now.Year(), now.Month(), now.Day(), ca.Hour(), ca.Minute(), ca.Second(), 0, tz)
-			closesAt = &caDate
-		}
+	if hours != nil && hours.ClosesAt != nil {
+		ca := *hours.ClosesAt
+		caDate := time.Date(now.Year(), now.Month(), now.Day(), ca.Hour(), ca.Minute(), ca.Second(), 0, tz)
+		closesAt = &caDate
 	}
 
 	res := queue.ResolveBookingOptions(queue.BookingResolverInput{
