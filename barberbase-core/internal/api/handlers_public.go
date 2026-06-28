@@ -1142,8 +1142,7 @@ func (s *Server) CreateCheckinIntent(w http.ResponseWriter, r *http.Request, loc
 		fromPhone = *location.BusinessWhatsAppNumber
 	}
 
-	tenantSlugUpper := strings.ToUpper(location.TenantSlug)
-	text := "JOIN " + tenantSlugUpper + " " + tokenCode
+	text := "JOIN " + location.Slug + " " + tokenCode
 	deepLink := "https://wa.me/" + fromPhone + "?text=" + url.QueryEscape(text)
 
 	respondJSON(w, http.StatusCreated, map[string]interface{}{

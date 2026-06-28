@@ -80,6 +80,7 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			log.Printf("[JOIN] token_code '%s' not found (from '%s', slug '%s')", msg.TokenCode, msg.SenderPhone, msg.SlugFromBody)
 			return "Link expired or invalid", nil
 		}
 		return "", fmt.Errorf("failed to load checkin intent: %w", err)
@@ -94,14 +95,17 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 
 	// Step 3 — Expiry check
 	if !expiresAt.After(time.Now()) {
+		log.Printf("[JOIN] token_code '%s' expired at %s (from '%s')", msg.TokenCode, expiresAt.Format(time.RFC3339), msg.SenderPhone)
 		return "Link expired or invalid", nil
 	}
 
 	// Step 4 — Shop status gate
 	if shopStatusAtCreation != "open" && shopStatusAtCreation != "closing_soon" {
+		log.Printf("[JOIN] token_code '%s' blocked: shop_status_at_creation='%s' for location '%s'", msg.TokenCode, shopStatusAtCreation, locationSlug)
 		return "This shop isn't accepting new walk-ins right now", nil
 	}
 	if !locationIsActive {
+		log.Printf("[JOIN] token_code '%s' blocked: location '%s' is inactive", msg.TokenCode, locationSlug)
 		return "This shop isn't available", nil
 	}
 

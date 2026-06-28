@@ -20,6 +20,7 @@ import (
 	"barberbase-core/internal/outbox"
 	"barberbase-core/internal/realtime"
 	"barberbase-core/internal/repository"
+	"barberbase-core/internal/webhook"
 	bbMiddleware "barberbase-core/pkg/middleware"
 
 	"github.com/go-chi/chi/v5"
@@ -27,7 +28,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// Server is declared in package api.
+// webhookBroadcaster adapts realtime.Manager to the webhook.SSEBroadcaster interface.
+type webhookBroadcaster struct{ m *realtime.Manager }
+
+func (b webhookBroadcaster) Broadcast(locationID uuid.UUID, queueVersion int) {
+	b.m.Broadcast(locationID.String(), realtime.SSEEvent{
+		Type:         "queue_changed",
+		LocationID:   locationID.String(),
+		QueueVersion: queueVersion,
+	})
+}
 
 func main() {
 	log.Println("Starting BarberBase API Server...")
@@ -85,9 +95,10 @@ func main() {
 	// 5. Register oapi-codegen generated handler
 	bhejnaClient := bhejna.NewClient(pool, cfg.AESEncryptionKey, cfg.BhejnaAPIKey, cfg.BhejnaFromPhone)
 	go outbox.NewWorker(pool, bhejnaClient).Run(ctx)
-	
+
 	mgr := realtime.NewManager()
 	mgr.StartHeartbeats(ctx)
+	go webhook.NewProcessor(pool, webhookBroadcaster{m: mgr}).Run(ctx)
 
 	watchdog := jobs.NewWatchdog(pool, mgr, cfg)
 	eod      := jobs.NewEndOfDay(pool, mgr, cfg)
