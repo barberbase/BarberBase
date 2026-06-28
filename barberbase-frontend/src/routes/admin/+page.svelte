@@ -7,10 +7,10 @@
 	let wizardDone = $state(false);
 
 	let linkCopied = $state(false);
+	// locationSlug is the compound slug (e.g. "star-salon/bhayander") per contract in
+	// 09_notifications_templates.md — URL = domain + compound, no tenantSlug prepend.
 	const publicUrl = $derived(
-		data.tenantSlug && data.locationSlug
-			? `https://barberbase.in/${data.tenantSlug}/${data.locationSlug}`
-			: ''
+		data.locationSlug ? `https://barberbase.in/${data.locationSlug}` : ''
 	);
 	function copyPublicUrl() {
 		navigator.clipboard.writeText(publicUrl);
