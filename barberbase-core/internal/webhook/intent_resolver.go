@@ -48,6 +48,7 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 		intentID             uuid.UUID
 		tenantID             uuid.UUID
 		locationID           uuid.UUID
+		intentStatus         string
 		expiresAt            time.Time
 		shopStatusAtCreation string
 		variantIDsJSON       []byte
@@ -61,29 +62,46 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 		businessPhone        *string
 	)
 
+	// No status filter in SQL — check in Go so expired/resolved give distinct log lines.
 	queryIntent := `
-		SELECT ci.id, ci.tenant_id, ci.location_id, ci.expires_at,
+		SELECT ci.id, ci.tenant_id, ci.location_id, ci.status, ci.expires_at,
 		       ci.shop_status_at_creation, ci.variant_ids, ci.party_size, ci.customer_name,
 		       l.slug, l.name AS location_name, l.timezone, l.is_active,
 		       l.whatsapp_mode, l.business_whatsapp_number
 		FROM checkin_intents ci
 		JOIN locations l ON l.id = ci.location_id
 		WHERE ci.token_code = $1
-		  AND ci.status = 'created'
 		LIMIT 1
 	`
 	err := r.pool.QueryRow(ctx, queryIntent, msg.TokenCode).Scan(
-		&intentID, &tenantID, &locationID, &expiresAt,
+		&intentID, &tenantID, &locationID, &intentStatus, &expiresAt,
 		&shopStatusAtCreation, &variantIDsJSON, &partySize, &customerName,
 		&locationSlug, &locationName, &timezone, &locationIsActive,
 		&whatsappMode, &businessPhone,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			log.Printf("[JOIN] token_code '%s' not found (from '%s', slug '%s')", msg.TokenCode, msg.SenderPhone, msg.SlugFromBody)
+			log.Printf("[JOIN] token_code '%s' truly absent from DB (from '%s', slug '%s')", msg.TokenCode, msg.SenderPhone, msg.SlugFromBody)
 			return "Link expired or invalid", nil
 		}
 		return "", fmt.Errorf("failed to load checkin intent: %w", err)
+	}
+
+	// Status gate — checked in Go so each outcome has its own log line.
+	switch intentStatus {
+	case "resolved":
+		// Bhejna redelivered a message whose intent was already consumed. Silent
+		// success: the queue_entry already exists, the customer is already in.
+		log.Printf("[JOIN] token_code '%s' already resolved (duplicate Bhejna delivery) for location '%s'", msg.TokenCode, locationSlug)
+		return "", nil
+	case "expired", "rejected":
+		log.Printf("[JOIN] token_code '%s' status=%s for location '%s'", msg.TokenCode, intentStatus, locationSlug)
+		return "This link has already been used or has expired. Please scan the QR code again.", nil
+	case "created":
+		// fall through
+	default:
+		log.Printf("[JOIN] token_code '%s' unexpected status='%s' for location '%s'", msg.TokenCode, intentStatus, locationSlug)
+		return "Link expired or invalid", nil
 	}
 
 	// Step 2 — Slug validation (optional, non-fatal)
