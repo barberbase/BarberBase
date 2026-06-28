@@ -245,6 +245,7 @@ func GetEffectiveShopStatus(ctx context.Context, db *pgxpool.Pool, tenantID, loc
 		WHERE tenant_id = $1
 		  AND location_id = $2
 		  AND cleared_at IS NULL
+		  AND starts_at <= NOW()
 		  AND (expires_at IS NULL OR expires_at > NOW())
 		ORDER BY starts_at DESC
 		LIMIT 1
@@ -254,7 +255,7 @@ func GetEffectiveShopStatus(ctx context.Context, db *pgxpool.Pool, tenantID, loc
 	err := row.Scan(&o.Status, &o.ExpiresAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return ShopStatusResult{Status: "open", ManualOverrideActive: false}, nil
+			return ShopStatusResult{Status: "closed", ManualOverrideActive: false}, nil
 		}
 		return ShopStatusResult{}, err
 	}
@@ -371,26 +372,43 @@ func SetShopStatus(ctx context.Context, db *pgxpool.Pool, params SetShopStatusPa
 			}
 		}
 
-		if params.Status == "open" {
-			clearQuery := `
-				UPDATE location_status_overrides
-				SET cleared_at = NOW()
-				WHERE tenant_id = $1 AND location_id = $2 AND cleared_at IS NULL
-			`
-			_, err = tx.Exec(ctx, clearQuery, params.TenantID, params.LocationID)
-			if err != nil {
+		// Open with no explicit expiry gets a midnight ceiling so a forgotten tap
+		// doesn't show "open" all night. EOD doesn't touch overrides and doesn't
+		// run for no-hours tenants, so this is the only backstop in Phase 1.
+		if params.Status == "open" && params.ExpiresAt == nil {
+			var tz string
+			if err = tx.QueryRow(ctx, "SELECT timezone FROM locations WHERE id = $1", params.LocationID).Scan(&tz); err != nil {
 				return err
 			}
-		} else {
-			insertQuery := `
-				INSERT INTO location_status_overrides
-					(tenant_id, location_id, status, reason, set_by, starts_at, expires_at)
-				VALUES ($1, $2, $3, $4, $5, NOW(), $6)
-			`
-			_, err = tx.Exec(ctx, insertQuery, params.TenantID, params.LocationID, params.Status, params.Reason, params.SetBy, params.ExpiresAt)
-			if err != nil {
-				return err
+			loc, _ := time.LoadLocation(tz)
+			if loc == nil {
+				loc = time.UTC
 			}
+			now := time.Now().In(loc)
+			midnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, loc)
+			params.ExpiresAt = &midnight
+		}
+
+		// Always clear stale overrides first, then write the new state.
+		// "open" is also written as an explicit override so the public endpoint
+		// (override > hours) has something to read without requiring location_hours.
+		clearQuery := `
+			UPDATE location_status_overrides
+			SET cleared_at = NOW()
+			WHERE tenant_id = $1 AND location_id = $2 AND cleared_at IS NULL
+		`
+		_, err = tx.Exec(ctx, clearQuery, params.TenantID, params.LocationID)
+		if err != nil {
+			return err
+		}
+		insertQuery := `
+			INSERT INTO location_status_overrides
+				(tenant_id, location_id, status, reason, set_by, starts_at, expires_at)
+			VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+		`
+		_, err = tx.Exec(ctx, insertQuery, params.TenantID, params.LocationID, params.Status, params.Reason, params.SetBy, params.ExpiresAt)
+		if err != nil {
+			return err
 		}
 
 		if sessionExists {

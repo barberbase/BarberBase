@@ -60,7 +60,7 @@ type locationEODInfo struct {
 	LocationID uuid.UUID
 	TenantID   uuid.UUID
 	Timezone   string
-	ClosesAt   time.Time
+	ClosesAt   *time.Time // nil for manual-override-only locations (no location_hours row)
 	SessionID  uuid.UUID
 }
 
@@ -71,14 +71,14 @@ func (e *EndOfDay) runJob(ctx context.Context) {
 		  lh.closes_at,
 		  qs.id AS session_id
 		FROM locations l
-		JOIN location_hours lh ON lh.location_id = l.id
+		LEFT JOIN location_hours lh ON lh.location_id = l.id
 		  AND lh.day_of_week = EXTRACT(DOW FROM (NOW() AT TIME ZONE l.timezone))::SMALLINT
+		  AND lh.is_open = true
+		  AND lh.closes_at IS NOT NULL
 		JOIN queue_sessions qs ON qs.location_id = l.id
 		  AND qs.business_date = (NOW() AT TIME ZONE l.timezone)::DATE
 		  AND qs.status NOT IN ('archived', 'closed')
 		WHERE l.is_active = true
-		  AND lh.is_open = true
-		  AND lh.closes_at IS NOT NULL
 	`)
 	if err != nil {
 		log.Printf("EOD: failed to query locations for EOD: %v", err)
@@ -104,10 +104,13 @@ func (e *EndOfDay) runJob(ctx context.Context) {
 			loc = time.Local
 		}
 		now := time.Now().In(loc)
-		closingTime := time.Date(
-			now.Year(), now.Month(), now.Day(),
-			row.ClosesAt.Hour(), row.ClosesAt.Minute(), 0, 0, loc,
-		)
+		var closingTime time.Time
+		if row.ClosesAt != nil {
+			closingTime = time.Date(now.Year(), now.Month(), now.Day(), row.ClosesAt.Hour(), row.ClosesAt.Minute(), 0, 0, loc)
+		} else {
+			// ponytail: midnight ceiling for manual-override-only locations; upgrade when location_hours are seeded
+			closingTime = time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, loc)
+		}
 		eodTrigger := closingTime.Add(2 * time.Hour)
 		if time.Now().Before(eodTrigger) {
 			continue // not yet time
