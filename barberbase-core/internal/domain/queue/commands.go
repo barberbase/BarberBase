@@ -234,7 +234,7 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 	// ── STEP 1: UPSERT + LOCK QUEUE SESSION (Law 1) ──
 	_, err = tx.Exec(ctx, `
 		INSERT INTO queue_sessions (tenant_id, location_id, business_date, status, queue_version, last_token_number)
-		VALUES ($1, $2, CURRENT_DATE, 'active', 0, 0)
+		VALUES ($1, $2, (SELECT (NOW() AT TIME ZONE timezone)::DATE FROM locations WHERE id = $2), 'active', 0, 0)
 		ON CONFLICT (location_id, business_date) DO NOTHING`, params.TenantID, params.LocationID)
 	if err != nil {
 		return nil, fmt.Errorf("upsert queue session: %w", err)
@@ -247,7 +247,8 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 	err = tx.QueryRow(ctx, `
 		SELECT id, last_token_number, queue_version, status
 		FROM queue_sessions
-		WHERE location_id = $1 AND business_date = CURRENT_DATE
+		WHERE location_id = $1
+		  AND business_date = (SELECT (NOW() AT TIME ZONE timezone)::DATE FROM locations WHERE id = $1)
 		FOR UPDATE`, params.LocationID).Scan(&sessionID, &lastTokenNumber, &queueVersion, &sessionStatus)
 	if err != nil {
 		return nil, fmt.Errorf("lock queue session: %w", err)

@@ -236,8 +236,9 @@ func (s *Server) PushCallNext(w http.ResponseWriter, r *http.Request) {
 		SELECT COUNT(*) AS waiting_arrived_count
 		FROM queue_entries qe
 		JOIN queue_sessions qs ON qs.id = qe.queue_session_id
+		JOIN locations l ON l.id = qs.location_id
 		WHERE qs.location_id = $1
-		  AND qs.business_date = CURRENT_DATE
+		  AND qs.business_date = (NOW() AT TIME ZONE l.timezone)::DATE
 		  AND qe.state = 'waiting'
 		  AND qe.is_dispatchable = true
 		  AND qe.presence_state = 'arrived'`,

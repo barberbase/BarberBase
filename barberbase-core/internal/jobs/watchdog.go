@@ -93,7 +93,7 @@ func (w *Watchdog) runJob(ctx context.Context) {
 		       l.name AS location_name
 		FROM queue_sessions qs
 		JOIN locations l ON l.id = qs.location_id
-		WHERE qs.business_date = CURRENT_DATE
+		WHERE qs.business_date = (NOW() AT TIME ZONE l.timezone)::DATE
 		  AND qs.status IN ('active', 'ending')
 		  AND l.is_active = true
 	`)

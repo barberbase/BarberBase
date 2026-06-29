@@ -1849,12 +1849,13 @@ func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {
 	var sessionStatus string
 
 	err = s.Pool.QueryRow(ctx, `
-		SELECT id, queue_version, business_date, status
-		FROM queue_sessions
-		WHERE location_id = $1
-		  AND tenant_id = $2
-		  AND business_date = CURRENT_DATE
-		  AND status <> 'archived'`, locationID, tenantID).Scan(&sessionID, &queueVersion, &businessDate, &sessionStatus)
+		SELECT qs.id, qs.queue_version, qs.business_date, qs.status
+		FROM queue_sessions qs
+		JOIN locations l ON l.id = qs.location_id
+		WHERE qs.location_id = $1
+		  AND qs.tenant_id = $2
+		  AND qs.business_date = (NOW() AT TIME ZONE l.timezone)::DATE
+		  AND qs.status <> 'archived'`, locationID, tenantID).Scan(&sessionID, &queueVersion, &businessDate, &sessionStatus)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
