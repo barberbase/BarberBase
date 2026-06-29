@@ -119,6 +119,7 @@ type JoinQueueParams struct {
 	InitiatedVia      string // 'whatsapp'|'web_form'|'staff_dashboard'|'ai_agent'
 	MaxQueueSize      int    // resolved from locations before calling
 	HMACSecret        []byte
+	BhejnaFromPhone   string
 }
 
 type JoinQueueResult struct {
@@ -552,15 +553,66 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 	}
 
 	// ── STEP 10: INSERT OUTBOX EVENT (Law 7 — inside tx) ──
+	// Fetch location info here — also used in step 11 for the idempotency response.
+	var locationName, waMode, bizPhone string
+	err = tx.QueryRow(ctx, `
+		SELECT name, whatsapp_mode, COALESCE(business_whatsapp_number, '')
+		FROM locations WHERE id = $1`, params.LocationID).Scan(&locationName, &waMode, &bizPhone)
+	if err != nil {
+		return nil, fmt.Errorf("query location name for idempotency: %w", err)
+	}
+
 	var whatsAppSent bool
 	if params.PhoneNumber != nil && *params.PhoneNumber != "" && customerID != nil {
+		fromPhone := params.BhejnaFromPhone
+		if waMode == "own_number" && bizPhone != "" {
+			fromPhone = bizPhone
+		}
+
+		var totalActive int
+		_ = tx.QueryRow(ctx, `
+			SELECT COUNT(*) FROM queue_entries
+			WHERE queue_session_id = $1 AND state IN ('waiting','called','in_progress')`,
+			sessionID).Scan(&totalActive)
+		peopleAhead := totalActive - 1
+		if peopleAhead < 0 {
+			peopleAhead = 0
+		}
+		estWait := peopleAhead * totalDurationMinutes
+
 		payloadMap := map[string]interface{}{
-			"template_id":    "bb_queue_joined",
-			"visit_id":        visitID.String(),
-			"location_id":     params.LocationID.String(),
-			"queue_entry_id":  entryID.String(),
-			"token_number":    tokenNumber,
-			"customer_id":     customerID.String(),
+			"template_code":       "bb_queue_joined",
+			"to":                  *params.PhoneNumber,
+			"from_business_phone": fromPhone,
+			"location_id":         params.LocationID.String(),
+			"notification_type":   "queue_joined",
+			"components": []interface{}{
+				map[string]interface{}{
+					"type": "body",
+					"parameters": []interface{}{
+						map[string]interface{}{"type": "text", "text": locationName},
+						map[string]interface{}{"type": "text", "text": strconv.Itoa(tokenNumber)},
+						map[string]interface{}{"type": "text", "text": strconv.Itoa(peopleAhead)},
+						map[string]interface{}{"type": "text", "text": strconv.Itoa(estWait)},
+					},
+				},
+				map[string]interface{}{
+					"type":     "button",
+					"sub_type": "url",
+					"index":    0,
+					"parameters": []interface{}{
+						map[string]interface{}{"type": "text", "text": magicLinkToken},
+					},
+				},
+				map[string]interface{}{
+					"type":     "button",
+					"sub_type": "quick_reply",
+					"index":    1,
+					"parameters": []interface{}{
+						map[string]interface{}{"type": "payload", "payload": "CANCEL:" + entryID.String()},
+					},
+				},
+			},
 		}
 		payloadBytes, errMarshal := json.Marshal(payloadMap)
 		if errMarshal != nil {
@@ -580,11 +632,6 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 	}
 
 	// ── STEP 11: UPDATE IDEMPOTENCY KEY ──
-	var locationName string
-	err = tx.QueryRow(ctx, `SELECT name FROM locations WHERE id = $1`, params.LocationID).Scan(&locationName)
-	if err != nil {
-		return nil, fmt.Errorf("query location name for idempotency: %w", err)
-	}
 
 	localServices := make([]localServiceJSON, len(params.VariantIDs))
 	for i, id := range params.VariantIDs {
@@ -649,9 +696,11 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 }
 
 type CallNextParams struct {
-	TenantID      uuid.UUID
-	LocationID    uuid.UUID
-	StaffMemberID uuid.UUID
+	TenantID        uuid.UUID
+	LocationID      uuid.UUID
+	StaffMemberID   uuid.UUID
+	BhejnaFromPhone string
+	HMACSecret      []byte
 }
 
 type CallNextOutput struct {
@@ -686,9 +735,11 @@ func CallNext(ctx context.Context, pool *pgxpool.Pool, params CallNextParams) (C
 	var entryID uuid.UUID
 	var newQueueVersion int
 	repoParams := repository.CallNextParams{
-		TenantID:      params.TenantID,
-		LocationID:    params.LocationID,
-		StaffMemberID: params.StaffMemberID,
+		TenantID:        params.TenantID,
+		LocationID:      params.LocationID,
+		StaffMemberID:   params.StaffMemberID,
+		BhejnaFromPhone: params.BhejnaFromPhone,
+		HMACSecret:      params.HMACSecret,
 	}
 
 	errTx := repository.WithTx(ctx, pool, func(tx pgx.Tx) error {

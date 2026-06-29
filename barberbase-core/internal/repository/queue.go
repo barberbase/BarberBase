@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -174,9 +175,11 @@ type QueueEntryStaffRow struct {
 }
 
 type CallNextParams struct {
-	TenantID      uuid.UUID
-	LocationID    uuid.UUID
-	StaffMemberID uuid.UUID
+	TenantID        uuid.UUID
+	LocationID      uuid.UUID
+	StaffMemberID   uuid.UUID
+	BhejnaFromPhone string
+	HMACSecret      []byte
 }
 
 type ErrRepoNoDispatchable struct {
@@ -215,11 +218,12 @@ func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMo
 	var selectErr error
 	var customerID *uuid.UUID
 	var sessionChannel string
+	var tokenNumber int
 
 	switch routingMode {
 	case "pooled":
 		const q = `
-			SELECT id, visit_id, customer_id, session_channel
+			SELECT id, visit_id, customer_id, session_channel, token_number
 			FROM queue_entries
 			WHERE queue_session_id = $1
 			  AND state = 'waiting'
@@ -228,10 +232,10 @@ func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMo
 			ORDER BY priority_group ASC, sort_key ASC, token_number ASC
 			LIMIT 1
 			FOR UPDATE`
-		selectErr = tx.QueryRow(ctx, q, sessionID).Scan(&entryID, &visitID, &customerID, &sessionChannel)
+		selectErr = tx.QueryRow(ctx, q, sessionID).Scan(&entryID, &visitID, &customerID, &sessionChannel, &tokenNumber)
 	case "hybrid":
 		const q = `
-			SELECT id, visit_id, customer_id, session_channel
+			SELECT id, visit_id, customer_id, session_channel, token_number
 			FROM queue_entries
 			WHERE queue_session_id = $1
 			  AND state = 'waiting'
@@ -241,10 +245,10 @@ func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMo
 			ORDER BY priority_group ASC, sort_key ASC, token_number ASC
 			LIMIT 1
 			FOR UPDATE`
-		selectErr = tx.QueryRow(ctx, q, sessionID, params.StaffMemberID).Scan(&entryID, &visitID, &customerID, &sessionChannel)
+		selectErr = tx.QueryRow(ctx, q, sessionID, params.StaffMemberID).Scan(&entryID, &visitID, &customerID, &sessionChannel, &tokenNumber)
 	case "barber_specific":
 		const q = `
-			SELECT id, visit_id, customer_id, session_channel
+			SELECT id, visit_id, customer_id, session_channel, token_number
 			FROM queue_entries
 			WHERE queue_session_id = $1
 			  AND state = 'waiting'
@@ -254,7 +258,7 @@ func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMo
 			ORDER BY priority_group ASC, sort_key ASC, token_number ASC
 			LIMIT 1
 			FOR UPDATE`
-		selectErr = tx.QueryRow(ctx, q, sessionID, params.StaffMemberID).Scan(&entryID, &visitID, &customerID, &sessionChannel)
+		selectErr = tx.QueryRow(ctx, q, sessionID, params.StaffMemberID).Scan(&entryID, &visitID, &customerID, &sessionChannel, &tokenNumber)
 	default:
 		return uuid.Nil, uuid.Nil, uuid.Nil, 0, fmt.Errorf("invalid routing mode: %s", routingMode)
 	}
@@ -316,30 +320,60 @@ func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMo
 		return uuid.Nil, uuid.Nil, uuid.Nil, 0, fmt.Errorf("update staff status: %w", err)
 	}
 
-	// Step 9: [Law 7] Insert outbox event
-	payloadMap := map[string]any{
-		"template_key":    "bb_you_are_next",
-		"queue_entry_id":  entryID.String(),
-		"visit_id":        visitID.String(),
-		"tenant_id":       params.TenantID.String(),
-		"location_id":     params.LocationID.String(),
-		"session_channel": sessionChannel,
-	}
-	if customerID != nil {
-		payloadMap["customer_id"] = customerID.String()
-	}
+	// Step 9: [Law 7] Insert outbox event — fully-formed payload for WhatsApp customers only
+	if sessionChannel == "whatsapp" && customerID != nil {
+		var customerPhone, mlToken, locName, waMode, bizPhone string
+		notifErr := tx.QueryRow(ctx, `
+			SELECT c.phone_number,
+			       COALESCE(v.magic_link_token_hash, ''),
+			       l.name,
+			       l.whatsapp_mode,
+			       COALESCE(l.business_whatsapp_number, '')
+			FROM visits v
+			JOIN customers c ON c.id = v.customer_id
+			JOIN locations l ON l.id = $3
+			WHERE v.id = $1 AND c.id = $2`,
+			visitID, *customerID, params.LocationID,
+		).Scan(&customerPhone, &mlToken, &locName, &waMode, &bizPhone)
 
-	payloadBytes, err := json.Marshal(payloadMap)
-	if err != nil {
-		return uuid.Nil, uuid.Nil, uuid.Nil, 0, fmt.Errorf("marshal outbox payload: %w", err)
-	}
-
-	const insertOutbox = `
-		INSERT INTO outbox_events (tenant_id, type, payload, process_after)
-		VALUES ($1, 'notification.send', $2, NOW())`
-	_, err = tx.Exec(ctx, insertOutbox, params.TenantID, payloadBytes)
-	if err != nil {
-		return uuid.Nil, uuid.Nil, uuid.Nil, 0, fmt.Errorf("insert outbox event: %w", err)
+		if notifErr == nil && customerPhone != "" && mlToken != "" {
+			fromPhone := params.BhejnaFromPhone
+			if waMode == "own_number" && bizPhone != "" {
+				fromPhone = bizPhone
+			}
+			outboxPayload := map[string]any{
+				"template_code":       "bb_you_are_next",
+				"to":                  customerPhone,
+				"from_business_phone": fromPhone,
+				"location_id":         params.LocationID.String(),
+				"notification_type":   "you_are_next",
+				"components": []any{
+					map[string]any{
+						"type": "body",
+						"parameters": []any{
+							map[string]any{"type": "text", "text": locName},
+							map[string]any{"type": "text", "text": strconv.Itoa(tokenNumber)},
+						},
+					},
+					map[string]any{
+						"type":     "button",
+						"sub_type": "url",
+						"index":    0,
+						"parameters": []any{
+							map[string]any{"type": "text", "text": mlToken},
+						},
+					},
+				},
+			}
+			payloadBytes, _ := json.Marshal(outboxPayload)
+			_, err = tx.Exec(ctx, `
+				INSERT INTO outbox_events (tenant_id, type, payload, process_after)
+				VALUES ($1, 'notification.send', $2, NOW())`,
+				params.TenantID, payloadBytes)
+			if err != nil {
+				return uuid.Nil, uuid.Nil, uuid.Nil, 0, fmt.Errorf("insert outbox event: %w", err)
+			}
+		}
 	}
 
 	// Step 10: Increment queue_version

@@ -169,6 +169,7 @@ func (s *Server) JoinQueue(w http.ResponseWriter, r *http.Request) {
 			InitiatedVia:      string(req.InitiatedVia),
 			MaxQueueSize:      maxTotalQueueSize,
 			HMACSecret:        []byte(s.Config.HMACSecret),
+			BhejnaFromPhone:   s.Config.BhejnaFromPhone,
 		})
 		return err
 	})

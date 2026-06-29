@@ -784,6 +784,7 @@ func (s *Server) AddWalkIn(w http.ResponseWriter, r *http.Request) {
 			InitiatedVia:      "staff_dashboard",
 			MaxQueueSize:      maxQueueSize,
 			HMACSecret:        []byte(s.Config.HMACSecret),
+			BhejnaFromPhone:   s.Config.BhejnaFromPhone,
 		})
 		return err
 	})
@@ -885,9 +886,11 @@ func (s *Server) CallNextCustomer(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Call queue.CallNext
 	output, err := queue.CallNext(ctx, s.Pool, queue.CallNextParams{
-		TenantID:      tenantID,
-		LocationID:    locationID,
-		StaffMemberID: staffMemberID,
+		TenantID:        tenantID,
+		LocationID:      locationID,
+		StaffMemberID:   staffMemberID,
+		BhejnaFromPhone: s.Config.BhejnaFromPhone,
+		HMACSecret:      []byte(s.Config.HMACSecret),
 	})
 
 	// 3. Switch on error
