@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -349,9 +348,9 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 		return "", fmt.Errorf("failed to update checkin intent: %w", err)
 	}
 
-	// 6i — Generate magic link token
+	// 6i — Generate magic link token (stored directly as hash — matches commands.go pattern)
 	expiresML := time.Now().Add(23 * time.Hour) // Law 13: hardcoded 23h
-	tokenStr, tokenHash := generateMagicLinkToken(customerID, locationID, visitID, expiresML, r.hmacSecret)
+	tokenStr := generateMagicLinkToken(customerID, locationID, visitID, expiresML, r.hmacSecret)
 
 	queryUpdateVisitML := `
 		UPDATE visits
@@ -359,7 +358,7 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 		    magic_link_expires_at = $2
 		WHERE id = $3
 	`
-	_, err = tx.Exec(ctx, queryUpdateVisitML, tokenHash, expiresML, visitID)
+	_, err = tx.Exec(ctx, queryUpdateVisitML, tokenStr, expiresML, visitID)
 	if err != nil {
 		return "", fmt.Errorf("failed to update magic link on visit: %w", err)
 	}
@@ -445,20 +444,13 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 	return "", nil
 }
 
-func generateMagicLinkToken(customerID, locationID, visitID uuid.UUID, expiresAt time.Time, hmacSecret []byte) (string, string) {
-	expiresUnix := strconv.FormatInt(expiresAt.Unix(), 10)
-	payload := customerID.String() + ":" + locationID.String() + ":" + visitID.String() + ":" + expiresUnix
-
-	h := hmac.New(sha256.New, hmacSecret)
-	h.Write([]byte(payload))
-	mac := h.Sum(nil)
-
-	token := base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + base64.RawURLEncoding.EncodeToString(mac)
-
-	hashBytes := sha256.Sum256([]byte(token))
-	tokenHash := hex.EncodeToString(hashBytes[:])
-
-	return token, tokenHash
+// generateMagicLinkToken matches commands.go format: HMAC of pipe-delimited payload, base64url-encoded.
+// The returned token is stored directly as magic_link_token_hash and passed as the button URL suffix.
+func generateMagicLinkToken(customerID, locationID, visitID uuid.UUID, expiresAt time.Time, hmacSecret []byte) string {
+	payload := customerID.String() + "|" + locationID.String() + "|" + visitID.String() + "|" + strconv.FormatInt(expiresAt.Unix(), 10)
+	mac := hmac.New(sha256.New, hmacSecret)
+	mac.Write([]byte(payload))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 // GenerateTokenCode returns a random 6-character uppercase alphanumeric code.

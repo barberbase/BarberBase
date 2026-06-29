@@ -175,13 +175,37 @@ func (fs *FeedbackScheduler) Handle(ctx context.Context, pool *pgxpool.Pool, eve
 		"customer_id":         &custIDStr,
 		"source_type":         "feedback_request",
 		"source_id":           feedbackRequestID.String(),
-		"components": []feedbackComponent{
-			{
+		"components": []interface{}{
+			feedbackComponent{
 				Type: "body",
 				Parameters: []feedbackComponentParam{
 					{Type: "text", Text: staffName},
 					{Type: "text", Text: shopName},
 					{Type: "text", Text: visitIDStr},
+				},
+			},
+			map[string]interface{}{
+				"type":     "button",
+				"sub_type": "quick_reply",
+				"index":    0,
+				"parameters": []interface{}{
+					map[string]interface{}{"type": "payload", "payload": "RATING:5:" + visitIDStr},
+				},
+			},
+			map[string]interface{}{
+				"type":     "button",
+				"sub_type": "quick_reply",
+				"index":    1,
+				"parameters": []interface{}{
+					map[string]interface{}{"type": "payload", "payload": "RATING:3:" + visitIDStr},
+				},
+			},
+			map[string]interface{}{
+				"type":     "button",
+				"sub_type": "quick_reply",
+				"index":    2,
+				"parameters": []interface{}{
+					map[string]interface{}{"type": "payload", "payload": "RATING:1:" + visitIDStr},
 				},
 			},
 		},

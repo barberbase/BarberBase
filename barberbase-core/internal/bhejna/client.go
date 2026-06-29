@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/aes"
+	"log"
 	"crypto/cipher"
 	"crypto/rand"
 	"database/sql"
@@ -193,6 +194,7 @@ func (c *bhejnaClient) sendHTTPRequest(ctx context.Context, apiKey string, paylo
 	}
 
 	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		log.Printf("Bhejna 4xx response body: %s", string(respBody))
 		var errorResp struct {
 			Success bool `json:"success"`
 			Error   struct {

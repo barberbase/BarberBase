@@ -249,6 +249,8 @@ func (w *Watchdog) triggerNearTurn(ctx context.Context, s session, cand candidat
 			"template_code":       "bb_near_turn",
 			"to":                  cand.CustomerPhone,
 			"from_business_phone": w.cfg.BhejnaFromPhone,
+			"location_id":         s.LocationID.String(),
+			"notification_type":   "near_turn",
 			"components": []interface{}{
 				map[string]interface{}{
 					"type": "body",
@@ -256,7 +258,14 @@ func (w *Watchdog) triggerNearTurn(ctx context.Context, s session, cand candidat
 						map[string]interface{}{"type": "text", "text": s.LocationName},
 						map[string]interface{}{"type": "text", "text": strconv.Itoa(cand.PeopleAhead)},
 						map[string]interface{}{"type": "text", "text": strconv.Itoa(cand.EstimatedWaitMinutes)},
-						map[string]interface{}{"type": "text", "text": cand.EntryID.String()},
+					},
+				},
+				map[string]interface{}{
+					"type":     "button",
+					"sub_type": "quick_reply",
+					"index":    0,
+					"parameters": []interface{}{
+						map[string]interface{}{"type": "payload", "payload": "ON_THE_WAY:" + cand.EntryID.String()},
 					},
 				},
 				map[string]interface{}{
@@ -395,6 +404,8 @@ func (w *Watchdog) triggerAutoSnooze(ctx context.Context, s session, top struct 
 				"template_code":       "bb_queue_snoozed",
 				"to":                  customerPhone,
 				"from_business_phone": w.cfg.BhejnaFromPhone,
+				"location_id":         s.LocationID.String(),
+				"notification_type":   "queue_snoozed",
 				"components": []interface{}{
 					map[string]interface{}{
 						"type": "body",
