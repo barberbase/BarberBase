@@ -382,19 +382,23 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 		return "", fmt.Errorf("failed to query queue position: %w", err)
 	}
 
-	estWaitMinutes := queuePosition * totalDuration
+	// queuePosition COUNT runs after the new entry is inserted, so subtract 1 for people_ahead.
+	peopleAhead := queuePosition - 1
+	estWaitMinutes := peopleAhead * totalDuration
 
 	outboxPayload := map[string]interface{}{
 		"template_code":       "bb_queue_joined",
 		"to":                  msg.SenderPhone, // empty string if masked
 		"from_business_phone": fromPhone,
+		"location_id":         locationID.String(), // required by handler for credential resolution
+		"notification_type":   "queue_joined",
 		"components": []interface{}{
 			map[string]interface{}{
 				"type": "body",
 				"parameters": []interface{}{
 					map[string]interface{}{"type": "text", "text": locationName},
 					map[string]interface{}{"type": "text", "text": strconv.Itoa(tokenNumber)},
-					map[string]interface{}{"type": "text", "text": strconv.Itoa(queuePosition)},
+					map[string]interface{}{"type": "text", "text": strconv.Itoa(peopleAhead)},
 					map[string]interface{}{"type": "text", "text": strconv.Itoa(estWaitMinutes)},
 				},
 			},
@@ -404,6 +408,14 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 				"index":    0,
 				"parameters": []interface{}{
 					map[string]interface{}{"type": "text", "text": tokenStr},
+				},
+			},
+			map[string]interface{}{
+				"type":     "button",
+				"sub_type": "quick_reply",
+				"index":    1,
+				"parameters": []interface{}{
+					map[string]interface{}{"type": "payload", "payload": "CANCEL:" + entryID.String()},
 				},
 			},
 		},
