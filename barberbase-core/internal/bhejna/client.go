@@ -43,15 +43,16 @@ type SendTemplateReq struct {
 }
 
 type TemplateComponent struct {
-	Type       string              // "body" | "button"
-	SubType    string              // buttons only: "url"
-	Index      int                 // buttons only: 0-based
-	Parameters []TemplateParameter
+	Type       string              `json:"type"`
+	SubType    string              `json:"sub_type,omitempty"`
+	Index      int                 `json:"index"`
+	Parameters []TemplateParameter `json:"parameters"`
 }
 
 type TemplateParameter struct {
-	Type string // "text"
-	Text string
+	Type    string `json:"type"`
+	Text    string `json:"text,omitempty"`
+	Payload string `json:"payload,omitempty"` // quick_reply buttons only
 }
 
 type SendResult struct {
@@ -255,10 +256,13 @@ func (c *bhejnaClient) SendTemplate(ctx context.Context, tenantID, locationID uu
 	for i, comp := range req.Components {
 		paramsPayload := make([]map[string]interface{}, len(comp.Parameters))
 		for j, param := range comp.Parameters {
-			paramsPayload[j] = map[string]interface{}{
-				"type": param.Type,
-				"text": param.Text,
+			p := map[string]interface{}{"type": param.Type}
+			if param.Type == "payload" {
+				p["payload"] = param.Payload
+			} else {
+				p["text"] = param.Text
 			}
+			paramsPayload[j] = p
 		}
 
 		compMap := map[string]interface{}{
