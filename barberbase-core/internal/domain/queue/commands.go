@@ -670,7 +670,7 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 			LocationName:         locationName,
 		},
 		MagicLinkToken: magicLinkToken,
-		MagicLinkURL:   "https://barbers.app/q/status?t=" + magicLinkToken,
+		MagicLinkURL:   "https://barberbase.in/q/status?t=" + magicLinkToken,
 		WhatsAppSent:   whatsAppSent,
 	}
 

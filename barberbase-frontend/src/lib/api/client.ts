@@ -1980,7 +1980,7 @@ export interface operations {
 						magic_link_token: string;
 						/**
 						 * Format: uri
-						 * @example https://barbers.app/q/status?t=eyJ...
+						 * @example https://barberbase.in/q/status?t=eyJ...
 						 */
 						magic_link_url?: string;
 						/** @description false if customer has no phone number (anonymous walk-in) */

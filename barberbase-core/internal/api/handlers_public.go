@@ -275,7 +275,7 @@ func (s *Server) JoinQueue(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{
 		"queue_entry":      publicEntry,
 		"magic_link_token": result.MagicLinkToken,
-		"magic_link_url":   "https://barbers.app/q/status?t=" + result.MagicLinkToken,
+		"magic_link_url":   "https://barberbase.in/q/status?t=" + result.MagicLinkToken,
 		"whatsapp_sent":    result.WhatsAppSent,
 	}
 

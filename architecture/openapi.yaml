@@ -17,7 +17,7 @@ info:
     All monetary values are in **paise** (1 INR = 100 paise). Never floats.
 
 servers:
-  - url: https://api.barbers.app/v1
+  - url: https://api.barberbase.in/v1
     description: Production
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1061,7 +1061,7 @@ paths:
                   magic_link_url:
                     type: string
                     format: uri
-                    example: "https://barbers.app/q/status?t=eyJ..."
+                    example: "https://barberbase.in/q/status?t=eyJ..."
                   whatsapp_sent:
                     type: boolean
                     description: false if customer has no phone number (anonymous walk-in)

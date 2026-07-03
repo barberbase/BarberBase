@@ -46,9 +46,19 @@ AI agent), customer identity resolution, shadow profiles, and tenant isolation r
 ### Magic Link Token
  
 ```
-token = HMAC-SHA256(customer_id:location_id:visit_id:expires_at, HMAC_SECRET)
-Base64url encoded. Expires 23 hours. Hard-coded.
+payload = "{customer_id}:{location_id}:{visit_id}:{unix_expires}"
+token   = base64url(payload) + "." + base64url(HMAC-SHA256(payload, HMAC_SECRET))
+Expires 23 hours. Hard-coded.
 ```
+ 
+Two base64url segments joined by "." — same shape as the PAT. The payload
+segment is load-bearing: SSE connect (`verifyCustomerSession`) validates it
+statelessly (4 colon fields, location match, expiry), and the `/q/status`
+frontend reads `location_id` from payload field 1 to open its SSE stream.
+Generation is deterministic (single source of truth:
+`queue.GenerateMagicLinkToken`), so watchdog re-sends reproduce the exact
+string stored on `visits.magic_link_token_hash` at join time —
+`/queue/my-status` resolves the session by DB lookup of that raw token.
  
 - For queue status page: scoped to `visit_id`
 - For appointment page: scoped to `appointment_id`
