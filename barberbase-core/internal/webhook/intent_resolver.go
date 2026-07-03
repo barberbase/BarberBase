@@ -2,10 +2,7 @@ package webhook
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,10 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"barberbase-core/internal/domain/queue"
+	"barberbase-core/internal/repository"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"barberbase-core/internal/repository"
 )
 
 type IntentResolver struct {
@@ -350,7 +348,7 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 
 	// 6i — Generate magic link token (stored directly as hash — matches commands.go pattern)
 	expiresML := time.Now().Add(23 * time.Hour) // Law 13: hardcoded 23h
-	tokenStr := generateMagicLinkToken(customerID, locationID, visitID, expiresML, r.hmacSecret)
+	tokenStr := queue.GenerateMagicLinkToken(customerID.String(), locationID.String(), visitID.String(), expiresML, r.hmacSecret)
 
 	queryUpdateVisitML := `
 		UPDATE visits
@@ -444,14 +442,7 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 	return "", nil
 }
 
-// generateMagicLinkToken matches commands.go format: HMAC of pipe-delimited payload, base64url-encoded.
 // The returned token is stored directly as magic_link_token_hash and passed as the button URL suffix.
-func generateMagicLinkToken(customerID, locationID, visitID uuid.UUID, expiresAt time.Time, hmacSecret []byte) string {
-	payload := customerID.String() + "|" + locationID.String() + "|" + visitID.String() + "|" + strconv.FormatInt(expiresAt.Unix(), 10)
-	mac := hmac.New(sha256.New, hmacSecret)
-	mac.Write([]byte(payload))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-}
 
 // GenerateTokenCode returns a random 6-character uppercase alphanumeric code.
 // Used by createCheckinIntent to populate checkin_intents.token_code.

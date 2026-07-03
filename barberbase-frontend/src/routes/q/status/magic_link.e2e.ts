@@ -4,8 +4,10 @@ import http from 'http';
 let server: http.Server;
 const mockPort = 9090;
 
-const testToken =
-	'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjdXN0b21lcl9pZCI6ImN1c3QtMTIzIiwibG9jYXRpb25faWQiOiJsb2MtMTIzIiwidmlzaXRfaWQiOiJ2aXNpdC0xMjMiLCJleHAiOjk5OTk5OTk5OTl9.dummy_signature';
+// Real magic link format (queue.GenerateMagicLinkToken): two base64url segments,
+// payload "customer_id:location_id:visit_id:unix_expires" + HMAC. Payload here is
+// "cust-123:loc-123:visit-123:9999999999"; signature is opaque to the frontend.
+const testToken = 'Y3VzdC0xMjM6bG9jLTEyMzp2aXNpdC0xMjM6OTk5OTk5OTk5OQ.dummy_signature';
 
 let mockEntry = {
 	id: 'visit-123',

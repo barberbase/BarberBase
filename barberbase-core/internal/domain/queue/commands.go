@@ -161,16 +161,24 @@ type localServiceJSON struct {
 	DurationMinutes int    `json:"duration_minutes"`
 }
 
+// generateMagicLinkToken builds the CustomerSession token:
+//
+//	base64url("{customer_id}:{location_id}:{visit_id}:{unix_expires}") + "." + base64url(HMAC-SHA256(payload))
+//
+// The colon-separated payload segment is load-bearing: verifyCustomerSession
+// (SSE connect) validates exactly this shape statelessly, and the /q/status
+// frontend reads location_id from field[1] to open its SSE stream. Deterministic
+// for fixed inputs — the watchdog regenerates the same string the join stored.
 func generateMagicLinkToken(customerIDStr, locationIDStr, visitIDStr string, expiresAt time.Time, secret []byte) string {
-	tokenPayload := customerIDStr + "|" + locationIDStr + "|" + visitIDStr + "|" + strconv.FormatInt(expiresAt.Unix(), 10)
+	tokenPayload := customerIDStr + ":" + locationIDStr + ":" + visitIDStr + ":" + strconv.FormatInt(expiresAt.Unix(), 10)
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(tokenPayload))
-	hashed := mac.Sum(nil)
-	return base64.RawURLEncoding.EncodeToString(hashed)
+	return base64.RawURLEncoding.EncodeToString([]byte(tokenPayload)) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 // GenerateMagicLinkToken rebuilds the HMAC token for a known customer entry.
-// Use when re-notifying a customer who already joined (e.g. bb_queue_delayed).
+// Single source of truth for the magic link format — used by JoinQueue, the
+// watchdog (bb_near_turn / bb_you_are_next) and the WhatsApp JOIN webhook flow.
 func GenerateMagicLinkToken(customerID, locationID, visitID string, expiresAt time.Time, secret []byte) string {
 	return generateMagicLinkToken(customerID, locationID, visitID, expiresAt, secret)
 }

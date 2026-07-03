@@ -8,25 +8,23 @@ export const load: PageServerLoad = async (event) => {
 		return { error: 'invalid_link', entry: null, token: null, locationId: null };
 	}
 
+	// Magic link token is NOT a JWT: two base64url segments joined by "." —
+	// payload "customer_id:location_id:visit_id:unix_expires" and its HMAC.
+	// The backend verifies the signature; here we only extract location_id
+	// so the page can open its SSE stream.
 	const parts = token.split('.');
-	if (parts.length !== 3) {
+	if (parts.length !== 2) {
 		return { error: 'invalid_link', entry: null, token: null, locationId: null };
 	}
 
 	let locationId: string;
 	try {
-		const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+		const base64 = parts[0].replace(/-/g, '+').replace(/_/g, '/');
 		const raw =
 			typeof atob !== 'undefined' ? atob(base64) : Buffer.from(base64, 'base64').toString('binary');
-		const utf8 = decodeURIComponent(
-			raw
-				.split('')
-				.map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-				.join('')
-		);
-		const payload = JSON.parse(utf8);
-		locationId = payload.location_id;
-		if (!locationId) {
+		const fields = raw.split(':');
+		locationId = fields[1];
+		if (fields.length !== 4 || !locationId) {
 			return { error: 'invalid_link', entry: null, token: null, locationId: null };
 		}
 	} catch (err) {

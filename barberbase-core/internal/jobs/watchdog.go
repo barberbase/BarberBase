@@ -2,9 +2,6 @@ package jobs
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +10,7 @@ import (
 	"time"
 
 	"barberbase-core/internal/config"
+	"barberbase-core/internal/domain/queue"
 	"barberbase-core/internal/realtime"
 	"barberbase-core/internal/repository"
 
@@ -70,17 +68,17 @@ func (w *Watchdog) tick(ctx context.Context) {
 }
 
 type session struct {
-	ID                          uuid.UUID
-	TenantID                    uuid.UUID
-	LocationID                  uuid.UUID
-	NotifyPeopleAhead           int
-	NotifyWaitMinutes           int
-	StaleCalledWarningMinutes   int
-	StaleCalledCriticalMinutes  int
-	InProgressWarningMinutes    int
-	InProgressConfirmMinutes    int
-	InProgressCriticalMinutes   int
-	LocationName                string
+	ID                         uuid.UUID
+	TenantID                   uuid.UUID
+	LocationID                 uuid.UUID
+	NotifyPeopleAhead          int
+	NotifyWaitMinutes          int
+	StaleCalledWarningMinutes  int
+	StaleCalledCriticalMinutes int
+	InProgressWarningMinutes   int
+	InProgressConfirmMinutes   int
+	InProgressCriticalMinutes  int
+	LocationName               string
 }
 
 func (w *Watchdog) runJob(ctx context.Context) {
@@ -243,7 +241,7 @@ func (w *Watchdog) triggerNearTurn(ctx context.Context, s session, cand candidat
 			return err
 		}
 
-		magicLinkToken := generateMagicLinkToken(cand.CustomerID.String(), s.LocationID.String(), cand.VisitID.String(), cand.MagicLinkExpiresAt, []byte(w.cfg.HMACSecret))
+		magicLinkToken := queue.GenerateMagicLinkToken(cand.CustomerID.String(), s.LocationID.String(), cand.VisitID.String(), cand.MagicLinkExpiresAt, []byte(w.cfg.HMACSecret))
 
 		outboxPayload := map[string]interface{}{
 			"template_code":       "bb_near_turn",
@@ -398,7 +396,7 @@ func (w *Watchdog) triggerAutoSnooze(ctx context.Context, s session, top struct 
 		}
 
 		if top.SessionChannel == "whatsapp" && top.CustomerID != nil {
-			magicLinkToken := generateMagicLinkToken(top.CustomerID.String(), s.LocationID.String(), top.VisitID.String(), magicLinkExpiresAt, []byte(w.cfg.HMACSecret))
+			magicLinkToken := queue.GenerateMagicLinkToken(top.CustomerID.String(), s.LocationID.String(), top.VisitID.String(), magicLinkExpiresAt, []byte(w.cfg.HMACSecret))
 
 			outboxPayload := map[string]interface{}{
 				"template_code":       "bb_queue_snoozed",
@@ -487,12 +485,4 @@ func (w *Watchdog) updateStaleWarnings(ctx context.Context, s session) {
 	if err != nil {
 		log.Printf("Watchdog: failed to update stale warnings for in_progress entries of session %s: %v", s.ID, err)
 	}
-}
-
-func generateMagicLinkToken(customerIDStr, locationIDStr, visitIDStr string, expiresAt time.Time, secret []byte) string {
-	tokenPayload := customerIDStr + "|" + locationIDStr + "|" + visitIDStr + "|" + strconv.FormatInt(expiresAt.Unix(), 10)
-	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(tokenPayload))
-	hashed := mac.Sum(nil)
-	return base64.RawURLEncoding.EncodeToString(hashed)
 }
