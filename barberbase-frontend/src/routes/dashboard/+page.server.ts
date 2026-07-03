@@ -29,10 +29,15 @@ export const load: PageServerLoad = async (event) => {
 		client.get<any>(`/v1/public/locations/${locationId}/service-catalog`).catch(() => ({ categories: [] }))
 	]);
 
+	// SSE connects with the 12h stream token, not the 15-min access token.
+	// Fallback to accessToken covers sessions that logged in before stream_token existed.
+	const streamToken = event.cookies.get('stream_token') ?? accessToken;
+
 	return {
 		snapshot,
 		locationId,
 		accessToken,
+		streamToken,
 		staffMembers: staffMembersRes?.staff || [],
 		catalog,
 		apiBase

@@ -48,6 +48,8 @@ let currentSnapshot = {
 
 let callNextRequests = 0;
 let sseClients: http.ServerResponse[] = [];
+let lastSseToken: string | null = null;
+let lastSnapshotAuth: string | null = null;
 
 test.beforeAll(() => {
 	// Start a mock server to intercept SvelteKit backend API and SSE requests
@@ -66,6 +68,7 @@ test.beforeAll(() => {
 		const url = req.url || '';
 
 		if (url.includes('/v1/stream/')) {
+			lastSseToken = new URL(url, `http://127.0.0.1:${mockPort}`).searchParams.get('token');
 			res.writeHead(200, {
 				'Content-Type': 'text/event-stream',
 				'Cache-Control': 'no-cache',
@@ -77,6 +80,7 @@ test.beforeAll(() => {
 		}
 
 		if (url.includes('/v1/staff/queue/snapshot')) {
+			lastSnapshotAuth = req.headers.authorization ?? null;
 			res.writeHead(200, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify(currentSnapshot));
 			return;
@@ -116,6 +120,33 @@ test.beforeAll(() => {
 
 test.afterAll(() => {
 	server.close();
+});
+
+test('SSE connects with stream_token, API calls use access_token (C8.4)', async ({
+	page,
+	context
+}) => {
+	lastSseToken = null;
+	lastSnapshotAuth = null;
+
+	const accessToken =
+		'dummy.eyJyb2xlIjoiYmFyYmVyIiwiZXhwIjo5OTk5OTk5OTk5LCJsb2NhdGlvbl9pZCI6ImxvYy0xMjMiLCJuYW1lIjoiVGVzdCBTdGFmZiJ9.dummy';
+	const streamToken = 'stream-token-12h-scope-gated';
+
+	await context.addCookies([
+		{ name: 'access_token', value: accessToken, domain: 'localhost', path: '/' },
+		{ name: 'stream_token', value: streamToken, domain: 'localhost', path: '/' }
+	]);
+
+	await page.goto('/dashboard');
+	await expect(page.locator('text=CALL NEXT CLIENT')).toBeVisible();
+
+	// SSE must connect with the 12h stream token — the access token expiring
+	// at the 15-min mark then cannot drop the connection.
+	await expect.poll(() => lastSseToken).toBe(streamToken);
+	// Normal API calls must keep using the access token, never the stream token
+	// (stream scope is rejected with 403 outside SSE — Law 20).
+	expect(lastSnapshotAuth).toBe(`Bearer ${accessToken}`);
 });
 
 test('one-tap actions issue exactly one request (debounced)', async ({ page, context }) => {

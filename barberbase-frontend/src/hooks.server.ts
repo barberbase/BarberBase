@@ -1,10 +1,34 @@
 import { redirect } from '@sveltejs/kit';
-import type { Handle, HandleFetch } from '@sveltejs/kit';
+import type { Cookies, Handle, HandleFetch } from '@sveltejs/kit';
 import { decodeToken, isTokenExpired, getApiBase } from '$lib/api/client';
 
-function parseCookie(cookieString: string, name: string): string | null {
-	const matches = cookieString.match(new RegExp(`(^|;)\\s*${name}\\s*=\\s*([^;]+)`));
-	return matches ? matches[2].trim() : null;
+const cookieOpts = {
+	httpOnly: true,
+	secure: true,
+	path: '/',
+	sameSite: 'lax'
+} as const;
+
+function clearAuthCookies(cookies: Cookies) {
+	cookies.delete('access_token', { path: '/' });
+	cookies.delete('refresh_token', { path: '/' });
+	cookies.delete('stream_token', { path: '/' });
+}
+
+// Refresh returns { access_token, stream_token } in the JSON body per openapi.yaml.
+// (The Set-Cookie the Go API also sends is named bb_access — not usable here.)
+async function captureRefreshedTokens(
+	refreshRes: Response,
+	cookies: Cookies
+): Promise<string | null> {
+	try {
+		const body = (await refreshRes.json()) as { access_token?: string; stream_token?: string };
+		if (body.access_token) cookies.set('access_token', body.access_token, cookieOpts);
+		if (body.stream_token) cookies.set('stream_token', body.stream_token, cookieOpts);
+		return body.access_token ?? null;
+	} catch {
+		return null;
+	}
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
@@ -39,34 +63,10 @@ export const handle: Handle = async ({ event, resolve }) => {
 					});
 
 					if (refreshRes.status === 200) {
-						const setCookieHeaders = refreshRes.headers.getSetCookie();
-						let newAccessToken: string | null = null;
-						let newRefreshToken: string | null = null;
-
-						for (const cookieStr of setCookieHeaders) {
-							const acc = parseCookie(cookieStr, 'access_token');
-							if (acc) newAccessToken = acc;
-							const ref = parseCookie(cookieStr, 'refresh_token');
-							if (ref) newRefreshToken = ref;
-						}
-
+						const newAccessToken = await captureRefreshedTokens(refreshRes, event.cookies);
 						if (newAccessToken) {
-							event.cookies.set('access_token', newAccessToken, {
-								httpOnly: true,
-								secure: true,
-								path: '/',
-								sameSite: 'lax'
-							});
 							claims = decodeToken(newAccessToken);
 							validToken = !!claims;
-						}
-						if (newRefreshToken) {
-							event.cookies.set('refresh_token', newRefreshToken, {
-								httpOnly: true,
-								secure: true,
-								path: '/',
-								sameSite: 'lax'
-							});
 						}
 					}
 				} catch (err) {
@@ -75,8 +75,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 			}
 
 			if (!validToken) {
-				event.cookies.delete('access_token', { path: '/' });
-				event.cookies.delete('refresh_token', { path: '/' });
+				clearAuthCookies(event.cookies);
 				throw redirect(302, '/login');
 			}
 		}
@@ -95,15 +94,13 @@ export const handleFetch: HandleFetch = async ({ event, request, fetch }) => {
 
 		if (response.status === 401) {
 			if (request.headers.has('x-bff-retry')) {
-				event.cookies.delete('access_token', { path: '/' });
-				event.cookies.delete('refresh_token', { path: '/' });
+				clearAuthCookies(event.cookies);
 				throw redirect(302, '/login');
 			}
 
 			const refreshToken = event.cookies.get('refresh_token');
 			if (!refreshToken) {
-				event.cookies.delete('access_token', { path: '/' });
-				event.cookies.delete('refresh_token', { path: '/' });
+				clearAuthCookies(event.cookies);
 				throw redirect(302, '/login');
 			}
 
@@ -116,33 +113,7 @@ export const handleFetch: HandleFetch = async ({ event, request, fetch }) => {
 			});
 
 			if (refreshRes.status === 200) {
-				const setCookieHeaders = refreshRes.headers.getSetCookie();
-				let newAccessToken: string | null = null;
-				let newRefreshToken: string | null = null;
-
-				for (const cookieStr of setCookieHeaders) {
-					const acc = parseCookie(cookieStr, 'access_token');
-					if (acc) newAccessToken = acc;
-					const ref = parseCookie(cookieStr, 'refresh_token');
-					if (ref) newRefreshToken = ref;
-				}
-
-				if (newAccessToken) {
-					event.cookies.set('access_token', newAccessToken, {
-						httpOnly: true,
-						secure: true,
-						path: '/',
-						sameSite: 'lax'
-					});
-				}
-				if (newRefreshToken) {
-					event.cookies.set('refresh_token', newRefreshToken, {
-						httpOnly: true,
-						secure: true,
-						path: '/',
-						sameSite: 'lax'
-					});
-				}
+				const newAccessToken = await captureRefreshedTokens(refreshRes, event.cookies);
 
 				const newRequest = request.clone();
 				if (newAccessToken) {
@@ -153,13 +124,11 @@ export const handleFetch: HandleFetch = async ({ event, request, fetch }) => {
 				response = await fetch(newRequest);
 
 				if (response.status === 401) {
-					event.cookies.delete('access_token', { path: '/' });
-					event.cookies.delete('refresh_token', { path: '/' });
+					clearAuthCookies(event.cookies);
 					throw redirect(302, '/login');
 				}
 			} else {
-				event.cookies.delete('access_token', { path: '/' });
-				event.cookies.delete('refresh_token', { path: '/' });
+				clearAuthCookies(event.cookies);
 				throw redirect(302, '/login');
 			}
 		}

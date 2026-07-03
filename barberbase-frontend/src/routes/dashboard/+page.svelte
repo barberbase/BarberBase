@@ -10,6 +10,7 @@
 			snapshot: any;
 			locationId: string;
 			accessToken: string;
+			streamToken: string;
 			staffMembers: any[];
 			catalog: any;
 		};
@@ -24,7 +25,7 @@
 	onMount(() => {
 		sseClient = connectSSE(
 			initialData.locationId,
-			initialData.accessToken,
+			initialData.streamToken,
 			store,
 			initialData.apiBase
 		);

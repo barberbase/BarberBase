@@ -87,6 +87,7 @@ export const actions: Actions = {
 		let success = false;
 		let bbAccess: string | null = null;
 		let bbRefresh: string | null = null;
+		let bbStream: string | null = null;
 		let errorResponse: any = null;
 
 		const apiBase = getApiBase(event.platform);
@@ -103,6 +104,7 @@ export const actions: Actions = {
 				const body = await res.json() as {
 					access_token: string;
 					refresh_token: string;
+					stream_token: string;
 					staff_member_id: string;
 					name: string;
 					role: string;
@@ -111,6 +113,7 @@ export const actions: Actions = {
 				};
 				bbAccess = body.access_token ?? null;
 				bbRefresh = body.refresh_token ?? null;
+				bbStream = body.stream_token ?? null;
 
 				if (!bbAccess || !bbRefresh) {
 					errorResponse = fail(500, {
@@ -156,6 +159,17 @@ export const actions: Actions = {
 				path: '/',
 				sameSite: 'lax'
 			});
+
+			// 12h SSE-only token (Law 20 scope-gated server-side) — never used
+			// as an Authorization header, only for the SSE ?token= connect.
+			if (bbStream) {
+				event.cookies.set('stream_token', bbStream, {
+					httpOnly: true,
+					secure: true,
+					path: '/',
+					sameSite: 'lax'
+				});
+			}
 
 			throw redirect(303, '/dashboard');
 		}
