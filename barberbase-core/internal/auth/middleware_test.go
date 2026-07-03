@@ -52,10 +52,11 @@ func TestRequireStaffJWT(t *testing.T) {
 			expectContext:  true,
 		},
 		{
+			// Law 20: scope rejection is 403, distinguishable from a generic 401.
 			name:           "Request WITH marker and valid stream-scoped token",
 			withMarker:     true,
 			authHeader:     "Bearer " + streamToken,
-			expectedStatus: http.StatusUnauthorized,
+			expectedStatus: http.StatusForbidden,
 			expectContext:  false,
 		},
 		{

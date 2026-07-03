@@ -34,8 +34,11 @@ func RequireStaffJWT(secret []byte, scopeKey any) func(http.Handler) http.Handle
 				return
 			}
 
+			// Law 20: scope rejection is 403 with a distinguishable code, not a generic 401.
 			if claims.Scope == "stream" {
-				respondUnauthorized(w)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"code":"WRONG_TOKEN_SCOPE","message":"stream token is only valid on the SSE stream endpoint"}`))
 				return
 			}
 

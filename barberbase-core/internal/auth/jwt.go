@@ -95,6 +95,11 @@ func GenerateStreamToken(secret []byte, tenantID, locationID, staffMemberID, rol
 	return token, nil
 }
 
+// IsTokenExpired reports whether a ParseAndVerifyToken error was caused by token expiry.
+func IsTokenExpired(err error) bool {
+	return errors.Is(err, jwt.ErrTokenExpired)
+}
+
 // ParseAndVerifyToken validates an Access JWT using HS256 and the provided secret.
 func ParseAndVerifyToken(tokenStr string, secret []byte) (*StaffClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &StaffClaims{}, func(token *jwt.Token) (interface{}, error) {

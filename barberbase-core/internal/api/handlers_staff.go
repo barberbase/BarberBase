@@ -2561,13 +2561,16 @@ func (s *Server) SubscribeToQueueStream(
 
 	authSucceeded := false
 
-	// Attempt StaffJWT verification
-	claims, err := auth.ParseAndVerifyToken(token, []byte(s.Config.JWTSecret))
-	if err == nil {
+	// Attempt StaffJWT verification (accepts both access and stream-scoped tokens)
+	claims, staffErr := auth.ParseAndVerifyToken(token, []byte(s.Config.JWTSecret))
+	if staffErr == nil {
 		if strings.EqualFold(claims.LocationID, locationId.String()) {
 			authSucceeded = true
 		} else {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			respondJSON(w, http.StatusUnauthorized, map[string]string{
+				"code":    "WRONG_LOCATION",
+				"message": "token is not valid for this location",
+			})
 			return
 		}
 	}
@@ -2580,7 +2583,16 @@ func (s *Server) SubscribeToQueueStream(
 	}
 
 	if !authSucceeded {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		// Distinguishable handshake failure so the frontend can react
+		// (TOKEN_EXPIRED → re-login / refresh; UNAUTHORIZED → bad token).
+		code := "UNAUTHORIZED"
+		if auth.IsTokenExpired(staffErr) {
+			code = "TOKEN_EXPIRED"
+		}
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":    code,
+			"message": "unauthorized",
+		})
 		return
 	}
 
