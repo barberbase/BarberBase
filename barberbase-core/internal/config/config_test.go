@@ -40,45 +40,21 @@ func TestLoad_AllVAPIDPresent(t *testing.T) {
 	}
 }
 
-// TestLoad_MissingVAPIDPublicKey verifies Load() returns an error when VAPID_PUBLIC_KEY is absent.
-func TestLoad_MissingVAPIDPublicKey(t *testing.T) {
+// TestLoad_MissingVAPID_BootsPushDisabled verifies Law 21: the server must boot
+// with zero push infrastructure. Empty VAPID vars are not an error — push is
+// simply disabled and queue correctness is unaffected.
+func TestLoad_MissingVAPID_BootsPushDisabled(t *testing.T) {
 	baseEnv(t)
-	t.Setenv("VAPID_PUBLIC_KEY", "") // override: make absent
+	t.Setenv("VAPID_PUBLIC_KEY", "")
+	t.Setenv("VAPID_PRIVATE_KEY", "")
+	t.Setenv("VAPID_SUBJECT", "")
 
-	_, err := config.Load()
-	if err == nil {
-		t.Fatal("expected error when VAPID_PUBLIC_KEY is empty, got nil — server would start without web-push capability")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Law 21 violation: Load() must succeed with no VAPID config, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "VAPID_PUBLIC_KEY") {
-		t.Errorf("error message should mention VAPID_PUBLIC_KEY; got: %v", err)
-	}
-}
-
-// TestLoad_MissingVAPIDPrivateKey verifies Load() returns an error when VAPID_PRIVATE_KEY is absent.
-func TestLoad_MissingVAPIDPrivateKey(t *testing.T) {
-	baseEnv(t)
-	t.Setenv("VAPID_PRIVATE_KEY", "") // override: make absent
-
-	_, err := config.Load()
-	if err == nil {
-		t.Fatal("expected error when VAPID_PRIVATE_KEY is empty, got nil — server would start without web-push capability")
-	}
-	if !strings.Contains(err.Error(), "VAPID_PRIVATE_KEY") {
-		t.Errorf("error message should mention VAPID_PRIVATE_KEY; got: %v", err)
-	}
-}
-
-// TestLoad_MissingVAPIDSubject verifies Load() returns an error when VAPID_SUBJECT is absent.
-func TestLoad_MissingVAPIDSubject(t *testing.T) {
-	baseEnv(t)
-	t.Setenv("VAPID_SUBJECT", "") // override: make absent
-
-	_, err := config.Load()
-	if err == nil {
-		t.Fatal("expected error when VAPID_SUBJECT is empty, got nil — server would start without web-push capability")
-	}
-	if !strings.Contains(err.Error(), "VAPID_SUBJECT") {
-		t.Errorf("error message should mention VAPID_SUBJECT; got: %v", err)
+	if cfg.VAPIDPublicKey != "" || cfg.VAPIDPrivateKey != "" || cfg.VAPIDSubject != "" {
+		t.Error("VAPID fields should be empty when env vars are unset")
 	}
 }
 

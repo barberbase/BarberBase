@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 )
 
@@ -78,19 +79,15 @@ func Load() (*Config, error) {
 
 	platformAdminKey := os.Getenv("PLATFORM_ADMIN_KEY")
 
+	// Law 21: push is a convenience layer — the server must boot and run every
+	// core workflow with zero push infrastructure. VAPID keys are optional; when
+	// absent, push sends fail gracefully in the outbox dispatch handler (logged
+	// as failed notification_events) and never touch queue correctness.
 	vapidPublicKey := os.Getenv("VAPID_PUBLIC_KEY")
-	if vapidPublicKey == "" {
-		return nil, fmt.Errorf("VAPID_PUBLIC_KEY required")
-	}
-
 	vapidPrivateKey := os.Getenv("VAPID_PRIVATE_KEY")
-	if vapidPrivateKey == "" {
-		return nil, fmt.Errorf("VAPID_PRIVATE_KEY required")
-	}
-
 	vapidSubject := os.Getenv("VAPID_SUBJECT")
-	if vapidSubject == "" {
-		return nil, fmt.Errorf("VAPID_SUBJECT required")
+	if vapidPublicKey == "" || vapidPrivateKey == "" || vapidSubject == "" {
+		log.Printf("[Config] VAPID keys not fully configured — web push disabled (Law 21: queue correctness unaffected)")
 	}
 
 	return &Config{
