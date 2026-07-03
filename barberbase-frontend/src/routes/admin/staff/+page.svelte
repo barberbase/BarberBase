@@ -1,15 +1,26 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import Icon from '$lib/components/Icon.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
 	let showAddForm = $state(false);
 
-	const roleLabel = (r: string) =>
-		({ owner: '👑 Owner', manager: '🔑 Manager', barber: '✂️ Barber' })[r] || r;
-	const statusLabel = (s: string) =>
-		({ idle: '🟢 Idle', cutting: '✂️ Cutting', break: '⏸ Break', offline: '⚫ Offline' })[s] || s;
+	// Role tier read via badge color; status via presence-style dot + label.
+	const roleMeta = (r: string) =>
+		({
+			owner: { label: 'Owner', cls: 'border-gold-accent/40 bg-gold-accent/10 text-gold-accent' },
+			manager: { label: 'Manager', cls: 'border-white/[0.08] bg-titanium text-primary' },
+			barber: { label: 'Barber', cls: 'border-white/[0.08] bg-titanium text-muted' }
+		})[r] || { label: r, cls: 'border-white/[0.08] bg-titanium text-muted' };
+	const statusMeta = (s: string) =>
+		({
+			idle: { label: 'Idle', dot: 'bg-system-success', cls: 'text-system-success' },
+			cutting: { label: 'Cutting', dot: 'bg-gold-accent', cls: 'text-gold-accent' },
+			break: { label: 'Break', dot: 'bg-system-warning', cls: 'text-system-warning' },
+			offline: { label: 'Offline', dot: 'bg-dim', cls: 'text-dim' }
+		})[s] || { label: s, dot: 'bg-dim', cls: 'text-muted' };
 </script>
 
 <svelte:head>
@@ -31,22 +42,22 @@
 			<button
 				id="toggle-add-staff-btn"
 				onclick={() => (showAddForm = !showAddForm)}
-				class="bg-gold-accent hover:bg-amber-400 text-canvas font-bold px-4 py-2 rounded-xl text-sm transition-all"
+				class="bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] text-canvas font-bold px-4 py-2 rounded-xl text-sm transition-all duration-150"
 			>
-				{showAddForm ? '✕ Cancel' : '+ Add Staff'}
+				{showAddForm ? 'Cancel' : '+ Add Staff'}
 			</button>
 		</div>
 
 		{#if form?.error}
-			<div class="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6 text-system-error/80 text-sm">
+			<div class="bg-system-error/10 border border-system-error/30 rounded-xl p-4 mb-6 text-system-error text-sm">
 				{form.error}
 			</div>
 		{/if}
 		{#if form?.success}
 			<div
-				class="bg-green-900/30 border border-green-700 rounded-xl p-4 mb-6 text-green-400 text-sm"
+				class="bg-system-success/10 border border-system-success/30 rounded-xl p-4 mb-6 text-system-success text-sm flex items-center gap-2"
 			>
-				✓ Staff member added successfully
+				<Icon name="check" size={14} /> Staff member added successfully
 			</div>
 		{/if}
 
@@ -104,7 +115,7 @@
 					<button
 						id="submit-add-staff-btn"
 						type="submit"
-						class="bg-gold-accent hover:bg-amber-400 text-canvas font-bold px-6 py-2 rounded-xl text-sm transition-all"
+						class="bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] text-canvas font-bold px-6 py-2 rounded-xl text-sm transition-all duration-150"
 					>
 						Add Staff Member
 					</button>
@@ -124,25 +135,37 @@
 					<thead>
 						<tr class="border-b border-white/[0.05]">
 							<th
-								class="px-6 py-4 text-left text-xs text-muted font-medium uppercase tracking-wider"
+								class="px-6 py-4 text-left font-mono text-[10px] text-muted font-medium uppercase tracking-wider"
 								>Name</th
 							>
 							<th
-								class="px-4 py-4 text-left text-xs text-muted font-medium uppercase tracking-wider"
+								class="px-4 py-4 text-left font-mono text-[10px] text-muted font-medium uppercase tracking-wider"
 								>Role</th
 							>
 							<th
-								class="px-4 py-4 text-left text-xs text-muted font-medium uppercase tracking-wider"
+								class="px-4 py-4 text-left font-mono text-[10px] text-muted font-medium uppercase tracking-wider"
 								>Status</th
 							>
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-white/[0.03]">
 						{#each data.staffMembers as member}
+							{@const role = roleMeta(member.role)}
+							{@const status = statusMeta(member.status)}
 							<tr class="hover:bg-titanium/20 transition-colors">
 								<td class="px-6 py-4 text-primary font-medium text-sm">{member.name}</td>
-								<td class="px-4 py-4 text-sm text-primary">{roleLabel(member.role)}</td>
-								<td class="px-4 py-4 text-sm text-primary">{statusLabel(member.status)}</td>
+								<td class="px-4 py-4 text-sm">
+									<span
+										class="inline-block font-mono text-[10px] font-medium uppercase tracking-wider border rounded px-2 py-0.5 {role.cls}"
+										>{role.label}</span
+									>
+								</td>
+								<td class="px-4 py-4 text-sm">
+									<span class="inline-flex items-center gap-1.5 {status.cls}">
+										<span class="inline-block w-1.5 h-1.5 rounded-full {status.dot}"></span>
+										{status.label}
+									</span>
+								</td>
 							</tr>
 						{/each}
 					</tbody>

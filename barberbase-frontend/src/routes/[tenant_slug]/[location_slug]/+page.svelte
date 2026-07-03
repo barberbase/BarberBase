@@ -2,6 +2,7 @@
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { tick } from 'svelte';
+	import Icon from '$lib/components/Icon.svelte';
 
 	let { data }: { data: any } = $props();
 
@@ -197,6 +198,28 @@
 		}
 	}
 
+	// Exact outgoing WhatsApp message, recovered from the deep link so the
+	// preview can never drift from what actually gets sent.
+	const waMessage = $derived.by(() => {
+		if (!checkinResponse?.deep_link) return '';
+		try {
+			return new URL(checkinResponse.deep_link).searchParams.get('text') || '';
+		} catch {
+			return `JOIN ${checkinResponse.token_code || ''}`.trim();
+		}
+	});
+
+	const expiryLabel = $derived.by(() => {
+		if (!checkinResponse?.expires_at) return '';
+		const d = new Date(checkinResponse.expires_at);
+		if (isNaN(d.getTime())) return '';
+		return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+	});
+
+	function handleModalKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && checkinResponse) checkinResponse = null;
+	}
+
 	// Human-readable status mapping
 	function getStatusLabel(status: string) {
 		switch (status) {
@@ -265,7 +288,7 @@
 	{#if data.location.shop_status === 'closed'}
 		<!-- CLOSED SHOP VIEW -->
 		<section class="closed-card">
-			<div class="closed-icon">🚪</div>
+			<div class="closed-icon"><Icon name="clock" size={36} /></div>
 			<h2>We are currently closed</h2>
 			{#if data.location.business_hours_today?.opens_at}
 				<p class="hours-info">We open today at {data.location.business_hours_today.opens_at}</p>
@@ -389,11 +412,14 @@
 								>
 									{isJoining ? 'Securing Spot...' : 'Join via WhatsApp'}
 								</button>
+								<p class="join-hint">
+									Next: you'll see the exact WhatsApp message before anything is sent.
+								</p>
 							</div>
 						{:else}
 							<!-- BLOCKED STATE -->
 							<div class="blocked-card">
-								<div class="blocked-icon">🔒</div>
+								<div class="blocked-icon"><Icon name="lock" size={20} /></div>
 								<p class="blocked-message">{getBlockedMessage(bookingOptions)}</p>
 							</div>
 						{/if}
@@ -404,21 +430,44 @@
 	{/if}
 </div>
 
-<!-- CONFIRMATION DIALOG/MODAL -->
+<!-- WHATSAPP HANDOFF PREVIEW -->
+<svelte:window onkeydown={handleModalKeydown} />
 {#if checkinResponse}
-	<div class="modal-overlay">
+	<div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="handoff-title">
 		<div class="confirmation-card">
 			<button
 				class="modal-close"
 				onclick={() => (checkinResponse = null)}
 				aria-label="Close"
 			>&times;</button>
-			<div class="modal-icon">📱</div>
-			<h2>WhatsApp will open</h2>
-			<p>
-				Simply press <strong>Send</strong> on the pre-filled message inside WhatsApp to confirm your spot
-				in the queue.
+
+			<h2 id="handoff-title">Review before you send</h2>
+			<p class="handoff-sub">
+				WhatsApp will open with this message ready. Nothing is sent until you press
+				<strong>Send</strong> there — and you can close it without sending.
 			</p>
+
+			<div class="message-preview">
+				<span class="preview-label">Your message</span>
+				<div class="message-bubble">{waMessage}</div>
+				<span class="preview-to">To {data.location.name} on WhatsApp</span>
+			</div>
+
+			<ul class="next-steps">
+				<li>
+					<span class="step-icon"><Icon name="check" size={14} /></span>
+					Sending it confirms your spot — you get a token number and a live link showing your wait.
+				</li>
+				<li>
+					<span class="step-icon"><Icon name="bell" size={14} /></span>
+					We message you on WhatsApp when your turn is near.
+				</li>
+				<li>
+					<span class="step-icon"><Icon name="lock" size={14} /></span>
+					No account, no signup, no cost — just this one message.
+				</li>
+			</ul>
+
 			<a
 				href={checkinResponse.deep_link}
 				class="wa-confirm-btn"
@@ -427,6 +476,10 @@
 			>
 				Open WhatsApp & Send
 			</a>
+			{#if expiryLabel}
+				<p class="expiry-note">This join code is valid until {expiryLabel}.</p>
+			{/if}
+			<button class="cancel-link" onclick={() => (checkinResponse = null)}>Not now</button>
 		</div>
 	</div>
 {/if}
@@ -480,20 +533,20 @@
 
 	.status-badge.open {
 		background: rgba(16, 185, 129, 0.15);
-		color: #34d399;
+		color: var(--color-system-success);
 		border-color: rgba(16, 185, 129, 0.25);
 	}
 
 	.status-badge.closing_soon {
 		background: rgba(245, 158, 11, 0.15);
-		color: #fbbf24;
+		color: var(--color-system-warning);
 		border-color: rgba(245, 158, 11, 0.25);
 	}
 
 	.status-badge.temporarily_closed,
 	.status-badge.closed {
 		background: rgba(239, 68, 68, 0.15);
-		color: #f87171;
+		color: var(--color-system-error);
 		border-color: rgba(239, 68, 68, 0.25);
 	}
 
@@ -519,7 +572,15 @@
 	}
 
 	.closed-icon {
-		font-size: 3rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 4rem;
+		height: 4rem;
+		border-radius: 999px;
+		background: var(--color-canvas);
+		border: 1px solid rgba(255, 255, 255, 0.05);
+		color: var(--color-muted);
 		margin-bottom: 1rem;
 	}
 
@@ -527,7 +588,7 @@
 		font-size: 1.5rem;
 		font-weight: 700;
 		margin: 0 0 0.75rem 0;
-		color: #f87171;
+		color: var(--color-system-error);
 	}
 
 	.hours-info {
@@ -859,6 +920,13 @@
 		border: 1px solid rgba(255, 255, 255, 0.03);
 	}
 
+	.join-hint {
+		font-size: 0.8rem;
+		color: var(--color-muted);
+		text-align: center;
+		margin: 0;
+	}
+
 	/* BLOCKED STATE */
 	.blocked-card {
 		background: rgba(239, 68, 68, 0.05);
@@ -868,11 +936,12 @@
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
-		color: #f87171;
+		color: var(--color-system-error);
 	}
 
 	.blocked-icon {
-		font-size: 1.25rem;
+		display: inline-flex;
+		flex-shrink: 0;
 	}
 
 	.blocked-message {
@@ -886,7 +955,7 @@
 		border: 1px solid rgba(239, 68, 68, 0.2);
 		border-radius: 0.5rem;
 		padding: 0.85rem;
-		color: #f87171;
+		color: var(--color-system-error);
 		font-size: 0.85rem;
 		font-weight: 600;
 		text-align: center;
@@ -960,24 +1029,122 @@
 		color: var(--color-primary);
 	}
 
-	.modal-icon {
-		font-size: 3rem;
-		margin-bottom: 1.25rem;
-	}
-
 	.confirmation-card h2 {
 		font-size: 1.45rem;
 		font-weight: 800;
-		margin: 0 0 0.85rem 0;
+		margin: 0 0 0.6rem 0;
 		color: var(--color-primary);
 		font-family: var(--font-satoshi);
+		letter-spacing: -0.025em;
 	}
 
-	.confirmation-card p {
+	.handoff-sub {
 		color: var(--color-muted);
-		font-size: 0.95rem;
+		font-size: 0.9rem;
 		line-height: 1.5;
-		margin: 0 0 1.75rem 0;
+		margin: 0 0 1.5rem 0;
+	}
+
+	.handoff-sub strong {
+		color: var(--color-primary);
+	}
+
+	.message-preview {
+		background: var(--color-canvas);
+		border: 1px solid rgba(255, 255, 255, 0.05);
+		border-radius: 0.75rem;
+		padding: 1rem;
+		margin-bottom: 1.25rem;
+		text-align: left;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+	}
+
+	.preview-label {
+		display: block;
+		font-family: var(--font-mono);
+		font-size: 0.65rem;
+		font-weight: 500;
+		text-transform: uppercase;
+		letter-spacing: 0.25em;
+		color: var(--color-dim);
+		margin-bottom: 0.6rem;
+	}
+
+	.message-bubble {
+		background: var(--color-titanium);
+		border: 1px solid rgba(200, 169, 107, 0.25);
+		border-radius: 0.75rem 0.75rem 0.25rem 0.75rem;
+		padding: 0.75rem 1rem;
+		font-family: var(--font-mono);
+		font-size: 0.95rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		color: var(--color-primary);
+		word-break: break-word;
+	}
+
+	.preview-to {
+		display: block;
+		font-size: 0.75rem;
+		color: var(--color-muted);
+		margin-top: 0.5rem;
+		text-align: right;
+	}
+
+	.next-steps {
+		list-style: none;
+		margin: 0 0 1.5rem 0;
+		padding: 0;
+		text-align: left;
+		display: flex;
+		flex-direction: column;
+		gap: 0.7rem;
+	}
+
+	.next-steps li {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.65rem;
+		font-size: 0.85rem;
+		line-height: 1.45;
+		color: var(--color-primary);
+	}
+
+	.step-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.5rem;
+		height: 1.5rem;
+		flex-shrink: 0;
+		border-radius: 999px;
+		background: rgba(200, 169, 107, 0.1);
+		border: 1px solid rgba(200, 169, 107, 0.25);
+		color: var(--color-gold-accent);
+		margin-top: 0.05rem;
+	}
+
+	.expiry-note {
+		font-size: 0.75rem;
+		color: var(--color-muted);
+		margin: 0.85rem 0 0 0;
+	}
+
+	.cancel-link {
+		background: none;
+		border: none;
+		color: var(--color-muted);
+		font-size: 0.85rem;
+		font-weight: 600;
+		cursor: pointer;
+		padding: 0.6rem 1rem;
+		margin-top: 0.35rem;
+		border-radius: 999px;
+		transition: color 0.15s ease;
+	}
+
+	.cancel-link:hover {
+		color: var(--color-primary);
 	}
 
 	.wa-confirm-btn {

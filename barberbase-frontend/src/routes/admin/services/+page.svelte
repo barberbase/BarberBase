@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import Icon from '$lib/components/Icon.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -55,22 +56,22 @@
 			<button
 				id="toggle-create-form-btn"
 				onclick={() => (showCreateForm = !showCreateForm)}
-				class="bg-gold-accent hover:bg-amber-400 text-canvas font-bold px-4 py-2 rounded-xl text-sm transition-all"
+				class="bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] text-canvas font-bold px-4 py-2 rounded-xl text-sm transition-all duration-150"
 			>
-				{showCreateForm ? '✕ Cancel' : '+ Add Service'}
+				{showCreateForm ? 'Cancel' : '+ Add Service'}
 			</button>
 		</div>
 
 		{#if form?.error}
-			<div class="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6 text-system-error/80 text-sm">
+			<div class="bg-system-error/10 border border-system-error/30 rounded-xl p-4 mb-6 text-system-error text-sm">
 				{form.error}
 			</div>
 		{/if}
 		{#if form?.success}
 			<div
-				class="bg-green-900/30 border border-green-700 rounded-xl p-4 mb-6 text-green-400 text-sm"
+				class="bg-system-success/10 border border-system-success/30 rounded-xl p-4 mb-6 text-system-success text-sm flex items-center gap-2"
 			>
-				✓ Service updated successfully
+				<Icon name="check" size={14} /> Service updated successfully
 			</div>
 		{/if}
 
@@ -215,7 +216,7 @@
 								onchange={(e) => (newIsPopular = (e.target as HTMLInputElement).checked)}
 								class="accent-gold-accent"
 							/>
-							⭐ Popular
+							Popular
 						</label>
 					</div>
 					<!-- Pass unchecked booleans as 'false' -->
@@ -228,7 +229,7 @@
 					<button
 						id="submit-create-service-btn"
 						type="submit"
-						class="bg-gold-accent hover:bg-amber-400 text-canvas font-bold px-6 py-2 rounded-xl text-sm transition-all"
+						class="bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] text-canvas font-bold px-6 py-2 rounded-xl text-sm transition-all duration-150"
 					>
 						Create Variant
 					</button>
@@ -341,7 +342,7 @@
 																<div class="flex gap-2">
 																	<button
 																		type="submit"
-																		class="bg-gold-accent hover:bg-amber-400 text-canvas font-bold px-3 py-1.5 rounded-lg text-xs transition-all"
+																		class="bg-gold-accent hover:brightness-110 active:brightness-90 text-canvas font-bold px-3 py-1.5 rounded-lg text-xs transition-all duration-150"
 																		>Save</button
 																	>
 																	<button
@@ -357,11 +358,12 @@
 												{:else}
 													<td class="px-6 py-3 text-sm text-primary font-medium">
 														{variant.name}
-														{#if variant.is_popular}<span class="ml-1 text-gold-accent text-xs"
-																>⭐</span
+														{#if variant.is_popular}<span
+																class="ml-1.5 font-mono text-[9px] font-medium uppercase tracking-wider text-gold-accent border border-gold-accent/30 bg-gold-accent/10 rounded px-1.5 py-0.5"
+																>Popular</span
 															>{/if}
 													</td>
-													<td class="px-4 py-3 text-sm text-primary"
+													<td class="px-4 py-3 text-sm text-primary font-mono"
 														>{variant.duration_minutes} min</td
 													>
 													<td class="px-4 py-3 text-sm text-primary font-mono"
@@ -369,15 +371,15 @@
 													>
 													<td class="px-4 py-3 text-xs text-muted">
 														{#if variant.allow_walk_in}<span
-																class="bg-blue-900/40 text-blue-400 px-1.5 py-0.5 rounded mr-1"
+																class="bg-titanium border border-white/[0.08] text-muted px-1.5 py-0.5 rounded mr-1"
 																>Walk-in</span
 															>{/if}
 														{#if variant.allow_appointment}<span
-																class="bg-purple-900/40 text-purple-400 px-1.5 py-0.5 rounded mr-1"
+																class="bg-titanium border border-white/[0.08] text-muted px-1.5 py-0.5 rounded mr-1"
 																>Appt</span
 															>{/if}
 														{#if variant.requires_appointment}<span
-																class="bg-orange-900/40 text-orange-400 px-1.5 py-0.5 rounded"
+																class="bg-system-warning/10 border border-system-warning/30 text-system-warning px-1.5 py-0.5 rounded"
 																>Required</span
 															>{/if}
 													</td>
@@ -393,7 +395,7 @@
 																<input type="hidden" name="variant_id" value={variant.id} />
 																<button
 																	type="submit"
-																	class="text-dim hover:text-system-error/80 text-xs transition-colors"
+																	class="text-dim hover:text-system-error text-xs transition-colors"
 																	onclick={(e) => {
 																		if (!confirm('Deactivate this service?')) e.preventDefault();
 																	}}

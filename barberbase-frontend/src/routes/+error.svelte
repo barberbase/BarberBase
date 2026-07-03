@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import Icon from '$lib/components/Icon.svelte';
 	import SiteFooter from '$lib/components/SiteFooter.svelte';
 	import { resolve } from '$app/paths';
 	import logo from '$lib/assets/favicon.svg';
@@ -19,7 +20,7 @@
 			class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-gold-accent/10 blur-[120px]"
 		></div>
 		<div
-			class="absolute bottom-1/4 left-1/3 w-[400px] h-[400px] rounded-full bg-blue-500/5 blur-[100px]"
+			class="absolute bottom-1/4 left-1/3 w-[400px] h-[400px] rounded-full bg-gold-accent/5 blur-[100px]"
 		></div>
 	</div>
 
@@ -41,22 +42,9 @@
 			class="w-full max-w-md bg-matte/60 backdrop-blur-xl border border-white/[0.03] rounded-3xl p-8 shadow-2xl text-center space-y-6"
 		>
 			<div
-				class="w-16 h-16 bg-gold-accent/10 rounded-full flex items-center justify-center text-gold-accent mx-auto"
+				class="w-16 h-16 bg-gold-accent/10 border border-gold-accent/25 rounded-full flex items-center justify-center text-gold-accent mx-auto"
 			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-8 w-8"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-					/>
-				</svg>
+				<Icon name="alert" size={28} />
 			</div>
 
 			<div class="space-y-2">
@@ -81,7 +69,7 @@
 			<div class="pt-4">
 				<a
 					href={resolve('/')}
-					class="inline-flex items-center justify-center w-full py-3 bg-gold-accent hover:bg-amber-400 active:bg-amber-600 text-canvas font-bold text-sm rounded-xl transition-all shadow-md"
+					class="inline-flex items-center justify-center w-full py-3 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] text-canvas font-bold text-sm rounded-xl transition-all duration-150 shadow-md"
 				>
 					Back to Homepage
 				</a>

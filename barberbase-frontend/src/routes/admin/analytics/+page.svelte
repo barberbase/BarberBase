@@ -52,7 +52,7 @@
 		</div>
 
 		{#if data.analyticsError}
-			<div class="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6 text-system-error/80 text-sm">
+			<div class="bg-system-error/10 border border-system-error/30 rounded-xl p-4 mb-6 text-system-error text-sm">
 				{data.analyticsError}
 			</div>
 		{/if}
@@ -70,14 +70,14 @@
 					class="bg-matte border border-white/[0.05] rounded-2xl p-5 shadow-lg"
 				>
 					<p class="text-xs text-muted mb-1 uppercase tracking-wider">Total Visits</p>
-					<p class="text-3xl font-bold text-primary">{data.analytics.total_visits}</p>
+					<p class="text-3xl font-mono font-bold text-primary">{data.analytics.total_visits}</p>
 				</div>
 				<div
 					id="analytics-total-revenue"
 					class="bg-matte border border-white/[0.05] rounded-2xl p-5 shadow-lg"
 				>
 					<p class="text-xs text-muted mb-1 uppercase tracking-wider">Total Revenue</p>
-					<p class="text-3xl font-bold text-gold-accent">
+					<p class="text-3xl font-mono font-bold text-gold-accent">
 						{formatRupees(data.analytics.total_revenue_paise)}
 					</p>
 				</div>
@@ -86,7 +86,7 @@
 					class="bg-matte border border-white/[0.05] rounded-2xl p-5 shadow-lg"
 				>
 					<p class="text-xs text-muted mb-1 uppercase tracking-wider">Avg Wait</p>
-					<p class="text-3xl font-bold text-primary">
+					<p class="text-3xl font-mono font-bold text-primary">
 						{data.analytics.average_wait_minutes ?? 0}<span class="text-base text-muted ml-1"
 							>min</span
 						>
@@ -97,7 +97,7 @@
 					class="bg-matte border border-white/[0.05] rounded-2xl p-5 shadow-lg"
 				>
 					<p class="text-xs text-muted mb-1 uppercase tracking-wider">No-shows</p>
-					<p class="text-3xl font-bold text-primary">{data.analytics.no_show_count ?? 0}</p>
+					<p class="text-3xl font-mono font-bold text-primary">{data.analytics.no_show_count ?? 0}</p>
 				</div>
 			</div>
 
@@ -111,19 +111,19 @@
 						<thead>
 							<tr class="border-b border-white/[0.05]">
 								<th
-									class="px-6 py-3 text-left text-xs text-muted font-medium uppercase tracking-wider"
+									class="px-6 py-3 text-left font-mono text-[10px] text-muted font-medium uppercase tracking-wider"
 									>Barber</th
 								>
 								<th
-									class="px-4 py-3 text-right text-xs text-muted font-medium uppercase tracking-wider"
+									class="px-4 py-3 text-right font-mono text-[10px] text-muted font-medium uppercase tracking-wider"
 									>Visits</th
 								>
 								<th
-									class="px-4 py-3 text-right text-xs text-muted font-medium uppercase tracking-wider"
+									class="px-4 py-3 text-right font-mono text-[10px] text-muted font-medium uppercase tracking-wider"
 									>Revenue</th
 								>
 								<th
-									class="px-4 py-3 text-right text-xs text-muted font-medium uppercase tracking-wider"
+									class="px-4 py-3 text-right font-mono text-[10px] text-muted font-medium uppercase tracking-wider"
 									>Avg Service</th
 								>
 							</tr>
@@ -132,7 +132,7 @@
 							{#each data.analytics.barber_breakdown as row}
 								<tr class="hover:bg-titanium/20 transition-colors">
 									<td class="px-6 py-4 text-primary font-medium text-sm">{row.barber_name ?? '—'}</td>
-									<td class="px-4 py-4 text-primary text-sm text-right"
+									<td class="px-4 py-4 text-primary text-sm text-right font-mono"
 										>{row.visits_completed ?? 0}</td
 									>
 									<td
@@ -140,7 +140,7 @@
 										class="px-4 py-4 text-gold-accent text-sm text-right font-mono font-medium"
 										>{formatRupees(row.revenue_paise)}</td
 									>
-									<td class="px-4 py-4 text-primary text-sm text-right"
+									<td class="px-4 py-4 text-primary text-sm text-right font-mono"
 										>{row.average_service_minutes ?? 0} min</td
 									>
 								</tr>

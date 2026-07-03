@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import Icon from '$lib/components/Icon.svelte';
 	import type { PageData, ActionData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -14,20 +15,31 @@
 	let activeEntryCount = $derived((form as any)?.active_entry_count ?? 0);
 
 	const statusLabel: Record<string, string> = {
-		open: '🟢 Open',
-		closed: '🔴 Closed',
-		temporarily_closed: '⏸ Temporarily Closed',
-		closing_soon: '🟡 Closing Soon'
+		open: 'Open',
+		closed: 'Closed',
+		temporarily_closed: 'Temporarily Closed',
+		closing_soon: 'Closing Soon'
 	};
 
 	function statusBadge(s: string) {
 		return (
 			{
-				open: 'bg-green-900/40 text-green-400 border-green-700',
-				closed: 'bg-red-900/40 text-system-error/80 border-red-700',
-				temporarily_closed: 'bg-yellow-900/40 text-yellow-400 border-yellow-700',
-				closing_soon: 'bg-orange-900/40 text-orange-400 border-orange-700'
+				open: 'bg-system-success/10 text-system-success border-system-success/30',
+				closed: 'bg-system-error/10 text-system-error border-system-error/30',
+				temporarily_closed: 'bg-system-warning/10 text-system-warning border-system-warning/30',
+				closing_soon: 'bg-system-warning/10 text-system-warning border-system-warning/30'
 			}[s] || 'bg-surface text-muted border-white/[0.05]'
+		);
+	}
+
+	function statusDot(s: string) {
+		return (
+			{
+				open: 'bg-system-success',
+				closed: 'bg-system-error',
+				temporarily_closed: 'bg-system-warning',
+				closing_soon: 'bg-system-warning'
+			}[s] || 'bg-dim'
 		);
 	}
 </script>
@@ -47,15 +59,15 @@
 		</div>
 
 		{#if form?.error}
-			<div class="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6 text-system-error/80 text-sm">
+			<div class="bg-system-error/10 border border-system-error/30 rounded-xl p-4 mb-6 text-system-error text-sm">
 				{form.error}
 			</div>
 		{/if}
 		{#if form?.success}
 			<div
-				class="bg-green-900/30 border border-green-700 rounded-xl p-4 mb-6 text-green-400 text-sm"
+				class="bg-system-success/10 border border-system-success/30 rounded-xl p-4 mb-6 text-system-success text-sm flex items-center gap-2"
 			>
-				✓ Shop status updated
+				<Icon name="check" size={14} /> Shop status updated
 			</div>
 		{/if}
 
@@ -65,10 +77,11 @@
 				<div class="flex items-center justify-between mb-4">
 					<h2 class="text-lg font-bold text-primary">Current Status</h2>
 					<span
-						class="px-3 py-1 rounded-full border text-sm font-medium {statusBadge(
+						class="px-3 py-1 rounded-full border text-sm font-medium inline-flex items-center gap-2 {statusBadge(
 							data.shopStatus.shop_status
 						)}"
 					>
+						<span class="inline-block w-1.5 h-1.5 rounded-full {statusDot(data.shopStatus.shop_status)}"></span>
 						{statusLabel[data.shopStatus.shop_status] ?? data.shopStatus.shop_status}
 					</span>
 				</div>
@@ -76,7 +89,7 @@
 					<div>
 						<p class="text-muted text-xs mb-1">Manual Override</p>
 						<p class="text-primary">
-							{data.shopStatus.manual_override_active ? '✓ Active' : '— None'}
+							{data.shopStatus.manual_override_active ? 'Active' : 'None'}
 						</p>
 					</div>
 					{#if data.shopStatus.override_expires_at}
@@ -91,30 +104,30 @@
 
 				<!-- Counter PIN -->
 				{#if data.shopStatus.arrival_pin}
-					<div class="mt-4 p-4 bg-gold-accent/10 border border-amber-700/50 rounded-xl">
+					<div class="mt-4 p-4 bg-gold-accent/10 border border-gold-accent/30 rounded-xl">
 						<p class="text-xs text-gold-accent font-semibold mb-1">
 							Counter PIN — show this to customers for arrival verification
 						</p>
 						<p
 							id="arrival-pin-display"
-							class="text-4xl font-bold font-mono text-amber-300 tracking-widest"
+							class="text-4xl font-bold font-mono text-gold-accent tracking-widest"
 						>
 							{data.shopStatus.arrival_pin}
 						</p>
 						<form method="POST" action="?/regeneratePin" use:enhance class="mt-3">
 							<button
 								type="submit"
-								class="text-xs text-gold-accent hover:text-gold-accent/80 transition-colors"
+								class="text-xs text-gold-accent hover:text-primary transition-colors inline-flex items-center gap-1.5"
 							>
-								↻ Regenerate PIN
+								<Icon name="refresh" size={12} /> Regenerate PIN
 							</button>
 						</form>
 					</div>
 				{/if}
 				{#if form?.pin_success && form?.new_pin}
-					<div class="mt-3 p-3 bg-green-900/20 border border-green-700 rounded-xl">
-						<p class="text-xs text-green-400">New PIN generated:</p>
-						<p class="text-2xl font-bold font-mono text-green-300 tracking-widest">
+					<div class="mt-3 p-3 bg-system-success/10 border border-system-success/30 rounded-xl">
+						<p class="text-xs text-system-success">New PIN generated:</p>
+						<p class="text-2xl font-bold font-mono text-system-success tracking-widest">
 							{form.new_pin}
 						</p>
 					</div>
@@ -137,9 +150,10 @@
 								class="sr-only peer"
 							/>
 							<div
-								class="border rounded-xl p-3 text-center text-sm font-medium transition-all border-white/[0.05] text-dim peer-checked:border-gold-accent peer-checked:text-gold-accent peer-checked:bg-gold-accent/10 hover:border-slate-500 hover:text-primary"
+								class="border rounded-xl p-3 text-center text-sm font-medium transition-all duration-150 border-white/[0.05] text-dim peer-checked:border-gold-accent peer-checked:text-gold-accent peer-checked:bg-gold-accent/10 hover:border-white/20 hover:text-primary flex items-center justify-center gap-2"
 							>
-								{#if s === 'open'}🟢 Open{:else if s === 'closed'}🔴 Closed{:else}⏸ Temp Closed{/if}
+								<span class="inline-block w-1.5 h-1.5 rounded-full {statusDot(s)}"></span>
+								{#if s === 'open'}Open{:else if s === 'closed'}Closed{:else}Temp Closed{/if}
 							</div>
 						</label>
 					{/each}
@@ -169,7 +183,7 @@
 					id="submit-shop-status-btn"
 					type="submit"
 					disabled={!selectedStatus}
-					class="w-full bg-gold-accent hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-canvas font-bold py-3 rounded-xl transition-all"
+					class="w-full bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:brightness-100 text-canvas font-bold py-3 rounded-xl transition-all duration-150"
 				>
 					Update Status
 				</button>
@@ -180,12 +194,15 @@
 
 <!-- 422 Modal: Active customers conflict -->
 {#if showModal}
-	<div class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+	<div class="fixed inset-0 bg-canvas/85 backdrop-blur-sm flex items-center justify-center z-50 p-4">
 		<div
 			id="shop-status-conflict-modal"
-			class="bg-matte border border-white/[0.05] rounded-2xl p-6 max-w-md w-full shadow-2xl"
+			class="bg-matte border border-white/[0.05] rounded-2xl p-6 max-w-md w-full shadow-2xl machined-edge"
 		>
-			<h3 class="text-xl font-bold text-primary mb-2">⚠️ Active Customers Waiting</h3>
+			<h3 class="text-xl font-bold text-primary mb-2 flex items-center gap-2">
+				<span class="text-system-warning"><Icon name="alert" size={20} /></span>
+				Active Customers Waiting
+			</h3>
 			<p class="text-primary mb-6 text-sm">
 				There {activeEntryCount === 1 ? 'is' : 'are'}
 				<strong class="text-primary">{activeEntryCount}</strong>
@@ -204,7 +221,7 @@
 					<button
 						id="modal-finish-remaining-btn"
 						type="submit"
-						class="w-full bg-blue-600 hover:bg-blue-500 text-primary font-bold py-3 rounded-xl transition-all text-sm"
+						class="w-full bg-primary hover:brightness-110 active:brightness-90 active:scale-[0.98] text-canvas font-bold py-3 rounded-xl transition-all duration-150 text-sm"
 					>
 						Serve them first, then close
 					</button>
@@ -221,7 +238,7 @@
 					<button
 						id="modal-expire-remaining-btn"
 						type="submit"
-						class="w-full bg-red-700 hover:bg-red-600 text-primary font-bold py-3 rounded-xl transition-all text-sm"
+						class="w-full bg-system-error/10 border border-system-error/30 hover:bg-system-error hover:text-canvas active:scale-[0.98] text-system-error font-bold py-3 rounded-xl transition-all duration-150 text-sm"
 					>
 						Cancel all waiting customers
 					</button>

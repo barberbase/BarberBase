@@ -207,7 +207,7 @@
 					<h1 class="text-xl font-extrabold text-primary font-satoshi tracking-tightest mb-1">Add your first service</h1>
 					<p class="text-muted text-sm mb-6">What's the main thing customers come in for?</p>
 					{#if svcError}
-						<div class="text-sm mb-4 bg-red-950/30 border border-system-error/20 rounded-xl p-3 text-system-error/80">{svcError}</div>
+						<div class="text-sm mb-4 bg-system-error/10 border border-system-error/20 rounded-xl p-3 text-system-error">{svcError}</div>
 					{/if}
 					<div class="space-y-4">
 						<div class="grid grid-cols-2 gap-3">
@@ -295,7 +295,7 @@
 					<h2 class="text-xl font-extrabold text-primary font-satoshi tracking-tightest mb-1">Add a team member</h2>
 					<p class="text-muted text-sm mb-6">Who's working today?</p>
 					{#if staffError}
-						<div class="text-sm mb-4 bg-red-950/30 border border-system-error/20 rounded-xl p-3 text-system-error/80">{staffError}</div>
+						<div class="text-sm mb-4 bg-system-error/10 border border-system-error/20 rounded-xl p-3 text-system-error">{staffError}</div>
 					{/if}
 					<div class="space-y-4">
 						<div>
@@ -346,7 +346,7 @@
 					<h2 class="text-xl font-extrabold text-primary font-satoshi tracking-tightest mb-1">Connect WhatsApp</h2>
 					<p class="text-muted text-sm mb-6">Optional — lets customers get queue updates on WhatsApp.</p>
 					{#if waWebhookUrl}
-						<div class="bg-emerald-950/20 border border-system-success/20 rounded-xl p-4 mb-4">
+						<div class="bg-system-success/10 border border-system-success/30 rounded-xl p-4 mb-4">
 							<p class="text-system-success text-sm font-semibold mb-2">
 								Connected. Paste this webhook URL into Bhejna Developer Settings:
 							</p>
@@ -366,7 +366,7 @@
 						</div>
 					{:else}
 						{#if waError}
-							<div class="text-sm mb-4 bg-red-950/30 border border-system-error/20 rounded-xl p-3 text-system-error/80">{waError}</div>
+							<div class="text-sm mb-4 bg-system-error/10 border border-system-error/20 rounded-xl p-3 text-system-error">{waError}</div>
 						{/if}
 						<div>
 							<label for="wz-wa-json" class="block text-xs font-medium text-muted mb-1.5">Bhejna config JSON</label>

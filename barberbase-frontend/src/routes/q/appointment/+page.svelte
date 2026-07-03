@@ -1,5 +1,6 @@
 <script lang="ts">
 	/* Appointment management is deferred to Phase 1.5. Pure stub page. */
+	import Icon from '$lib/components/Icon.svelte';
 </script>
 
 <svelte:head>
@@ -20,17 +21,30 @@
 			class="absolute -bottom-24 -right-24 w-48 h-48 bg-gold-accent/5 rounded-full blur-3xl pointer-events-none"
 		></div>
 
-		<div class="text-5xl animate-pulse">📅</div>
-		<h1 class="text-2xl font-black text-primary tracking-wide">Appointment Management</h1>
-
-		<div class="space-y-2 py-2">
-			<p class="text-sm text-primary font-semibold">Your appointment details will appear here.</p>
-			<p class="text-xs text-muted">Appointment management is coming soon.</p>
+		<div class="mx-auto w-16 h-16 rounded-full bg-canvas/60 border border-white/[0.06] flex items-center justify-center text-gold-accent">
+			<Icon name="calendar" size={28} />
 		</div>
 
-		<div class="pt-4 border-t border-white/[0.02]">
-			<span class="text-[10px] font-bold text-gold-accent uppercase tracking-widest"
-				>BarberBase Platform</span
+		<div class="space-y-3">
+			<span class="inline-block font-mono text-[10px] font-medium uppercase tracking-[0.25em] text-muted border border-white/[0.08] bg-titanium rounded px-2.5 py-1"
+				>Coming Soon</span
+			>
+			<h1 class="text-2xl font-extrabold text-primary tracking-tight">Appointments</h1>
+		</div>
+
+		<div class="space-y-2 py-2">
+			<p class="text-sm text-primary font-semibold">
+				Online appointment booking is on its way.
+			</p>
+			<p class="text-xs text-muted leading-relaxed">
+				For now, walk-ins and WhatsApp queue joins work as usual — your live queue status
+				stays in the WhatsApp link we sent you.
+			</p>
+		</div>
+
+		<div class="pt-4 border-t border-white/[0.04]">
+			<span class="font-mono text-[10px] font-medium text-dim uppercase tracking-[0.25em]"
+				>BarberBase</span
 			>
 		</div>
 	</div>

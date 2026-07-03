@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { PUBLIC_VAPID_PUBLIC_KEY } from '$env/static/public';
+	import Icon from '$lib/components/Icon.svelte';
 
 	// Svelte 5 Rune props
 	let { jwt } = $props<{ jwt: string }>();
@@ -89,19 +90,7 @@
 	<div class="push-prompt-container" id="push-permission-prompt">
 		<div class="push-prompt-content">
 			<div class="push-prompt-icon">
-				<svg
-					viewBox="0 0 24 24"
-					width="20"
-					height="20"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				>
-					<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
-					<path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
-				</svg>
+				<Icon name="bell" size={18} />
 			</div>
 			<div class="push-prompt-text">
 				<span class="push-prompt-label"
@@ -128,7 +117,7 @@
 		transform: translateX(-50%);
 		width: calc(100% - 48px);
 		max-width: 500px;
-		background: rgba(26, 26, 26, 0.95);
+		background: rgba(28, 28, 28, 0.95); /* titanium */
 		backdrop-filter: blur(12px);
 		border: 1px solid rgba(255, 255, 255, 0.1);
 		border-radius: 16px;
@@ -169,9 +158,10 @@
 		justify-content: center;
 		width: 36px;
 		height: 36px;
-		background: rgba(255, 255, 255, 0.1);
+		background: rgba(200, 169, 107, 0.1);
+		border: 1px solid rgba(200, 169, 107, 0.25);
 		border-radius: 50%;
-		color: #ffffff;
+		color: #c8a96b;
 		flex-shrink: 0;
 	}
 
@@ -187,7 +177,7 @@
 			sans-serif;
 		font-size: 14px;
 		font-weight: 500;
-		color: #e0e0e0;
+		color: #e5e2d9;
 		line-height: 1.4;
 	}
 
@@ -211,20 +201,20 @@
 			sans-serif;
 		font-size: 13px;
 		font-weight: 600;
-		color: #1a1a1a;
-		background: #ffffff;
+		color: #080808;
+		background: #e5e2d9;
 		border: none;
-		border-radius: 8px;
+		border-radius: 999px;
 		padding: 8px 16px;
 		cursor: pointer;
 		transition:
-			background 0.2s ease,
-			transform 0.1s ease;
+			filter 0.15s ease,
+			transform 0.15s ease;
 		white-space: nowrap;
 	}
 
 	.push-btn-primary:hover {
-		background: #e6e6e6;
+		filter: brightness(1.08);
 	}
 
 	.push-btn-primary:active {
@@ -239,7 +229,7 @@
 			sans-serif;
 		font-size: 13px;
 		font-weight: 500;
-		color: #a0a0a0;
+		color: #9f9b93;
 		background: transparent;
 		border: none;
 		padding: 8px 12px;
@@ -250,6 +240,6 @@
 	}
 
 	.push-btn-secondary:hover {
-		color: #ffffff;
+		color: #e5e2d9;
 	}
 </style>

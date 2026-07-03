@@ -55,7 +55,7 @@
 		</div>
 
 		{#if form?.error}
-			<div class="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6 text-system-error/80 text-sm">
+			<div class="bg-system-error/10 border border-system-error/30 rounded-xl p-4 mb-6 text-system-error text-sm">
 				{form.error}
 			</div>
 		{/if}
@@ -66,8 +66,8 @@
 				<div>
 					{#if isConnected}
 						<div class="flex items-center gap-2 mb-2">
-							<span class="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"></span>
-							<span class="text-green-400 font-semibold text-sm">Mode B — Your Own Number</span>
+							<span class="w-2.5 h-2.5 rounded-full bg-system-success animate-pulse"></span>
+							<span class="text-system-success font-semibold text-sm">Mode B — Your Own Number</span>
 						</div>
 						<p class="text-primary font-mono text-lg">{connectedPhone}</p>
 						<p class="text-muted text-xs mt-1">
@@ -75,7 +75,7 @@
 						</p>
 					{:else if isDisconnected}
 						<div class="flex items-center gap-2 mb-2">
-							<span class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+							<span class="w-2.5 h-2.5 rounded-full bg-dim"></span>
 							<span class="text-muted font-semibold text-sm"
 								>Mode A — Shared BarberBase Number</span
 							>
@@ -85,7 +85,7 @@
 						</p>
 					{:else}
 						<div class="flex items-center gap-2 mb-2">
-							<span class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+							<span class="w-2.5 h-2.5 rounded-full bg-dim"></span>
 							<span class="text-muted font-semibold text-sm"
 								>Mode A — Shared BarberBase Number</span
 							>
@@ -103,9 +103,9 @@
 			<!-- Webhook URL copy box -->
 			<div
 				id="webhook-url-panel"
-				class="bg-green-900/20 border border-green-700 rounded-2xl p-6 mb-6 shadow-xl"
+				class="bg-system-success/10 border border-system-success/30 rounded-2xl p-6 mb-6 shadow-xl"
 			>
-				<p class="text-green-400 font-semibold mb-1 text-sm">
+				<p class="text-system-success font-semibold mb-1 text-sm">
 					Step 2: Paste this URL into your Bhejna portal
 				</p>
 				<p class="text-muted text-xs mb-3">Bhejna portal → Developer Settings → Webhook URL</p>
@@ -114,14 +114,14 @@
 						id="webhook-url-display"
 						readonly
 						value={webhookUrl}
-						class="flex-1 bg-matte border border-white/[0.05] rounded-lg px-3 py-2 text-green-300 text-xs font-mono focus:outline-none"
+						class="flex-1 bg-matte border border-white/[0.05] rounded-lg px-3 py-2 text-system-success text-xs font-mono focus:outline-none"
 					/>
 					<button
 						id="copy-webhook-btn"
 						onclick={copyWebhook}
 						class="bg-titanium hover:bg-surface text-primary text-sm px-4 py-2 rounded-lg transition-colors font-medium whitespace-nowrap"
 					>
-						{copied ? '✓ Copied!' : 'Copy URL'}
+						{copied ? 'Copied' : 'Copy URL'}
 					</button>
 				</div>
 			</div>
@@ -137,7 +137,7 @@
 					<button
 						id="disconnect-whatsapp-btn"
 						type="submit"
-						class="bg-red-700/80 hover:bg-red-700 text-primary font-bold px-6 py-2 rounded-xl text-sm transition-all"
+						class="bg-system-error/10 border border-system-error/30 hover:bg-system-error hover:text-canvas text-system-error font-bold px-6 py-2 rounded-xl text-sm transition-all"
 						onclick={(e) => {
 							if (!confirm('Disconnect your own WhatsApp number?')) e.preventDefault();
 						}}
@@ -176,7 +176,7 @@
 					<button
 						id="submit-connect-whatsapp-btn"
 						type="submit"
-						class="w-full bg-gold-accent hover:bg-amber-400 text-canvas font-bold py-3 rounded-xl text-sm transition-all"
+						class="w-full bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] text-canvas font-bold py-3 rounded-xl text-sm transition-all duration-150"
 					>
 						Connect WhatsApp
 					</button>

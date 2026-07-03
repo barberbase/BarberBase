@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import Icon from '$lib/components/Icon.svelte';
 
 	let { form } = $props<{
 		form: {
@@ -127,9 +128,9 @@
 			>
 				<div class="text-center space-y-2">
 					<div
-						class="mx-auto w-16 h-16 rounded-full bg-system-success/10 border border-system-success/30 flex items-center justify-center text-3xl"
+						class="mx-auto w-16 h-16 rounded-full bg-system-success/10 border border-system-success/30 flex items-center justify-center text-system-success"
 					>
-						🎉
+						<Icon name="check-circle" size={28} />
 					</div>
 					<h2 class="text-2xl font-extrabold text-system-success/80">Shop Successfully Provisioned!</h2>
 					<p class="text-sm text-muted">

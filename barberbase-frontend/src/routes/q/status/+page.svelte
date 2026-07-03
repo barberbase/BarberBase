@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getApiBase } from '$lib/api/client';
+	import Icon from '$lib/components/Icon.svelte';
 
 	// SvelteKit SSR data
 	let { data } = $props<{
@@ -384,7 +385,9 @@
 		<!-- ERROR PAGES -->
 		{#if initialError === 'invalid_link'}
 			<div class="text-center py-10 space-y-4">
-				<div class="text-5xl">⚠️</div>
+				<div class="mx-auto w-16 h-16 rounded-full bg-canvas/60 border border-white/[0.06] flex items-center justify-center text-system-error">
+					<Icon name="alert" size={28} />
+				</div>
 				<h1 class="text-xl font-extrabold text-primary">Invalid Link</h1>
 				<p class="text-sm text-muted">
 					This link is not valid. Please request a new one via WhatsApp.
@@ -392,7 +395,9 @@
 			</div>
 		{:else if initialError === 'expired'}
 			<div class="text-center py-10 space-y-4">
-				<div class="text-5xl">⏰</div>
+				<div class="mx-auto w-16 h-16 rounded-full bg-canvas/60 border border-white/[0.06] flex items-center justify-center text-system-warning">
+					<Icon name="clock" size={28} />
+				</div>
 				<h1 class="text-xl font-extrabold text-primary">Link Expired</h1>
 				<p class="text-sm text-muted">
 					Your session has expired (links are valid for 23 hours).
@@ -400,7 +405,9 @@
 			</div>
 		{:else if initialError === 'not_found'}
 			<div class="text-center py-10 space-y-4">
-				<div class="text-5xl">📭</div>
+				<div class="mx-auto w-16 h-16 rounded-full bg-canvas/60 border border-white/[0.06] flex items-center justify-center text-muted">
+					<Icon name="inbox" size={28} />
+				</div>
 				<h1 class="text-xl font-extrabold text-primary">Inactive Entry</h1>
 				<p class="text-sm text-muted">This queue entry is no longer active.</p>
 			</div>
@@ -426,7 +433,9 @@
 			{#if currentEntry.state === 'completed'}
 				<!-- STATE 6 — Completed -->
 				<div class="text-center py-6 space-y-4">
-					<div class="text-5xl animate-float-slow">🎉</div>
+					<div class="mx-auto w-16 h-16 rounded-full bg-gold-accent/10 border border-gold-accent/25 flex items-center justify-center text-gold-accent animate-float-slow">
+						<Icon name="sparkles" size={28} />
+					</div>
 					<h1 class="text-2xl font-black text-primary">All Done!</h1>
 					<p class="text-sm text-muted">
 						Thanks for visiting {currentEntry.shop_name || 'us'}.
@@ -461,7 +470,9 @@
 				<div
 					class="text-center py-8 space-y-4 bg-gold-accent/10 border border-gold-accent/30 rounded-3xl p-6 ring-2 ring-gold-accent/20"
 				>
-					<div class="text-5xl motion-safe:animate-pulse">🔔</div>
+					<div class="mx-auto w-16 h-16 rounded-full bg-gold-accent text-canvas flex items-center justify-center shadow-[0_0_12px_rgba(200,169,107,0.15)] motion-safe:animate-pulse">
+						<Icon name="bell" size={28} />
+					</div>
 					<h1 class="text-2xl font-black text-gold-accent">It's Your Turn!</h1>
 					<p class="text-sm text-gold-accent">Please go to the barber chair now.</p>
 				</div>
@@ -470,14 +481,18 @@
 				<div
 					class="text-center py-8 space-y-4 bg-system-success/10 border border-system-success/30 rounded-3xl p-6"
 				>
-					<div class="text-5xl">✂️</div>
+					<div class="mx-auto w-16 h-16 rounded-full bg-system-success/10 border border-system-success/30 flex items-center justify-center text-system-success">
+						<Icon name="scissors" size={28} />
+					</div>
 					<h1 class="text-2xl font-black text-system-success/80">In Progress</h1>
 					<p class="text-sm text-system-success">Enjoy your service!</p>
 				</div>
 			{:else if currentEntry.state === 'cancelled' || currentEntry.state === 'expired'}
 				<!-- STATE — Terminal / Cancelled -->
 				<div class="text-center py-6 space-y-4">
-					<div class="text-5xl">🚫</div>
+					<div class="mx-auto w-16 h-16 rounded-full bg-canvas/60 border border-white/[0.06] flex items-center justify-center text-system-error">
+						<Icon name="x-circle" size={28} />
+					</div>
 					<h1 class="text-2xl font-black text-primary">Queue Entry Ended</h1>
 					<p class="text-sm text-muted">
 						{currentEntry.state === 'cancelled'
@@ -488,7 +503,9 @@
 			{:else if currentEntry.presence_state === 'snoozed' || currentEntry.state === 'skipped' || currentEntry.state === 'no_show'}
 				<!-- STATE 7 — Spot Paused -->
 				<div class="text-center py-6 space-y-4">
-					<div class="text-5xl">⏸</div>
+					<div class="mx-auto w-16 h-16 rounded-full bg-canvas/60 border border-white/[0.06] flex items-center justify-center text-system-warning">
+						<Icon name="pause-circle" size={28} />
+					</div>
 					<h1 class="text-2xl font-black text-primary">Spot Paused</h1>
 					<p class="text-sm text-muted">
 						Your turn was passed. Ask staff to reactivate your spot.
@@ -506,7 +523,9 @@
 				<div
 					class="text-center py-8 space-y-4 bg-canvas/40 border border-white/[0.03] rounded-3xl p-6"
 				>
-					<div class="text-5xl">✅</div>
+					<div class="mx-auto w-16 h-16 rounded-full bg-system-success/10 border border-system-success/30 flex items-center justify-center text-system-success">
+						<Icon name="check-circle" size={28} />
+					</div>
 					<h1 class="text-2xl font-black text-primary">You're Confirmed!</h1>
 					<p class="text-sm text-muted">
 						Please wait inside the shop. We will call you when it is your turn.
@@ -536,7 +555,7 @@
 							<div class="text-[10px] text-muted font-bold uppercase tracking-wider">
 								Ahead of You
 							</div>
-							<div class="text-xl font-black text-primary mt-0.5">
+							<div class="text-xl font-mono font-bold text-primary mt-0.5">
 								{currentEntry.position_ahead}
 							</div>
 						</div>
@@ -545,7 +564,7 @@
 							<div class="text-[10px] text-muted font-bold uppercase tracking-wider">
 								Est. Wait
 							</div>
-							<div class="text-xl font-black text-primary mt-0.5">
+							<div class="text-xl font-mono font-bold text-primary mt-0.5">
 								{currentEntry.estimated_wait_minutes}m
 							</div>
 						</div>
@@ -621,7 +640,8 @@
 									<span class="inline-block w-3.5 h-3.5 border-2 border-white/20 border-t-gold-accent rounded-full animate-spin motion-reduce:animate-none"></span>
 									<span>Retrieving GPS...</span>
 								{:else}
-									<span>📍 Auto-Confirm using GPS</span>
+									<Icon name="map-pin" size={14} />
+									<span>Auto-Confirm using GPS</span>
 								{/if}
 							</button>
 
@@ -646,7 +666,7 @@
 							<div class="text-[10px] text-muted font-bold uppercase tracking-wider">
 								Ahead of You
 							</div>
-							<div class="text-xl font-black text-primary mt-0.5">
+							<div class="text-xl font-mono font-bold text-primary mt-0.5">
 								{currentEntry.position_ahead}
 							</div>
 						</div>
@@ -655,7 +675,7 @@
 							<div class="text-[10px] text-muted font-bold uppercase tracking-wider">
 								Est. Wait
 							</div>
-							<div class="text-xl font-black text-primary mt-0.5">
+							<div class="text-xl font-mono font-bold text-primary mt-0.5">
 								{currentEntry.estimated_wait_minutes}m
 							</div>
 						</div>
@@ -687,7 +707,7 @@
 							disabled={isSubmitting}
 						>
 							<span>I'm On My Way</span>
-							<span class="text-xs font-bold">🏃</span>
+							<Icon name="arrow-right" size={16} />
 						</button>
 
 						<button

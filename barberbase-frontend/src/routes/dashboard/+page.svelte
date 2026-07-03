@@ -3,6 +3,7 @@
 	import { QueueStore } from '$lib/stores/queue.svelte';
 	import { connectSSE } from '$lib/sse';
 	import CheckoutModal from '$lib/components/CheckoutModal.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 
 	// SvelteKit SSR data
 	let { data } = $props<{
@@ -132,6 +133,62 @@
 		);
 	}
 
+	// Legibility helpers: humanized state labels, presence icons, card tiers.
+	const STATE_LABELS: Record<string, string> = {
+		in_progress: 'In Chair',
+		called: 'Called',
+		waiting: 'Waiting',
+		skipped: 'Skipped'
+	};
+
+	function stateBadgeClass(state: string): string {
+		switch (state) {
+			case 'in_progress':
+				return 'bg-system-success/10 border-system-success/30 text-system-success';
+			case 'called':
+				return 'bg-gold-accent border-gold-accent text-canvas';
+			case 'waiting':
+				return 'bg-titanium border-white/[0.08] text-muted';
+			default:
+				return 'bg-canvas/50 border-white/[0.03] text-dim';
+		}
+	}
+
+	function presenceMeta(p: string | null | undefined) {
+		switch (p) {
+			case 'remote':
+				return { icon: 'globe' as const, label: 'Remote', cls: 'text-muted' };
+			case 'notified':
+				return { icon: 'send' as const, label: 'Notified', cls: 'text-muted' };
+			case 'on_the_way':
+				return { icon: 'arrow-right' as const, label: 'On the Way', cls: 'text-gold-accent' };
+			case 'arrived':
+				return { icon: 'check' as const, label: 'Arrived', cls: 'text-system-success' };
+			case 'snoozed':
+				return { icon: 'pause-circle' as const, label: 'Snoozed', cls: 'text-system-warning' };
+			default:
+				return { icon: 'user' as const, label: 'Walk-in', cls: 'text-dim' };
+		}
+	}
+
+	// Stale warnings (spec: yellow/red) override the state tier.
+	function cardClass(entry: any): string {
+		if (entry.stale_warning === 'called_critical' || entry.stale_warning === 'in_progress_critical')
+			return 'border-system-error/60 bg-system-error/[0.06] ring-2 ring-system-error/40 animate-pulse-slow';
+		if (entry.stale_warning === 'called_warning' || entry.stale_warning === 'in_progress_warning')
+			return 'border-system-warning/50 bg-system-warning/[0.05] ring-1 ring-system-warning/25';
+		switch (entry.state) {
+			case 'in_progress':
+				return 'border-system-success/25 bg-surface';
+			case 'called':
+				return 'border-gold-accent/35 bg-gold-accent/[0.04]';
+			case 'skipped':
+				return 'border-white/[0.03] bg-matte opacity-60';
+			default:
+				return 'border-white/[0.03] bg-matte hover:border-white/[0.06]';
+		}
+	}
+
 	// Sorted queue entries: in_progress -> called -> waiting -> skipped -> others
 	const sortedEntries = $derived(() => {
 		if (!store.snapshot || !store.snapshot.entries) return [];
@@ -175,6 +232,27 @@
 		skipped.sort((a, b) => new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime());
 
 		return [...inProgress, ...called, ...waiting, ...skipped, ...others];
+	});
+
+	// Labeled sections so the queue's priority tiers read at a glance.
+	const queueGroups = $derived(() => {
+		const buckets: Record<string, any[]> = {
+			in_progress: [],
+			called: [],
+			waiting: [],
+			skipped: [],
+			other: []
+		};
+		for (const entry of sortedEntries()) {
+			buckets[entry.state in buckets ? entry.state : 'other'].push(entry);
+		}
+		return [
+			{ key: 'in_progress', label: 'Now Serving', cls: 'text-system-success', entries: buckets.in_progress },
+			{ key: 'called', label: 'Called', cls: 'text-gold-accent', entries: buckets.called },
+			{ key: 'waiting', label: 'Waiting', cls: 'text-muted', entries: buckets.waiting },
+			{ key: 'skipped', label: 'Skipped', cls: 'text-dim', entries: buckets.skipped },
+			{ key: 'other', label: 'Other', cls: 'text-dim', entries: buckets.other }
+		].filter((g) => g.entries.length > 0);
 	});
 
 	// Active counts
@@ -243,7 +321,7 @@
 <div class="min-h-screen bg-canvas text-primary flex flex-col font-manrope">
 	<!-- Error toast -->
 	{#if toastMessage}
-		<div role="alert" aria-live="assertive" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-red-950/90 border border-system-error/30 text-system-error rounded-xl px-5 py-3 text-sm font-medium shadow-lg max-w-md animate-fade-in">
+		<div role="alert" aria-live="assertive" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-matte border border-system-error/40 text-system-error rounded-xl px-5 py-3 text-sm font-medium shadow-lg max-w-md animate-fade-in">
 			{toastMessage}
 		</div>
 	{/if}
@@ -266,16 +344,16 @@
 				<span class="relative flex h-2.5 w-2.5">
 					<span
 						class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 {store.sseConnected
-							? 'bg-emerald-400'
-							: 'bg-rose-400'}"
+							? 'bg-system-success'
+							: 'bg-system-error'}"
 					></span>
 					<span
 						class="relative inline-flex rounded-full h-2.5 w-2.5 {store.sseConnected
 							? 'bg-system-success'
-							: 'bg-rose-500'}"
+							: 'bg-system-error'}"
 					></span>
 				</span>
-				<span class={store.sseConnected ? 'text-system-success/80' : 'text-rose-400'}>
+				<span class={store.sseConnected ? 'text-system-success/80' : 'text-system-error'}>
 					{store.sseConnected ? 'Live' : 'SSE Offline'}
 				</span>
 			</div>
@@ -283,7 +361,7 @@
 			<!-- Queue Session Status Badge -->
 			{#if store.snapshot}
 				<div
-					class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-white/[0.05] bg-slate-850 flex items-center"
+					class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-white/[0.05] bg-canvas flex items-center"
 				>
 					Session:
 					<span
@@ -302,7 +380,7 @@
 
 			<!-- Barber Name -->
 			<div class="text-sm text-primary">
-				Hello, <span class="font-bold text-white">{data.snapshot ? 'Barber' : 'Staff'}</span>
+				Hello, <span class="font-bold text-primary">{data.snapshot ? 'Barber' : 'Staff'}</span>
 			</div>
 		</div>
 	</header>
@@ -310,7 +388,7 @@
 	<!-- Operational Alert Banners -->
 	{#if store.snapshot && store.snapshot.session_status === 'ending'}
 		<div
-			class="bg-amber-950/40 border-b border-amber-900/40 px-6 py-3.5 text-sm text-amber-300 flex items-center space-x-3"
+			class="bg-system-warning/10 border-b border-system-warning/20 px-6 py-3.5 text-sm text-system-warning flex items-center space-x-3"
 		>
 			<svg
 				xmlns="http://www.w3.org/2000/svg"
@@ -368,7 +446,7 @@
 					<!-- BIG Call Next Button (two-tap confirm) -->
 					<button
 						type="button"
-						class="w-full py-5 {callNextArmed ? 'bg-amber-500 hover:bg-amber-400 ring-2 ring-amber-400/50' : 'bg-gold-accent hover:bg-amber-400'} active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-gold-accent text-canvas font-black text-xl rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex flex-col items-center justify-center space-y-1"
+						class="w-full py-5 bg-gold-accent {callNextArmed ? 'ring-2 ring-gold-accent/50 brightness-110' : ''} hover:brightness-110 active:brightness-90 active:scale-[0.99] disabled:opacity-40 disabled:hover:brightness-100 text-canvas font-black text-xl rounded-2xl transition-all duration-150 shadow-[0_0_12px_rgba(200,169,107,0.15)] cursor-pointer flex flex-col items-center justify-center space-y-1"
 						disabled={activeActions['call-next'] || store.snapshot?.session_status === 'closed'}
 						onclick={handleCallNext}
 					>
@@ -391,11 +469,11 @@
 					<div class="grid grid-cols-2 gap-3 pt-2">
 						<div class="bg-canvas border border-white/[0.03] rounded-xl p-3.5 text-center">
 							<div class="text-xs font-medium text-muted">Total Active</div>
-							<div class="text-2xl font-black text-primary mt-1">{activeCount}</div>
+							<div class="text-2xl font-mono font-bold text-primary mt-1">{activeCount}</div>
 						</div>
 						<div class="bg-canvas border border-white/[0.03] rounded-xl p-3.5 text-center">
 							<div class="text-xs font-medium text-muted">Waiting</div>
-							<div class="text-2xl font-black text-primary mt-1">{store.snapshot?.entries?.filter((e: any) => e.state === 'waiting').length || 0}</div>
+							<div class="text-2xl font-mono font-bold text-primary mt-1">{store.snapshot?.entries?.filter((e: any) => e.state === 'waiting').length || 0}</div>
 						</div>
 					</div>
 				</div>
@@ -407,7 +485,7 @@
 					<h2 class="text-lg font-bold text-primary tracking-wide">Add Walk-in Client</h2>
 					<button
 						type="button"
-						class="px-3 py-1.5 text-xs font-bold rounded-xl border border-white/[0.05] hover:bg-slate-800 transition-colors"
+						class="px-3 py-1.5 text-xs font-bold rounded-xl border border-white/[0.05] hover:bg-titanium transition-colors"
 						onclick={() => {
 							showWalkInForm = !showWalkInForm;
 						}}
@@ -431,7 +509,7 @@
 								id="walk-in-name"
 								placeholder="e.g. Rahul, Guest, Uncle"
 								maxlength="80"
-								class="w-full bg-canvas border border-white/[0.03] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent placeholder:text-slate-650"
+								class="w-full bg-canvas border border-white/[0.03] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent placeholder:text-dim"
 								bind:value={walkInName}
 							/>
 						</div>
@@ -445,7 +523,7 @@
 								type="tel"
 								id="walk-in-phone"
 								placeholder="e.g. 9876543210"
-								class="w-full bg-canvas border border-white/[0.03] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent placeholder:text-slate-650"
+								class="w-full bg-canvas border border-white/[0.03] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent placeholder:text-dim"
 								bind:value={walkInPhone}
 							/>
 							<span class="text-[10px] text-dim mt-0.5 block"
@@ -493,7 +571,7 @@
 								>Select Service Variants (Required)</span
 							>
 							<div
-								class="max-h-48 overflow-y-auto bg-canvas border border-white/[0.03] rounded-xl p-3 space-y-2 divide-y divide-slate-800/40"
+								class="max-h-48 overflow-y-auto bg-canvas border border-white/[0.03] rounded-xl p-3 space-y-2 divide-y divide-white/[0.04]"
 							>
 								{#if allVariants().length === 0}
 								<p class="text-xs text-dim py-2 text-center">No services configured. Add services in <a href="/admin/services" class="text-gold-accent hover:underline">Admin → Services</a>.</p>
@@ -503,7 +581,7 @@
 										<input
 											type="checkbox"
 											value={v.id}
-											class="mt-1 rounded text-gold-accent bg-matte border-white/[0.03] focus:ring-offset-slate-900"
+											class="mt-1 rounded text-gold-accent bg-matte border-white/[0.03] focus:ring-offset-canvas"
 											bind:group={walkInSelectedVariants}
 										/>
 										<div class="text-xs">
@@ -521,7 +599,7 @@
 						<!-- Error Display -->
 						{#if walkInError}
 							<div
-								class="bg-red-950/40 border border-system-error/30 rounded-xl p-3 text-xs text-system-error/80 flex items-start space-x-2"
+								class="bg-system-error/10 border border-system-error/30 rounded-xl p-3 text-xs text-system-error flex items-start space-x-2"
 							>
 								<svg
 									xmlns="http://www.w3.org/2000/svg"
@@ -543,7 +621,7 @@
 
 						<button
 							type="submit"
-							class="w-full bg-gold-accent hover:bg-amber-400 active:bg-amber-600 text-canvas font-bold py-2.5 rounded-xl transition-all duration-150 text-sm cursor-pointer"
+							class="w-full bg-gold-accent hover:brightness-110 active:brightness-90 text-canvas font-bold py-2.5 rounded-xl transition-all duration-150 text-sm cursor-pointer"
 						>
 							Add Walk-in client
 						</button>
@@ -563,7 +641,7 @@
 
 			{#if sortedEntries().length === 0}
 				<div
-					class="bg-matte border border-white/[0.03] rounded-2xl p-12 text-center text-slate-450 flex flex-col items-center justify-center space-y-3"
+					class="bg-matte border border-white/[0.03] rounded-2xl p-12 text-center text-muted flex flex-col items-center justify-center space-y-3"
 				>
 					<svg
 						xmlns="http://www.w3.org/2000/svg"
@@ -585,67 +663,55 @@
 					>
 				</div>
 			{:else}
-				<div class="space-y-4" aria-live="polite" aria-relevant="additions removals">
-					{#each sortedEntries() as entry (entry.id)}
-						<!-- Queue Entry Card with border styling for stale warnings -->
+				<div class="space-y-6" aria-live="polite" aria-relevant="additions removals">
+					{#each queueGroups() as group (group.key)}
+						<div class="space-y-3">
+							<!-- Section header: the state tier reads before any card detail -->
+							<div class="flex items-center gap-3">
+								<span class="font-mono text-[10px] font-medium uppercase tracking-[0.25em] {group.cls}">
+									{group.label}
+								</span>
+								<span class="font-mono text-[10px] text-dim">{group.entries.length}</span>
+								<div class="flex-1 border-t border-white/[0.04]"></div>
+							</div>
+
+							{#each group.entries as entry (entry.id)}
+						<!-- Queue Entry Card: tier tint by state, stale warnings override -->
 						<div
-							class="border rounded-2xl p-4 shadow-md transition-all duration-300 bg-matte border-white/[0.03] hover:border-white/[0.05] flex flex-col md:flex-row justify-between gap-4
-							{entry.stale_warning === 'called_warning' || entry.stale_warning === 'in_progress_warning'
-								? 'border-gold-accent bg-amber-950/20 ring-1 ring-amber-500/30'
-								: ''}
-							{entry.stale_warning === 'called_critical' || entry.stale_warning === 'in_progress_critical'
-								? 'border-red-500 bg-red-950/20 ring-2 ring-red-500/50 animate-pulse-slow'
-								: ''}"
+							class="border rounded-2xl p-4 shadow-md transition-all duration-300 flex flex-col md:flex-row justify-between gap-4 {cardClass(entry)}"
 						>
 							<!-- Left Column: Token + Customer Details -->
 							<div class="flex-1 space-y-3">
 								<div class="flex items-center space-x-2 flex-wrap gap-y-1">
 									<!-- Token Badge -->
 									<span
-										class="bg-canvas border border-white/[0.03] text-gold-accent text-sm font-extrabold px-3 py-1 rounded-xl"
+										class="bg-canvas border border-white/[0.05] text-gold-accent text-base font-mono font-bold px-3 py-1 rounded-xl"
 									>
 										#{entry.token_number}
 									</span>
 
 									<!-- State Status Badge -->
 									<span
-										class="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md border
-										{entry.state === 'in_progress' ? 'bg-emerald-950/30 border-emerald-800 text-system-success/80' : ''}
-										{entry.state === 'called' ? 'bg-amber-950/30 border-amber-800 text-gold-accent animate-pulse' : ''}
-										{entry.state === 'waiting' ? 'bg-blue-950/30 border-blue-800 text-blue-400' : ''}
-										{entry.state === 'skipped' ? 'bg-canvas/50 border-white/[0.03] text-muted' : ''}"
+										class="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border {stateBadgeClass(entry.state)}"
 									>
-										{entry.state}
+										{STATE_LABELS[entry.state] || entry.state}
 									</span>
 
 									<!-- Presence Badge -->
-									<span
-										class="text-xs font-medium bg-canvas border border-white/[0.03] rounded-lg px-2 py-0.5 flex items-center gap-1.5
-										{entry.presence_state === 'arrived' ? 'text-system-success' : ''}
-										{entry.presence_state === 'on_the_way' ? 'text-gold-accent' : ''}
-										{entry.presence_state === 'snoozed' ? 'text-system-warning' : ''}
-										{entry.presence_state === 'remote' || entry.presence_state === 'notified' ? 'text-muted' : ''}
-										{!entry.presence_state ? 'text-dim' : ''}"
-									>
-										<span class="inline-block w-1.5 h-1.5 rounded-full
-											{entry.presence_state === 'arrived' ? 'bg-system-success' : ''}
-											{entry.presence_state === 'on_the_way' ? 'bg-gold-accent' : ''}
-											{entry.presence_state === 'snoozed' ? 'bg-system-warning' : ''}
-											{entry.presence_state === 'remote' || entry.presence_state === 'notified' ? 'bg-muted' : ''}
-											{!entry.presence_state ? 'bg-dim' : ''}
-										"></span>
-										{#if entry.presence_state === 'remote'}Remote
-										{:else if entry.presence_state === 'notified'}Notified
-										{:else if entry.presence_state === 'on_the_way'}On the Way
-										{:else if entry.presence_state === 'arrived'}Arrived
-										{:else if entry.presence_state === 'snoozed'}Snoozed
-										{:else}Walk-in{/if}
-									</span>
+									{#if true}
+										{@const presence = presenceMeta(entry.presence_state)}
+										<span
+											class="text-xs font-medium bg-canvas border border-white/[0.03] rounded-lg px-2 py-0.5 flex items-center gap-1.5 {presence.cls}"
+										>
+											<Icon name={presence.icon} size={13} />
+											{presence.label}
+										</span>
+									{/if}
 
 									<!-- Stale Warning urgency banner -->
 									{#if entry.stale_warning === 'called_critical' || entry.stale_warning === 'in_progress_critical'}
 										<span
-											class="text-[10px] font-bold px-2 py-0.5 rounded bg-red-600 text-white animate-pulse"
+											class="text-[10px] font-mono font-bold tracking-wider px-2 py-0.5 rounded bg-system-error text-canvas animate-pulse"
 										>
 											DELAYED
 										</span>
@@ -687,7 +753,7 @@
 								<div class="flex flex-wrap gap-2 pt-1">
 									{#each entry.services as svc}
 										<span
-											class="text-[10px] bg-canvas border border-slate-850 rounded-lg px-2.5 py-1 text-primary"
+											class="text-[10px] bg-canvas border border-white/[0.05] rounded-lg px-2.5 py-1 text-primary"
 										>
 											{svc.name} ({svc.duration_minutes}m)
 										</span>
@@ -707,7 +773,7 @@
 									>
 									<select
 										id="barber-select-{entry.id}"
-										class="bg-canvas border border-slate-850 rounded-lg px-2 py-1.5 text-xs text-primary focus:outline-none focus:border-gold-accent w-full"
+										class="bg-canvas border border-white/[0.05] rounded-lg px-2 py-1.5 text-xs text-primary focus:outline-none focus:border-gold-accent w-full"
 										value={entry.assigned_barber_id || ''}
 										onchange={(e) => {
 											const barberId = e.currentTarget.value;
@@ -727,14 +793,14 @@
 									</select>
 								</div>
 
-								<!-- Action Buttons based on state and presence -->
+								<!-- Action Buttons: one dominant primary per state, secondaries ghost -->
 								<div class="flex flex-wrap gap-2 justify-end w-full">
 									{#if entry.state === 'waiting'}
 										{#if entry.presence_state === 'arrived'}
 											<!-- waiting + presence=arrived -->
 											<button
 												type="button"
-												class="px-4 py-2 bg-system-success hover:bg-emerald-450 active:bg-emerald-600 text-canvas font-bold text-xs rounded-xl cursor-pointer transition-colors"
+												class="flex-1 md:flex-none min-h-[48px] px-5 bg-system-success hover:brightness-110 active:brightness-90 active:scale-[0.98] text-canvas font-extrabold text-sm rounded-xl cursor-pointer transition-all"
 												disabled={activeActions[`${entry.id}-start`]}
 												onclick={() =>
 													runDebouncedAction(`${entry.id}-start`, () =>
@@ -749,7 +815,7 @@
 											</button>
 											<button
 												type="button"
-												class="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-650 text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors"
+												class="min-h-[48px] px-4 bg-transparent border border-white/[0.06] hover:bg-titanium text-muted hover:text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors"
 												disabled={activeActions[`${entry.id}-skip`]}
 												onclick={() =>
 													runDebouncedAction(`${entry.id}-skip`, () =>
@@ -764,7 +830,7 @@
 											<!-- waiting + presence≠arrived -->
 											<button
 												type="button"
-												class="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-650 text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors"
+												class="min-h-[48px] px-4 bg-transparent border border-white/[0.06] hover:bg-titanium text-muted hover:text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors"
 												disabled={activeActions[`${entry.id}-skip`]}
 												onclick={() =>
 													runDebouncedAction(`${entry.id}-skip`, () =>
@@ -777,7 +843,7 @@
 											</button>
 											<button
 												type="button"
-												class="px-4 py-2 bg-gold-accent hover:bg-amber-450 active:bg-amber-600 text-canvas font-bold text-xs rounded-xl cursor-pointer transition-colors"
+												class="flex-1 md:flex-none min-h-[48px] px-5 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] text-canvas font-extrabold text-sm rounded-xl cursor-pointer transition-all"
 												disabled={activeActions[`${entry.id}-arrive`]}
 												onclick={() =>
 													runDebouncedAction(`${entry.id}-arrive`, () =>
@@ -795,7 +861,7 @@
 										<!-- called -->
 										<button
 											type="button"
-											class="px-4 py-2 bg-system-success hover:bg-emerald-450 active:bg-emerald-600 text-canvas font-bold text-xs rounded-xl cursor-pointer transition-colors"
+											class="flex-1 md:flex-none min-h-[48px] px-5 bg-system-success hover:brightness-110 active:brightness-90 active:scale-[0.98] text-canvas font-extrabold text-sm rounded-xl cursor-pointer transition-all"
 											disabled={activeActions[`${entry.id}-start`]}
 											onclick={() =>
 												runDebouncedAction(`${entry.id}-start`, () =>
@@ -808,7 +874,7 @@
 										</button>
 										<button
 											type="button"
-											class="px-4 py-2 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-bold text-xs rounded-xl cursor-pointer transition-colors"
+											class="min-h-[48px] px-4 bg-system-error/10 border border-system-error/30 hover:bg-system-error hover:text-canvas text-system-error font-bold text-xs rounded-xl cursor-pointer transition-colors"
 											disabled={activeActions[`${entry.id}-noshow`]}
 											onclick={() =>
 												runDebouncedAction(`${entry.id}-noshow`, () =>
@@ -821,7 +887,7 @@
 										</button>
 										<button
 											type="button"
-											class="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-650 text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors"
+											class="min-h-[48px] px-4 bg-transparent border border-white/[0.06] hover:bg-titanium text-muted hover:text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors"
 											disabled={activeActions[`${entry.id}-skip`]}
 											onclick={() =>
 												runDebouncedAction(`${entry.id}-skip`, () =>
@@ -836,7 +902,7 @@
 										<!-- in_progress -->
 										<button
 											type="button"
-											class="px-5 py-2.5 bg-gold-accent hover:bg-amber-450 active:bg-amber-600 text-canvas font-extrabold text-xs rounded-xl cursor-pointer transition-all shadow"
+											class="flex-1 md:flex-none min-h-[48px] px-6 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] text-canvas font-extrabold text-sm rounded-xl cursor-pointer transition-all shadow-[0_0_12px_rgba(200,169,107,0.15)]"
 											onclick={() => {
 												selectedEntryForCheckout = entry;
 											}}
@@ -847,7 +913,7 @@
 										<!-- skipped -->
 										<button
 											type="button"
-											class="px-4 py-2 bg-gold-accent hover:bg-amber-450 active:bg-amber-600 text-canvas font-bold text-xs rounded-xl cursor-pointer transition-colors"
+											class="min-h-[48px] px-5 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] text-canvas font-bold text-sm rounded-xl cursor-pointer transition-all"
 											disabled={activeActions[`${entry.id}-reactivate`]}
 											onclick={() =>
 												runDebouncedAction(`${entry.id}-reactivate`, () =>
@@ -861,6 +927,8 @@
 									{/if}
 								</div>
 							</div>
+						</div>
+							{/each}
 						</div>
 					{/each}
 				</div>

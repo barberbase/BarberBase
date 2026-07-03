@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import Icon from '$lib/components/Icon.svelte';
 
 	let { form } = $props<{
 		form: {
@@ -45,7 +46,7 @@
 			class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-gold-accent/10 blur-[120px]"
 		></div>
 		<div
-			class="absolute bottom-1/4 left-1/3 w-[400px] h-[400px] rounded-full bg-blue-500/5 blur-[100px]"
+			class="absolute bottom-1/4 left-1/3 w-[400px] h-[400px] rounded-full bg-gold-accent/5 blur-[100px]"
 		></div>
 	</div>
 
@@ -89,7 +90,7 @@
 							required
 							disabled={loading}
 							bind:value={phoneNumber}
-							class="w-full bg-canvas border border-white/[0.03] rounded-2xl px-4 py-4 text-primary placeholder:text-dim focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500 transition-all duration-200 text-base"
+							class="w-full bg-canvas border border-white/[0.03] rounded-2xl px-4 py-4 text-primary placeholder:text-dim focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-gold-accent/30 transition-all duration-200 text-base"
 						/>
 					</div>
 					<span class="text-[11px] text-dim block">
@@ -100,22 +101,9 @@
 				<!-- Inline Error Display -->
 				{#if form?.error && step === 'phone'}
 					<div
-						class="bg-red-950/30 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error/80 flex items-start space-x-3 animate-fade-in"
+						class="bg-system-error/10 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error flex items-start space-x-3 animate-fade-in"
 					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							class="h-5 w-5 shrink-0 mt-0.5"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke="currentColor"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-							/>
-						</svg>
+						<span class="shrink-0 mt-0.5"><Icon name="alert" size={18} /></span>
 						<div>{form.error}</div>
 					</div>
 				{/if}
@@ -123,11 +111,11 @@
 				<button
 					type="submit"
 					disabled={loading || !phoneNumber}
-					class="w-full py-4 bg-gold-accent hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-gold-accent text-canvas font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
+					class="w-full py-4 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] disabled:opacity-40 disabled:hover:brightness-100 text-canvas font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
 				>
 					{#if loading}
 						<svg
-							class="animate-spin h-5 w-5 text-slate-950"
+							class="animate-spin h-5 w-5 text-canvas"
 							xmlns="http://www.w3.org/2000/svg"
 							fill="none"
 							viewBox="0 0 24 24"
@@ -179,7 +167,7 @@
 						>
 							Enter 6-Digit OTP
 						</label>
-						<span class="text-xs text-gold-accent font-medium">Sent to {phoneNumber}</span>
+						<span class="text-xs text-gold-accent font-mono font-medium">Sent to {phoneNumber}</span>
 					</div>
 					<input
 						type="text"
@@ -191,7 +179,7 @@
 						disabled={loading}
 						bind:value={otp}
 						oninput={() => { otp = otp.replace(/\D/g, '').slice(0, 6); }}
-						class="w-full bg-canvas border border-white/[0.03] rounded-2xl px-4 py-4 text-primary placeholder:text-dim focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500 tracking-[0.5em] text-center font-bold text-xl transition-all duration-200"
+						class="w-full bg-canvas border border-white/[0.03] rounded-2xl px-4 py-4 text-primary placeholder:text-dim focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-gold-accent/30 tracking-[0.5em] text-center font-mono font-bold text-xl transition-all duration-200"
 					/>
 					<span class="text-[11px] text-dim block text-center">
 						OTP is valid for 5 minutes.
@@ -201,22 +189,9 @@
 				<!-- Inline Error Display -->
 				{#if form?.error && step === 'otp'}
 					<div
-						class="bg-red-950/30 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error/80 flex items-start space-x-3 animate-fade-in"
+						class="bg-system-error/10 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error flex items-start space-x-3 animate-fade-in"
 					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							class="h-5 w-5 shrink-0 mt-0.5"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke="currentColor"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-							/>
-						</svg>
+						<span class="shrink-0 mt-0.5"><Icon name="alert" size={18} /></span>
 						<div>{form.error}</div>
 					</div>
 				{/if}
@@ -225,11 +200,11 @@
 					<button
 						type="submit"
 						disabled={loading || otp.length !== 6}
-						class="w-full py-4 bg-gold-accent hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-gold-accent text-canvas font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
+						class="w-full py-4 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] disabled:opacity-40 disabled:hover:brightness-100 text-canvas font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
 					>
 						{#if loading}
 							<svg
-								class="animate-spin h-5 w-5 text-slate-950"
+								class="animate-spin h-5 w-5 text-canvas"
 								xmlns="http://www.w3.org/2000/svg"
 								fill="none"
 								viewBox="0 0 24 24"
@@ -258,7 +233,7 @@
 						type="button"
 						disabled={loading}
 						onclick={handleChangeNumber}
-						class="w-full py-3 bg-transparent hover:bg-slate-800/40 text-muted hover:text-primary font-semibold text-sm rounded-2xl transition-all duration-150 cursor-pointer text-center"
+						class="w-full py-3 bg-transparent hover:bg-titanium text-muted hover:text-primary font-semibold text-sm rounded-2xl transition-all duration-150 cursor-pointer text-center"
 					>
 						Change number
 					</button>
