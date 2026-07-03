@@ -40,7 +40,7 @@ type CheckoutProductItem struct {
 
 // CheckoutPaymentLine is one leg of a split payment.
 type CheckoutPaymentLine struct {
-	Method              string  // "cash"|"upi"|"card"|"unpaid"|"complimentary"
+	Method              string // "cash"|"upi"|"card"|"unpaid"|"complimentary"
 	AmountPaise         int
 	ProviderReferenceID *string // UPI transaction ID; nil for cash/card
 }
@@ -485,11 +485,10 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 
 	presenceState := "remote"
 	if params.InitiatedVia == "staff_dashboard" {
-		if params.PhoneNumber == nil || *params.PhoneNumber == "" {
-			presenceState = "unknown"
-		} else {
-			presenceState = "arrived"
-		}
+		// Staff-added walk-in is physically present: staff tap is a valid Law 6
+		// verification. 'unknown' would make the entry undispatchable forever —
+		// CallNext and Direct Start both require presence_state='arrived'.
+		presenceState = "arrived"
 	}
 
 	sessionChannel := "web"

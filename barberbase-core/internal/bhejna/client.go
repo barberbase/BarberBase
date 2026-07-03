@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/aes"
-	"log"
 	"crypto/cipher"
 	"crypto/rand"
 	"database/sql"
@@ -13,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"time"
@@ -78,12 +78,12 @@ type Client interface {
 }
 
 type bhejnaClient struct {
-	pool            *pgxpool.Pool
-	aesKey          []byte
-	modeAKey        string
-	modeAPhone      string
-	httpClient      *http.Client
-	bhejnaAPIURL    string
+	pool         *pgxpool.Pool
+	aesKey       []byte
+	modeAKey     string
+	modeAPhone   string
+	httpClient   *http.Client
+	bhejnaAPIURL string
 }
 
 func NewClient(pool *pgxpool.Pool, aesKey []byte, modeAKey, modeAPhone string) Client {
@@ -229,7 +229,10 @@ func (c *bhejnaClient) SendText(ctx context.Context, tenantID, locationID uuid.U
 	}
 
 	payload := map[string]interface{}{
+		// bhejna.json (SendMessageRequest) names the recipient field to_phone;
+		// "to" kept alongside for compatibility with the deployed gateway.
 		"to":                  req.To,
+		"to_phone":            req.To,
 		"from_business_phone": fromPhone,
 		"idempotency_key":     req.IdempotencyKey,
 		"type":                "text",
@@ -245,7 +248,6 @@ func (c *bhejnaClient) SendTextPlatform(ctx context.Context, req SendTextReq) (*
 	req.SenderClass = SenderPlatform
 	return c.SendText(ctx, uuid.Nil, uuid.Nil, req)
 }
-
 
 func (c *bhejnaClient) SendTemplate(ctx context.Context, tenantID, locationID uuid.UUID, req SendTemplateReq) (*SendResult, error) {
 	class := ClassFor(req.TemplateCode)
@@ -281,7 +283,10 @@ func (c *bhejnaClient) SendTemplate(ctx context.Context, tenantID, locationID uu
 	}
 
 	payload := map[string]interface{}{
+		// bhejna.json (SendMessageRequest) names the recipient field to_phone;
+		// "to" kept alongside for compatibility with the deployed gateway.
 		"to":                  req.To,
+		"to_phone":            req.To,
 		"from_business_phone": fromPhone,
 		"idempotency_key":     req.IdempotencyKey,
 		"type":                "template",
@@ -372,4 +377,3 @@ func AESGCMEncrypt(plaintext string, key []byte) (string, error) {
 func AESGCMDecrypt(ciphertext string, key []byte) (string, error) {
 	return DecryptAESGCM(ciphertext, key)
 }
-

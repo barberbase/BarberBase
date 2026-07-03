@@ -692,7 +692,6 @@ func (s *Server) UpdateBarberStatus(w http.ResponseWriter, r *http.Request, staf
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-
 func (s *Server) AddWalkIn(w http.ResponseWriter, r *http.Request) {
 	// addWalkInBody extends generated AddWalkInJSONBody with optional idempotency_key for dedup
 	var body struct {
@@ -790,6 +789,13 @@ func (s *Server) AddWalkIn(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if errTx != nil {
+		if errors.Is(errTx, queue.ErrRequestInFlight) {
+			respondJSON(w, http.StatusConflict, map[string]string{
+				"code":    "REQUEST_IN_FLIGHT",
+				"message": "duplicate request in flight, retry",
+			})
+			return
+		}
 		var alreadyErr *queue.ErrAlreadyInQueue
 		if errors.As(errTx, &alreadyErr) {
 			respondJSON(w, http.StatusConflict, map[string]string{
@@ -829,6 +835,27 @@ func (s *Server) AddWalkIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Double-tap replay: same idempotency key already completed. Re-resolve the
+	// entry from the stored response and return the same staff-shaped body.
+	if result.IsIdempotentReplay {
+		var stored struct {
+			QueueEntry struct {
+				ID uuid.UUID `json:"id"`
+			} `json:"queue_entry"`
+		}
+		if err := json.Unmarshal(result.StoredResponse, &stored); err == nil && stored.QueueEntry.ID != uuid.Nil {
+			if entryView, err := repository.GetEntryStaffView(ctx, s.Pool, stored.QueueEntry.ID); err == nil {
+				respondJSON(w, http.StatusOK, toQueueEntryStaffJSON(entryView))
+				return
+			}
+		}
+		respondJSON(w, http.StatusConflict, map[string]string{
+			"code":    "REQUEST_IN_FLIGHT",
+			"message": "duplicate request already processed",
+		})
+		return
+	}
+
 	entryView, err := repository.GetEntryStaffView(ctx, s.Pool, result.QueueEntryID)
 	if err != nil {
 		log.Printf("[Error] AddWalkIn: failed to fetch entry view: %v", err)
@@ -848,7 +875,8 @@ func (s *Server) AddWalkIn(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	respondJSON(w, http.StatusCreated, toQueueEntryStaffJSON(entryView))
+	// openapi.yaml declares 200 for add-walkin (frozen contract)
+	respondJSON(w, http.StatusOK, toQueueEntryStaffJSON(entryView))
 }
 
 func (s *Server) CallNextCustomer(w http.ResponseWriter, r *http.Request) {
@@ -1194,8 +1222,16 @@ func (s *Server) MarkNoShow(w http.ResponseWriter, r *http.Request, entryId UUID
 		if _, err := tx.Exec(ctx, `SELECT id FROM queue_sessions WHERE id = $1 FOR UPDATE`, sessionID); err != nil {
 			return fmt.Errorf("lock session: %w", err)
 		}
-		var state string
-		if err := tx.QueryRow(ctx, `SELECT state FROM queue_entries WHERE id = $1 FOR UPDATE`, entryID).Scan(&state); err != nil {
+		var state, sessionChannel string
+		var tokenNumber int
+		var customerPhone *string
+		if err := tx.QueryRow(ctx, `
+			SELECT qe.state, qe.session_channel, qe.token_number, c.phone_number
+			FROM queue_entries qe
+			LEFT JOIN customers c ON c.id = qe.customer_id
+			WHERE qe.id = $1
+			FOR UPDATE OF qe
+		`, entryID).Scan(&state, &sessionChannel, &tokenNumber, &customerPhone); err != nil {
 			return fmt.Errorf("lock entry: %w", err)
 		}
 		if state == "no_show" {
@@ -1210,6 +1246,50 @@ func (s *Server) MarkNoShow(w http.ResponseWriter, r *http.Request, entryId UUID
 		`, entryID); err != nil {
 			return fmt.Errorf("mark no_show: %w", err)
 		}
+
+		// Law 7: "we missed you" WhatsApp inside the same tx. bb_queue_noshow is the
+		// dedicated no-show template: terminal removal, no reactivate path (unlike
+		// bb_queue_snoozed). Same gate as watchdog snooze: whatsapp-joined customers
+		// with a phone only.
+		if sessionChannel == "whatsapp" && customerPhone != nil && *customerPhone != "" {
+			var locationName, tenantSlug, locationSlug string
+			if err := tx.QueryRow(ctx, `
+				SELECT l.name, t.slug, l.slug
+				FROM locations l JOIN tenants t ON t.id = l.tenant_id
+				WHERE l.id = $1
+			`, locationID).Scan(&locationName, &tenantSlug, &locationSlug); err != nil {
+				return fmt.Errorf("read location slugs: %w", err)
+			}
+			outboxPayload := map[string]interface{}{
+				"template_code":       "bb_queue_noshow",
+				"to":                  *customerPhone,
+				"from_business_phone": s.Config.BhejnaFromPhone,
+				"location_id":         locationID.String(),
+				"language":            "en",
+				"notification_type":   "queue_noshow",
+				"components": []interface{}{
+					map[string]interface{}{
+						"type": "body",
+						"parameters": []interface{}{
+							map[string]interface{}{"type": "text", "text": locationName},                    // {{1}} shop_name
+							map[string]interface{}{"type": "text", "text": strconv.Itoa(tokenNumber)},       // {{2}} token_number
+							map[string]interface{}{"type": "text", "text": tenantSlug + "/" + locationSlug}, // {{3}} location_slug
+						},
+					},
+				},
+			}
+			payloadBytes, err := json.Marshal(outboxPayload)
+			if err != nil {
+				return fmt.Errorf("marshal no-show notification: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO outbox_events (tenant_id, type, payload, process_after)
+				VALUES ($1, 'notification.send', $2, NOW())
+			`, tenantID, payloadBytes); err != nil {
+				return fmt.Errorf("insert no-show notification outbox: %w", err)
+			}
+		}
+
 		return tx.QueryRow(ctx, `
 			UPDATE queue_sessions SET queue_version = queue_version+1 WHERE id = $1 RETURNING queue_version
 		`, sessionID).Scan(&queueVersion)
@@ -1425,9 +1505,9 @@ func (s *Server) ReactivateEntry(w http.ResponseWriter, r *http.Request, entryId
 				bodyComp{
 					Type: "body",
 					Parameters: []compParam{
-						{Type: "text", Text: locationName},                               // {{1}} shop_name
-						{Type: "text", Text: fmt.Sprintf("%d", displaced.tokenNumber)},  // {{2}} token_number
-						{Type: "text", Text: fmt.Sprintf("%d", waitMinutes)},            // {{3}} estimated_wait_minutes
+						{Type: "text", Text: locationName},                             // {{1}} shop_name
+						{Type: "text", Text: fmt.Sprintf("%d", displaced.tokenNumber)}, // {{2}} token_number
+						{Type: "text", Text: fmt.Sprintf("%d", waitMinutes)},           // {{3}} estimated_wait_minutes
 					},
 				},
 			}
@@ -1443,9 +1523,9 @@ func (s *Server) ReactivateEntry(w http.ResponseWriter, r *http.Request, entryId
 					[]byte(s.Config.HMACSecret),
 				)
 				components = append(components, btnComp{
-					Type:    "button",
-					SubType: "url",
-					Index:   0,
+					Type:       "button",
+					SubType:    "url",
+					Index:      0,
 					Parameters: []compParam{{Type: "text", Text: mlToken}},
 				})
 			} else {
@@ -1499,19 +1579,22 @@ func (s *Server) ReactivateEntry(w http.ResponseWriter, r *http.Request, entryId
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
 		return
 	}
-	if alreadyActive {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	// Law 8
-	if s.Manager != nil {
+	// Law 8: broadcast only on a real transition, after commit
+	if !alreadyActive && s.Manager != nil {
 		s.Manager.Broadcast(locationID.String(), realtime.SSEEvent{
 			Type:         "queue_changed",
 			LocationID:   locationID.String(),
 			QueueVersion: queueVersion,
 		})
 	}
-	w.WriteHeader(http.StatusOK)
+	// openapi.yaml: 200 returns QueueEntryStaff (also on idempotent no-op)
+	entryView, err := repository.GetEntryStaffView(ctx, s.Pool, entryID)
+	if err != nil {
+		log.Printf("[Error] ReactivateEntry: failed to fetch entry view: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	respondJSON(w, http.StatusOK, toQueueEntryStaffJSON(entryView))
 }
 
 func (s *Server) ReassignBarber(w http.ResponseWriter, r *http.Request, entryId UUIDv7) {
@@ -1527,6 +1610,11 @@ func (s *Server) ReassignBarber(w http.ResponseWriter, r *http.Request, entryId 
 	}
 
 	ctx := r.Context()
+	// openapi.yaml: manager/owner only. 403 (not 401) for scope rejection — Law 20 pattern.
+	if role := auth.RoleFromCtx(ctx); role != "manager" && role != "owner" {
+		respondJSON(w, http.StatusForbidden, map[string]string{"code": "FORBIDDEN", "message": "reassign requires manager or owner role"})
+		return
+	}
 	tenantIDStr := auth.TenantIDFromCtx(ctx)
 	locationIDStr := auth.LocationIDFromCtx(ctx)
 	tenantID, err := uuid.Parse(tenantIDStr)
@@ -1573,16 +1661,35 @@ func (s *Server) ReassignBarber(w http.ResponseWriter, r *http.Request, entryId 
 			return fmt.Errorf("lock session: %w", err)
 		}
 		var state string
-		if err := tx.QueryRow(ctx, `SELECT state FROM queue_entries WHERE id = $1 FOR UPDATE`, entryID).Scan(&state); err != nil {
+		var oldBarberID *uuid.UUID
+		if err := tx.QueryRow(ctx, `
+			SELECT state, assigned_barber_id FROM queue_entries WHERE id = $1 FOR UPDATE
+		`, entryID).Scan(&state, &oldBarberID); err != nil {
 			return fmt.Errorf("lock entry: %w", err)
 		}
-		if state != "waiting" && state != "called" {
+		if state != "waiting" && state != "called" && state != "in_progress" {
 			return queue.ErrInvalidStateTransition
 		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE queue_entries SET assigned_barber_id = $2 WHERE id = $1
 		`, entryID, newBarberID); err != nil {
 			return fmt.Errorf("reassign barber: %w", err)
+		}
+		// Mid-service handoff (openapi contract): old barber freed, new barber cutting.
+		// Only for in_progress — the old barber is definitionally cutting THIS customer.
+		if state == "in_progress" {
+			if oldBarberID != nil && *oldBarberID != newBarberID {
+				if _, err := tx.Exec(ctx, `
+					UPDATE staff_members SET status = 'idle' WHERE id = $1 AND status = 'cutting'
+				`, *oldBarberID); err != nil {
+					return fmt.Errorf("idle old barber: %w", err)
+				}
+			}
+			if _, err := tx.Exec(ctx, `
+				UPDATE staff_members SET status = 'cutting' WHERE id = $1
+			`, newBarberID); err != nil {
+				return fmt.Errorf("set new barber cutting: %w", err)
+			}
 		}
 		return tx.QueryRow(ctx, `
 			UPDATE queue_sessions SET queue_version = queue_version+1 WHERE id = $1 RETURNING queue_version
@@ -1595,7 +1702,7 @@ func (s *Server) ReassignBarber(w http.ResponseWriter, r *http.Request, entryId 
 			return
 		}
 		if errors.Is(errTx, queue.ErrInvalidStateTransition) {
-			respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": "INVALID_STATE_TRANSITION", "message": "entry must be in waiting or called state"})
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"code": "INVALID_STATE_TRANSITION", "message": "entry must be in waiting, called or in_progress state"})
 			return
 		}
 		var pgErr *pgconn.PgError

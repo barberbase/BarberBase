@@ -1,5 +1,5 @@
 # Purpose
-Complete specification of all 12 WhatsApp message templates registered on BarberBase's WABA via Bhejna. Includes exact body copy, button definitions, parameter mapping, trigger conditions, cost, and registration priority.
+Complete specification of all 13 WhatsApp message templates registered on BarberBase's WABA via Bhejna. Includes exact body copy, button definitions, parameter mapping, trigger conditions, cost, and registration priority.
  
 # Use This File When
 - Registering templates in Bhejna portal
@@ -37,8 +37,9 @@ Register all templates in Bhejna's template manager. Submit for Meta approval (u
 | 10 | `bb_appointment_reminder` | UTILITY | Appointment feature |
 | 11 | `bb_weekly_summary` | UTILITY | Weekly summary cron |
 | 12 | `bb_marketing_broadcast` | MARKETING | Phase 2 campaigns |
+| 13 | `bb_queue_noshow` | UTILITY | Go-live |
  
-Templates 1–8 must be ACTIVE before BarberBase serves any shop.
+Templates 1–8 and 13 must be ACTIVE before BarberBase serves any shop.
  
 ---
  
@@ -448,11 +449,34 @@ Footer: BarberBase
  
 ---
  
+## Template 13: `bb_queue_noshow`
+
+**Category:** UTILITY | **Cost:** ₹0 (within 24h session)
+**Trigger:** Staff marks a `called` entry as no_show (terminal — no reactivate path)
+**Quota:** `whatsapp_transactional`
+
+```
+Body:
+Sorry, we missed you at {{1}}!
+Your spot (Token #{{2}}) has been released since you didn't check in when called.
+Want another spot? Visit: https://barberbase.in/{{3}}
+
+Footer: BarberBase
+```
+
+| # | Field | Example |
+|---|---|---|
+| {{1}} | shop_name | "Star Salon" |
+| {{2}} | token_number | "18" |
+| {{3}} | location_slug | "star-salon/koramangala" |
+
+---
+ 
 ## Cost Summary
  
 | Bucket | Templates | Monthly cost/shop |
 |---|---|---|
-| transactional (queue flow) | 1,2,3,4,6,7,8,10,11,12 | ~₹55–68 total |
+| transactional (queue flow) | 1,2,3,4,6,7,8,10,11,12,13 | ~₹55–68 total |
 | authentication (OTP) | 5 | ~₹0.15/staff/month |
 | appointment notifications | 6,7 | ~₹0.14/appointment |
 | weekly summary | 8 | ~₹0.14/week |
