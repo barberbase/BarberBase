@@ -466,6 +466,7 @@ func (s *Server) RefreshStaffToken(w http.ResponseWriter, r *http.Request) {
 	})
 
 	respondJSON(w, http.StatusOK, map[string]string{
+		"access_token": accessToken,
 		"stream_token": streamToken,
 	})
 }

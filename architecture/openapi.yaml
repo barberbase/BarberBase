@@ -925,7 +925,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [staff_member_id, name, role, location_id]
+                required: [staff_member_id, name, role, location_id, access_token, refresh_token, stream_token]
                 properties:
                   staff_member_id:
                     $ref: '#/components/schemas/UUIDv7'
@@ -938,6 +938,15 @@ paths:
                     $ref: '#/components/schemas/UUIDv7'
                   tenant_id:
                     $ref: '#/components/schemas/UUIDv7'
+                  access_token:
+                    type: string
+                    description: 15-min TTL staff JWT.
+                  refresh_token:
+                    type: string
+                    description: 30-day TTL refresh token.
+                  stream_token:
+                    type: string
+                    description: 12-hour TTL, scope-limited to SSE stream connect only (Law 20). Not valid on any other endpoint.
         '401':
           description: Invalid or expired OTP
           content:
@@ -954,6 +963,16 @@ paths:
       responses:
         '200':
           description: New access token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, stream_token]
+                properties:
+                  access_token:
+                    type: string
+                  stream_token:
+                    type: string
         '401':
           description: Refresh token expired or invalid. Staff must re-login.
 
