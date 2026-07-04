@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
+	import QrCard from '$lib/components/QrCard.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -420,7 +421,7 @@
 			</div>
 
 			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-				{#each [{ href: '/admin/services', label: 'Services', desc: 'Service catalog' }, { href: '/admin/staff', label: 'Staff', desc: 'Team members' }, { href: '/admin/shop', label: 'Shop Status', desc: 'Open or close the shop' }, { href: '/admin/whatsapp', label: 'WhatsApp', desc: 'Notification channel' }, { href: '/admin/analytics', label: 'Analytics', desc: 'Revenue and visits' }] as section}
+				{#each [{ href: '/admin/services', label: 'Services', desc: 'Service catalog' }, { href: '/admin/staff', label: 'Staff', desc: 'Team members' }, { href: '/admin/shop', label: 'Shop Status', desc: 'Open or close the shop' }, { href: '/admin/hours', label: 'Business Hours', desc: 'Weekly open and close times' }, { href: '/admin/whatsapp', label: 'WhatsApp', desc: 'Notification channel' }, { href: '/admin/analytics', label: 'Analytics', desc: 'Revenue and visits' }] as section}
 					<a
 						href={section.href}
 						class="group bg-matte hover:bg-surface border border-white/[0.05] rounded-xl p-5 transition-all duration-150 active:scale-[0.98] machined-edge"
@@ -455,6 +456,7 @@
 						</button>
 					</div>
 				</div>
+				<QrCard url={publicUrl} filename="barberbase-{data.tenantSlug || 'shop'}-qr" />
 			{/if}
 		</div>
 	</div>

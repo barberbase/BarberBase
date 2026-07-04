@@ -166,21 +166,27 @@ test('one-tap actions issue exactly one request (debounced)', async ({ page, con
 	await page.goto('/dashboard');
 	await expect(page.locator('text=CALL NEXT CLIENT')).toBeVisible();
 
-	const button = page.locator('text=CALL NEXT CLIENT');
+	// Call Next is two-tap: first tap arms, second tap confirms.
+	const button = page.locator('button:has-text("CALL NEXT CLIENT")');
 	await expect(button).toBeEnabled();
-
-	// Click twice rapidly to test debouncing (force second click so Playwright doesn't auto-wait)
 	await button.click();
-	await button.click({ force: true }).catch(() => {});
+
+	const armed = page.locator('button:has-text("TAP AGAIN TO CONFIRM")');
+	await expect(armed).toBeVisible();
+
+	// Confirm twice rapidly to test debouncing (force second click so Playwright doesn't auto-wait)
+	await armed.click();
+	// Second rapid tap: the label may have already flipped back, so don't wait long.
+	await armed.click({ force: true, timeout: 500 }).catch(() => {});
 
 	// Verify button is disabled immediately
-	await expect(button).toBeDisabled();
+	await expect(page.locator('button:has-text("CALL NEXT")')).toBeDisabled();
 
 	// Wait for debounce period (1 second) to expire
 	await page.waitForTimeout(1500);
 
 	// Verify it becomes enabled again
-	await expect(button).toBeEnabled();
+	await expect(page.locator('button:has-text("CALL NEXT")')).toBeEnabled();
 
 	// Verify exactly 1 request was sent to the mock server
 	expect(callNextRequests).toBe(1);
@@ -203,6 +209,9 @@ test('checkout total mismatch blocks submit', async ({ page, context }) => {
 	await page.locator('text=Complete Service').click();
 	await expect(page.locator('text=Complete Service & Checkout')).toBeVisible();
 
+	// Quick-cash view is the default; split-payment view holds the editable amounts.
+	await page.locator('button:has-text("Split payment, UPI, or discount")').click();
+
 	const submitButton = page.locator('button:has-text("Complete Checkout")');
 	await expect(submitButton).toBeEnabled();
 
@@ -214,14 +223,14 @@ test('checkout total mismatch blocks submit', async ({ page, context }) => {
 	await expect(submitButton).toBeDisabled();
 
 	// Assert mismatch error is displayed immediately in UI
-	await expect(page.locator('text=Payment mismatch: Entered payment lines')).toBeVisible();
+	await expect(page.locator('text=Payment lines must sum exactly to the total.')).toBeVisible();
 
 	// Correct the mismatch by entering ₹500
 	await amountInput.fill('500');
 
 	// Assert submit button becomes enabled again and error is cleared
 	await expect(submitButton).toBeEnabled();
-	await expect(page.locator('text=Payment mismatch: Entered payment lines')).not.toBeVisible();
+	await expect(page.locator('text=Payment lines must sum exactly to the total.')).not.toBeVisible();
 });
 
 test('kill SSE, mutate via another client, dashboard recovers on reconnect via snapshot', async ({

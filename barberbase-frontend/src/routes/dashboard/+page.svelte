@@ -129,7 +129,18 @@
 		callNextArmed = false;
 		if (callNextTimer) clearTimeout(callNextTimer);
 		runDebouncedAction('call-next', () =>
-			store.callNext().catch((err: any) => showToast(err?.data?.message || 'Failed to call next customer.'))
+			store.callNext().catch((err: any) => {
+				if (err?.status === 404) {
+					const remote = err?.data?.waiting_remote_count;
+					showToast(
+						remote > 0
+							? `No one has arrived yet — ${remote} still on the way.`
+							: 'No customers waiting to call.'
+					);
+					return;
+				}
+				showToast(err?.data?.message || 'Failed to call next customer.');
+			})
 		);
 	}
 

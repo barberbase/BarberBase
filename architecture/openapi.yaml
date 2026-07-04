@@ -94,6 +94,28 @@ components:
       description: Monetary amount in paise (100 paise = 1 INR)
       example: 25000
 
+    LocationHoursDay:
+      type: object
+      required: [day_of_week, is_open]
+      properties:
+        day_of_week:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: 0=Sunday ... 6=Saturday (matches Go time.Weekday)
+        is_open:
+          type: boolean
+        opens_at:
+          type: string
+          pattern: '^\d{2}:\d{2}$'
+          description: HH:MM 24h local time. Required when is_open=true.
+          example: "09:00"
+        closes_at:
+          type: string
+          pattern: '^\d{2}:\d{2}$'
+          description: HH:MM 24h local time. Required when is_open=true.
+          example: "21:00"
+
     ErrorResponse:
       type: object
       required: [code, message]
@@ -2113,6 +2135,68 @@ paths:
                     type: string
                     example: "8362"
                     description: Display once to owner. Then only accessible from /staff/shop/status.
+
+  /admin/locations/{location_id}/hours:
+    get:
+      tags: [Admin - Location]
+      summary: Get the weekly business hours schedule
+      operationId: getLocationHours
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: location_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      responses:
+        '200':
+          description: All 7 days. Days never configured are returned with is_open=false.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [days]
+                properties:
+                  days:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LocationHoursDay'
+    put:
+      tags: [Admin - Location]
+      summary: Replace the weekly business hours schedule
+      description: |
+        Replaces the full 7-day schedule in one call. The manual status override
+        (PATCH /staff/shop/status) is a separate real-time layer on top of this
+        schedule and is not affected.
+      operationId: setLocationHours
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: location_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [days]
+              properties:
+                days:
+                  type: array
+                  minItems: 7
+                  maxItems: 7
+                  items:
+                    $ref: '#/components/schemas/LocationHoursDay'
+      responses:
+        '204':
+          description: Schedule saved
+        '422':
+          description: Invalid schedule (missing day, opens_at >= closes_at, or open day without times)
 
   /admin/staff:
     post:

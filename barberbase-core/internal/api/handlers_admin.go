@@ -851,3 +851,167 @@ func (s *Server) RegenerateArrivalPin(w http.ResponseWriter, r *http.Request, lo
 
 	respondAdminJSON(w, http.StatusOK, map[string]string{"arrival_pin": plainPin})
 }
+
+// GetLocationHours returns the full 7-day business hours schedule.
+func (s *Server) GetLocationHours(w http.ResponseWriter, r *http.Request, locationId UUIDv7) {
+	ctx := r.Context()
+
+	role := auth.RoleFromCtx(ctx)
+	if role != "owner" && role != "manager" {
+		respondAdminJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+
+	tenantID, err := uuid.Parse(auth.TenantIDFromCtx(ctx))
+	if err != nil {
+		respondAdminJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+
+	// Law 11: tenant scoping via JWT claim, never request body
+	var exists bool
+	err = s.Pool.QueryRow(ctx,
+		`SELECT true FROM locations WHERE id = $1 AND tenant_id = $2 AND is_active = true`,
+		locationId, tenantID).Scan(&exists)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondAdminJSON(w, http.StatusNotFound, map[string]string{"error": "location not found"})
+			return
+		}
+		log.Printf("[Error] GetLocationHours: location query failed: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+
+	rows, err := s.Pool.Query(ctx, `
+		SELECT day_of_week, is_open,
+		       to_char(opens_at, 'HH24:MI'), to_char(closes_at, 'HH24:MI')
+		FROM location_hours
+		WHERE location_id = $1
+	`, locationId)
+	if err != nil {
+		log.Printf("[Error] GetLocationHours: query failed: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	// Default all 7 days closed; overlay configured rows.
+	days := make([]LocationHoursDay, 7)
+	for i := range days {
+		days[i] = LocationHoursDay{DayOfWeek: i, IsOpen: false}
+	}
+	for rows.Next() {
+		var dow int
+		var isOpen bool
+		var opensAt, closesAt *string
+		if err := rows.Scan(&dow, &isOpen, &opensAt, &closesAt); err != nil {
+			log.Printf("[Error] GetLocationHours: scan failed: %v", err)
+			respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			return
+		}
+		if dow >= 0 && dow <= 6 {
+			days[dow] = LocationHoursDay{DayOfWeek: dow, IsOpen: isOpen, OpensAt: opensAt, ClosesAt: closesAt}
+		}
+	}
+
+	respondAdminJSON(w, http.StatusOK, map[string]any{"days": days})
+}
+
+// SetLocationHours replaces the full 7-day business hours schedule.
+// Location config only — no queue state touched, so no FOR UPDATE (Law 1 n/a).
+func (s *Server) SetLocationHours(w http.ResponseWriter, r *http.Request, locationId UUIDv7) {
+	ctx := r.Context()
+
+	role := auth.RoleFromCtx(ctx)
+	if role != "owner" && role != "manager" {
+		respondAdminJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+
+	tenantID, err := uuid.Parse(auth.TenantIDFromCtx(ctx))
+	if err != nil {
+		respondAdminJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+
+	var body SetLocationHoursJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+
+	if len(body.Days) != 7 {
+		respondAdminJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "exactly 7 days required"})
+		return
+	}
+	seen := [7]bool{}
+	for _, d := range body.Days {
+		if d.DayOfWeek < 0 || d.DayOfWeek > 6 || seen[d.DayOfWeek] {
+			respondAdminJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "each day_of_week 0-6 exactly once"})
+			return
+		}
+		seen[d.DayOfWeek] = true
+		if d.IsOpen {
+			if d.OpensAt == nil || d.ClosesAt == nil {
+				respondAdminJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "open days need opens_at and closes_at"})
+				return
+			}
+			if *d.OpensAt >= *d.ClosesAt {
+				respondAdminJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "opens_at must be before closes_at"})
+				return
+			}
+		}
+	}
+
+	// Law 11: verify location belongs to the JWT tenant before writing
+	var exists bool
+	err = s.Pool.QueryRow(ctx,
+		`SELECT true FROM locations WHERE id = $1 AND tenant_id = $2 AND is_active = true`,
+		locationId, tenantID).Scan(&exists)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondAdminJSON(w, http.StatusNotFound, map[string]string{"error": "location not found"})
+			return
+		}
+		log.Printf("[Error] SetLocationHours: location query failed: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		log.Printf("[Error] SetLocationHours: begin failed: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	for _, d := range body.Days {
+		var opensAt, closesAt *string
+		if d.IsOpen {
+			opensAt, closesAt = d.OpensAt, d.ClosesAt
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO location_hours (tenant_id, location_id, day_of_week, is_open, opens_at, closes_at)
+			VALUES ($1, $2, $3, $4, $5::time, $6::time)
+			ON CONFLICT (location_id, day_of_week)
+			DO UPDATE SET is_open = EXCLUDED.is_open,
+			              opens_at = EXCLUDED.opens_at,
+			              closes_at = EXCLUDED.closes_at
+		`, tenantID, locationId, d.DayOfWeek, d.IsOpen, opensAt, closesAt)
+		if err != nil {
+			log.Printf("[Error] SetLocationHours: upsert failed: %v", err)
+			respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			return
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		log.Printf("[Error] SetLocationHours: commit failed: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

@@ -53,7 +53,7 @@ export class ApiClient {
 		this.accessToken = accessToken;
 	}
 
-	async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+	async request<T>(path: string, options: RequestInit = {}, isRetry = false): Promise<T> {
 		const url = `${this.baseUrl}${path}`;
 		const headers = new Headers(options.headers);
 		if (this.accessToken) {
@@ -67,6 +67,20 @@ export class ApiClient {
 			...options,
 			headers
 		});
+
+		// Access tokens live 15 min but the dashboard stays open all day (SSE runs on
+		// a 12h stream token). On 401 in the browser, refresh via our own origin
+		// (httpOnly refresh cookie lives there) and retry the request once.
+		if (response.status === 401 && !isRetry && typeof window !== 'undefined') {
+			const refreshRes = await fetch('/api/refresh', { method: 'POST' });
+			if (refreshRes.ok) {
+				const { access_token } = (await refreshRes.json()) as { access_token: string };
+				this.accessToken = access_token;
+				return this.request<T>(path, options, true);
+			}
+			window.location.href = '/login';
+			throw { status: 401, data: { message: 'Session expired' } };
+		}
 
 		if (!response.ok) {
 			let errorData;
@@ -90,6 +104,14 @@ export class ApiClient {
 		return this.request<T>(path, {
 			...options,
 			method: 'POST',
+			body: body ? JSON.stringify(body) : undefined
+		});
+	}
+
+	put<T>(path: string, body?: any, options?: Omit<RequestInit, 'method' | 'body'>) {
+		return this.request<T>(path, {
+			...options,
+			method: 'PUT',
 			body: body ? JSON.stringify(body) : undefined
 		});
 	}
