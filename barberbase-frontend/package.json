@@ -42,6 +42,10 @@
 		"wrangler": "^4.97.0"
 	},
 	"dependencies": {
-		"qrcode-generator": "^2.0.4"
+		"bits-ui": "^2.18.1",
+		"clsx": "^2.1.1",
+		"qrcode-generator": "^2.0.4",
+		"tailwind-merge": "^3.6.0",
+		"tailwind-variants": "^3.2.2"
 	}
 }

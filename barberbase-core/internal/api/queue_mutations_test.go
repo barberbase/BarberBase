@@ -394,3 +394,51 @@ func TestAddWalkIn_AnonymousIsDispatchable(t *testing.T) {
 		`SELECT state FROM queue_entries`).Scan(&state))
 	require.Equal(t, "called", state)
 }
+
+// Regression: bb_queue_noshow {{3}} must be the compound locations.slug alone.
+// Prod bug sent "star-salon/star-salon/bhayander" because tenant slug was
+// prepended onto the already-compound slug. Exact-match assertion on the
+// resolved URL — a format-validity check would not have caught this.
+func TestMarkNoShow_NoshowLinkExactURL(t *testing.T) {
+	s, pool, tenantID, locationID, barberAID, _ := setupCallNextTestServer(t)
+	ctx := context.Background()
+
+	// Mirror prod slug shape: locations.slug is compound "tenant/location".
+	_, err := pool.Exec(ctx, `UPDATE locations SET slug='star-salon/bhayander' WHERE id=$1`, locationID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE tenants SET slug='star-salon' WHERE id=$1`, tenantID)
+	require.NoError(t, err)
+
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+	entryID, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "notified", nil)
+	_, err = pool.Exec(ctx, `UPDATE queue_entries SET state='called', session_channel='whatsapp' WHERE id=$1`, entryID)
+	require.NoError(t, err)
+
+	req := newStaffRequest(http.MethodPost, "/v1/staff/queue/entries/"+entryID.String()+"/no-show", tenantID, locationID, barberAID)
+	rec := httptest.NewRecorder()
+	s.MarkNoShow(rec, req, UUIDv7(entryID))
+	require.Equal(t, 200, rec.Code)
+
+	var payload []byte
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT payload FROM outbox_events
+		WHERE type='notification.send' AND payload->>'template_code'='bb_queue_noshow'
+		ORDER BY created_at DESC LIMIT 1`).Scan(&payload))
+
+	var parsed struct {
+		Components []struct {
+			Type       string `json:"type"`
+			Parameters []struct {
+				Text string `json:"text"`
+			} `json:"parameters"`
+		} `json:"components"`
+	}
+	require.NoError(t, json.Unmarshal(payload, &parsed))
+	require.Len(t, parsed.Components, 1)
+	require.Len(t, parsed.Components[0].Parameters, 3)
+
+	slugParam := parsed.Components[0].Parameters[2].Text
+	require.Equal(t, "star-salon/bhayander", slugParam)
+	// Template 13 body renders: https://barberbase.in/{{3}}
+	require.Equal(t, "https://barberbase.in/star-salon/bhayander", "https://barberbase.in/"+slugParam)
+}

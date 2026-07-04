@@ -23,6 +23,42 @@
 	// Derived categories matching active tab to avoid HTML template implicit any errors
 	let filteredCategories = $derived(categories.filter((c: any) => c.gender === activeTab));
 
+	// Scroll affordance: how many service cards sit fully below the fold.
+	// Recomputed on scroll/resize/tab-switch (rAF-throttled, passive) — cheap at
+	// catalog scale (tens of cards) and avoids customers never discovering
+	// services that render below the first viewport.
+	let servicesBelowFold = $state<number>(0);
+	let scrollTicking = false;
+
+	function countBelowFold() {
+		const cards = document.querySelectorAll<HTMLElement>('.variant-card');
+		let n = 0;
+		const vh = window.innerHeight;
+		for (const c of cards) {
+			if (c.getBoundingClientRect().top > vh) n++;
+		}
+		servicesBelowFold = n;
+	}
+
+	function onCatalogScroll() {
+		if (scrollTicking) return;
+		scrollTicking = true;
+		requestAnimationFrame(() => {
+			countBelowFold();
+			scrollTicking = false;
+		});
+	}
+
+	$effect(() => {
+		// re-count when the visible category set changes (gender tab switch)
+		void filteredCategories;
+		tick().then(countBelowFold);
+	});
+
+	function nudgeScroll() {
+		window.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
+	}
+
 	// Cloudflare Turnstile state
 	let turnstileToken = $state<string | null>(null);
 	let turnstileWidgetId = $state<any>(null);
@@ -362,6 +398,21 @@
 				</div>
 			</section>
 
+			<!-- Scroll affordance: visible only while service cards sit below the fold.
+			     Decorative duplicate of normal page scrolling, so hidden from AT. -->
+			{#if servicesBelowFold > 0}
+				<button
+					type="button"
+					class="more-below-pill"
+					onclick={nudgeScroll}
+					aria-hidden="true"
+					tabindex="-1"
+				>
+					{servicesBelowFold} more {servicesBelowFold === 1 ? 'service' : 'services'} below
+					<Icon name="chevron-down" size={14} />
+				</button>
+			{/if}
+
 			<!-- BOOKING OPTIONS PANEL -->
 			{#if selectedVariantIds.length > 0}
 				<section class="booking-panel">
@@ -431,7 +482,11 @@
 </div>
 
 <!-- WHATSAPP HANDOFF PREVIEW -->
-<svelte:window onkeydown={handleModalKeydown} />
+<svelte:window
+	onkeydown={handleModalKeydown}
+	onscroll={onCatalogScroll}
+	onresize={onCatalogScroll}
+/>
 {#if checkinResponse}
 	<div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="handoff-title">
 		<div class="confirmation-card">
@@ -595,6 +650,45 @@
 		color: var(--color-muted);
 		font-size: 1rem;
 		margin: 0;
+	}
+
+	/* Scroll affordance pill — fixed above the fold edge, disappears at list end */
+	.more-below-pill {
+		position: fixed;
+		bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+		left: 50%;
+		transform: translateX(-50%);
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		background: var(--color-titanium);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		color: var(--color-muted);
+		font-size: 0.75rem;
+		font-weight: 600;
+		padding: 0.5rem 0.9rem;
+		border-radius: 999px;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+		cursor: pointer;
+		z-index: 30;
+		animation: pill-in 0.2s ease-out;
+	}
+
+	@keyframes pill-in {
+		from {
+			opacity: 0;
+			transform: translateX(-50%) translateY(6px);
+		}
+		to {
+			opacity: 1;
+			transform: translateX(-50%) translateY(0);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.more-below-pill {
+			animation: none;
+		}
 	}
 
 	/* MAIN CONTENT */

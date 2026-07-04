@@ -1253,13 +1253,15 @@ func (s *Server) MarkNoShow(w http.ResponseWriter, r *http.Request, entryId UUID
 		// bb_queue_snoozed). Same gate as watchdog snooze: whatsapp-joined customers
 		// with a phone only.
 		if sessionChannel == "whatsapp" && customerPhone != nil && *customerPhone != "" {
-			var locationName, tenantSlug, locationSlug string
+			// locations.slug is already the compound "tenant/location" slug
+			// (e.g. "star-salon/bhayander") — never prepend tenant slug again.
+			var locationName, locationSlug string
 			if err := tx.QueryRow(ctx, `
-				SELECT l.name, t.slug, l.slug
-				FROM locations l JOIN tenants t ON t.id = l.tenant_id
+				SELECT l.name, l.slug
+				FROM locations l
 				WHERE l.id = $1
-			`, locationID).Scan(&locationName, &tenantSlug, &locationSlug); err != nil {
-				return fmt.Errorf("read location slugs: %w", err)
+			`, locationID).Scan(&locationName, &locationSlug); err != nil {
+				return fmt.Errorf("read location slug: %w", err)
 			}
 			outboxPayload := map[string]interface{}{
 				"template_code":       "bb_queue_noshow",
@@ -1274,7 +1276,7 @@ func (s *Server) MarkNoShow(w http.ResponseWriter, r *http.Request, entryId UUID
 						"parameters": []interface{}{
 							map[string]interface{}{"type": "text", "text": locationName},                    // {{1}} shop_name
 							map[string]interface{}{"type": "text", "text": strconv.Itoa(tokenNumber)},       // {{2}} token_number
-							map[string]interface{}{"type": "text", "text": tenantSlug + "/" + locationSlug}, // {{3}} location_slug
+							map[string]interface{}{"type": "text", "text": locationSlug}, // {{3}} compound location_slug per 09_notifications_templates.md
 						},
 					},
 				},

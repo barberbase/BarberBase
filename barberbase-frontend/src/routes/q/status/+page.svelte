@@ -479,7 +479,10 @@
 						<Icon name="bell" size={28} />
 					</div>
 					<h1 class="text-2xl font-black text-gold-accent">It's Your Turn!</h1>
-					<p class="text-sm text-gold-accent">Please go to the barber chair now.</p>
+					<p class="text-sm text-gold-accent">
+						Please come to the counter now. Spots are held for a short window, so head in as soon
+						as you can.
+					</p>
 				</div>
 			{:else if currentEntry.state === 'in_progress'}
 				<!-- STATE 5 — In Progress -->
@@ -490,7 +493,7 @@
 						<Icon name="scissors" size={28} />
 					</div>
 					<h1 class="text-2xl font-black text-system-success/80">In Progress</h1>
-					<p class="text-sm text-system-success">Enjoy your service!</p>
+					<p class="text-sm text-system-success">You're being served now — enjoy your service!</p>
 				</div>
 			{:else if currentEntry.state === 'cancelled' || currentEntry.state === 'expired'}
 				<!-- STATE — Terminal / Cancelled -->
@@ -580,6 +583,9 @@
 						<h3 class="text-sm font-bold text-primary uppercase tracking-wider text-center">
 							Verify Physical Arrival
 						</h3>
+						<p class="text-xs text-muted text-center">
+							Do this once you're physically at the shop — the 6-digit PIN is on the counter card.
+						</p>
 
 						<form onsubmit={handleConfirmArrivalPin} class="space-y-3">
 							<div>
@@ -706,9 +712,17 @@
 						</div>
 					</div>
 
+					<p class="text-xs text-muted text-center">
+						We'll notify you when it's almost your turn — no need to do anything right now.
+					</p>
+
 					<!-- Action Buttons -->
 					<div class="space-y-3 pt-2">
+						<p class="text-xs text-dim text-center" id="on-the-way-hint">
+							Tap this once you've left for the shop:
+						</p>
 						<button
+							aria-describedby="on-the-way-hint"
 							type="button"
 							class="w-full py-4 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] disabled:opacity-40 disabled:hover:brightness-100 text-canvas font-black text-sm rounded-xl cursor-pointer transition-all shadow-[0_0_20px_rgba(200,169,107,0.15)] flex items-center justify-center space-x-1 min-h-[48px]"
 							onclick={handleOnTheWay}

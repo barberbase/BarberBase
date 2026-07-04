@@ -347,7 +347,7 @@
 		</div>
 
 		<!-- Status Indicators -->
-		<div class="flex items-center space-x-4">
+		<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
 			<!-- SSE Live Sync indicator -->
 			<div
 				class="flex items-center space-x-1.5 text-xs bg-canvas border border-white/[0.03] rounded-full px-3 py-1 font-semibold"
@@ -393,6 +393,16 @@
 			<div class="text-sm text-primary">
 				Hello, <span class="font-bold text-primary">{data.snapshot ? 'Barber' : 'Staff'}</span>
 			</div>
+
+			<!-- Admin entry point — owner/manager only, absent from DOM for barbers -->
+			{#if data.staff?.role === 'owner' || data.staff?.role === 'manager'}
+				<a
+					href="/admin"
+					class="text-xs font-bold uppercase tracking-wider text-gold-accent border border-gold-accent/30 hover:bg-gold-accent/10 rounded-full px-4 min-h-[40px] inline-flex items-center transition-colors"
+				>
+					Admin
+				</a>
+			{/if}
 		</div>
 	</header>
 
