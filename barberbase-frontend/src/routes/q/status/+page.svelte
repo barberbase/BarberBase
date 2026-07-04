@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { getApiBase } from '$lib/api/client';
 	import Icon from '$lib/components/Icon.svelte';
+	import QueueTimeline from '$lib/components/QueueTimeline.svelte';
 
 	// SvelteKit SSR data
 	let { data } = $props<{
@@ -368,10 +369,11 @@
 </svelte:head>
 
 <div
-	class="min-h-screen bg-canvas text-primary flex flex-col items-center justify-center p-4 md:p-6 font-manrope"
+	class="min-h-dvh bg-canvas text-primary flex flex-col items-center justify-center p-4 md:p-6 font-manrope"
 >
+	<!-- solid matte instead of backdrop-blur: blur-xl janks on low-end Android -->
 	<div
-		class="w-full max-w-md bg-matte/60 backdrop-blur-xl border border-white/[0.03] rounded-3xl p-6 shadow-2xl space-y-6 relative overflow-hidden"
+		class="w-full max-w-md bg-matte border border-white/[0.03] rounded-3xl p-6 shadow-2xl space-y-6 relative overflow-hidden"
 		aria-live="polite" aria-atomic="true"
 	>
 		<!-- Subtle ambient backdrop light glow -->
@@ -428,6 +430,9 @@
 					Token #{currentEntry.token_number}
 				</span>
 			</div>
+
+			<!-- JOURNEY TIMELINE -->
+			<QueueTimeline state={currentEntry.state} presenceState={currentEntry.presence_state} />
 
 			<!-- NORMAL STATES CONTROLLER -->
 			{#if currentEntry.state === 'completed'}
@@ -579,23 +584,26 @@
 						<form onsubmit={handleConfirmArrivalPin} class="space-y-3">
 							<div>
 								<label for="pin-input" class="block text-xs font-semibold text-muted mb-1.5"
-									>Enter 4-Digit Counter PIN</label
+									>Enter 6-Digit Counter PIN</label
 								>
 								<div class="flex gap-2">
+									<!-- text-base (16px) prevents iOS auto-zoom on focus -->
 									<input
 										type="tel"
 										id="pin-input"
 										inputmode="numeric"
+										pattern="[0-9]*"
+										minlength="6"
 										maxlength="6"
-										placeholder="PIN on counter card"
-										class="flex-1 bg-canvas border border-white/[0.03] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-gold-accent/30 placeholder:text-dim min-h-[48px]"
+										placeholder="6-digit PIN"
+										class="flex-1 min-w-0 bg-canvas border border-white/[0.03] rounded-xl px-4 py-3 text-base font-mono tracking-[0.3em] text-center focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-gold-accent/30 placeholder:text-dim placeholder:tracking-normal placeholder:font-body min-h-[48px]"
 										bind:value={pinInput}
 										disabled={pinAttemptsRemaining === 0 || isSubmitting}
 									/>
 									<button
 										type="submit"
 										class="px-5 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] disabled:opacity-40 disabled:hover:brightness-100 text-canvas font-bold text-sm rounded-xl cursor-pointer transition-all min-h-[48px]"
-										disabled={!pinInput || pinAttemptsRemaining === 0 || isSubmitting}
+										disabled={pinInput.length < 6 || pinAttemptsRemaining === 0 || isSubmitting}
 									>
 										Confirm
 									</button>
@@ -712,7 +720,7 @@
 
 						<button
 							type="button"
-							class="w-full py-3 bg-canvas/40 hover:bg-surface/40 active:bg-matte/40 border border-white/[0.03] text-muted hover:text-primary font-bold text-xs rounded-xl cursor-pointer transition-colors min-h-[48px]"
+							class="w-full py-3 bg-canvas/40 hover:bg-surface/40 active:bg-matte/40 border border-white/[0.03] text-muted hover:text-primary active:text-primary font-bold text-sm rounded-xl cursor-pointer transition-colors min-h-[48px]"
 							onclick={handleCancel}
 							disabled={isSubmitting}
 						>

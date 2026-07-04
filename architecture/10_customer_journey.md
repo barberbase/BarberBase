@@ -177,7 +177,7 @@ Rendered based on `queue_entry.state` + `queue_entry.presence_state`:
 | State | What Customer Sees |
 |---|---|
 | `presence=remote` or `presence=notified` | Token #18 \| 5 ahead \| ~40 min \| Services + price \| [I'm On My Way →] |
-| `presence=on_the_way` | Token #18 \| 3 ahead \| ~25 min \| 4-digit PIN input \| [Confirm Arrival] \| [Use My Location] |
+| `presence=on_the_way` | Token #18 \| 3 ahead \| ~25 min \| 6-digit PIN input \| [Confirm Arrival] \| [Use My Location] |
 | `presence=arrived` | Token #18 \| 2 ahead \| ~15 min \| ✅ You're confirmed! Wait inside. |
 | `state=called` | 🔔 It's Your Turn! — Token #18 \| Please go to the barber chair now. |
 | `state=in_progress` | ✂️ Service In Progress — Token #18 \| Enjoy your service! |

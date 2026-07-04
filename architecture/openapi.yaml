@@ -1226,7 +1226,7 @@ paths:
                   enum: [pin, geolocation, nfc]
                 pin:
                   type: string
-                  minLength: 4
+                  minLength: 6
                   maxLength: 6
                   pattern: '^\d+$'
                   description: Required when method = pin
@@ -1945,9 +1945,9 @@ paths:
                     $ref: '#/components/schemas/UUIDv7'
                   arrival_pin:
                     type: string
-                    minLength: 4
+                    minLength: 6
                     maxLength: 6
-                    example: "8362"
+                    example: "836214"
                     description: Plaintext PIN shown once. Laminate on counter. Staff dashboard shows it thereafter.
         '409':
           description: tenant_slug, location_slug, or owner_phone already exists

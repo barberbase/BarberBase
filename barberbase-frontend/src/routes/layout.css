@@ -31,6 +31,9 @@
 @layer base {
   body {
     @apply bg-canvas text-primary font-manrope antialiased min-h-screen flex flex-col;
+    /* notched devices: viewport-fit=cover in app.html exposes the insets */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+      env(safe-area-inset-bottom) env(safe-area-inset-left);
     /* Subliminal Micro-Dot Grid Pattern (Visual Texture Reference) */
     background-image: radial-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px);
     background-size: 16px 16px;

@@ -383,20 +383,47 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 	peopleAhead := queuePosition - 1
 	estWaitMinutes := peopleAhead * totalDuration
 
-	outboxPayload := map[string]interface{}{
-		"template_code":       "bb_queue_joined",
-		"to":                  msg.SenderPhone, // empty string if masked
-		"from_business_phone": fromPhone,
-		"location_id":         locationID.String(), // required by handler for credential resolution
-		"notification_type":   "queue_joined",
-		"components": []interface{}{
+	// Same position-0 branch as domain/queue JoinQueue: an empty-queue join
+	// never crosses the near-turn threshold, so send bb_you_are_next directly.
+	templateCode := "bb_queue_joined"
+	notificationType := "queue_joined"
+	components := []interface{}{
+		map[string]interface{}{
+			"type": "body",
+			"parameters": []interface{}{
+				map[string]interface{}{"type": "text", "text": locationName},
+				map[string]interface{}{"type": "text", "text": strconv.Itoa(tokenNumber)},
+				map[string]interface{}{"type": "text", "text": strconv.Itoa(peopleAhead)},
+				map[string]interface{}{"type": "text", "text": strconv.Itoa(estWaitMinutes)},
+			},
+		},
+		map[string]interface{}{
+			"type":     "button",
+			"sub_type": "url",
+			"index":    0,
+			"parameters": []interface{}{
+				map[string]interface{}{"type": "text", "text": tokenStr},
+			},
+		},
+		map[string]interface{}{
+			"type":     "button",
+			"sub_type": "quick_reply",
+			"index":    1,
+			"parameters": []interface{}{
+				map[string]interface{}{"type": "payload", "payload": "CANCEL:" + entryID.String()},
+			},
+		},
+	}
+	if peopleAhead == 0 {
+		templateCode = "bb_you_are_next"
+		notificationType = "you_are_next"
+		// bb_you_are_next spec: body {shop_name, token_number} + single URL button (magic link).
+		components = []interface{}{
 			map[string]interface{}{
 				"type": "body",
 				"parameters": []interface{}{
 					map[string]interface{}{"type": "text", "text": locationName},
 					map[string]interface{}{"type": "text", "text": strconv.Itoa(tokenNumber)},
-					map[string]interface{}{"type": "text", "text": strconv.Itoa(peopleAhead)},
-					map[string]interface{}{"type": "text", "text": strconv.Itoa(estWaitMinutes)},
 				},
 			},
 			map[string]interface{}{
@@ -407,15 +434,16 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 					map[string]interface{}{"type": "text", "text": tokenStr},
 				},
 			},
-			map[string]interface{}{
-				"type":     "button",
-				"sub_type": "quick_reply",
-				"index":    1,
-				"parameters": []interface{}{
-					map[string]interface{}{"type": "payload", "payload": "CANCEL:" + entryID.String()},
-				},
-			},
-		},
+		}
+	}
+
+	outboxPayload := map[string]interface{}{
+		"template_code":       templateCode,
+		"to":                  msg.SenderPhone, // empty string if masked
+		"from_business_phone": fromPhone,
+		"location_id":         locationID.String(), // required by handler for credential resolution
+		"notification_type":   notificationType,
+		"components":          components,
 	}
 
 	payloadBytes, err := json.Marshal(outboxPayload)

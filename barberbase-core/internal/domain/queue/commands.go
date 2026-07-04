@@ -587,20 +587,48 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 		}
 		estWait := peopleAhead * totalDurationMinutes
 
-		payloadMap := map[string]interface{}{
-			"template_code":       "bb_queue_joined",
-			"to":                  *params.PhoneNumber,
-			"from_business_phone": fromPhone,
-			"location_id":         params.LocationID.String(),
-			"notification_type":   "queue_joined",
-			"components": []interface{}{
+		// Joining at position 0 (empty queue) never crosses the watchdog's
+		// near-turn threshold, so select bb_you_are_next here instead of
+		// bb_queue_joined — the customer should walk in now.
+		templateCode := "bb_queue_joined"
+		notificationType := "queue_joined"
+		components := []interface{}{
+			map[string]interface{}{
+				"type": "body",
+				"parameters": []interface{}{
+					map[string]interface{}{"type": "text", "text": locationName},
+					map[string]interface{}{"type": "text", "text": strconv.Itoa(tokenNumber)},
+					map[string]interface{}{"type": "text", "text": strconv.Itoa(peopleAhead)},
+					map[string]interface{}{"type": "text", "text": strconv.Itoa(estWait)},
+				},
+			},
+			map[string]interface{}{
+				"type":     "button",
+				"sub_type": "url",
+				"index":    0,
+				"parameters": []interface{}{
+					map[string]interface{}{"type": "text", "text": magicLinkToken},
+				},
+			},
+			map[string]interface{}{
+				"type":     "button",
+				"sub_type": "quick_reply",
+				"index":    1,
+				"parameters": []interface{}{
+					map[string]interface{}{"type": "payload", "payload": "CANCEL:" + entryID.String()},
+				},
+			},
+		}
+		if peopleAhead == 0 {
+			templateCode = "bb_you_are_next"
+			notificationType = "you_are_next"
+			// bb_you_are_next spec: body {shop_name, token_number} + single URL button (magic link).
+			components = []interface{}{
 				map[string]interface{}{
 					"type": "body",
 					"parameters": []interface{}{
 						map[string]interface{}{"type": "text", "text": locationName},
 						map[string]interface{}{"type": "text", "text": strconv.Itoa(tokenNumber)},
-						map[string]interface{}{"type": "text", "text": strconv.Itoa(peopleAhead)},
-						map[string]interface{}{"type": "text", "text": strconv.Itoa(estWait)},
 					},
 				},
 				map[string]interface{}{
@@ -611,15 +639,16 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 						map[string]interface{}{"type": "text", "text": magicLinkToken},
 					},
 				},
-				map[string]interface{}{
-					"type":     "button",
-					"sub_type": "quick_reply",
-					"index":    1,
-					"parameters": []interface{}{
-						map[string]interface{}{"type": "payload", "payload": "CANCEL:" + entryID.String()},
-					},
-				},
-			},
+			}
+		}
+
+		payloadMap := map[string]interface{}{
+			"template_code":       templateCode,
+			"to":                  *params.PhoneNumber,
+			"from_business_phone": fromPhone,
+			"location_id":         params.LocationID.String(),
+			"notification_type":   notificationType,
+			"components":          components,
 		}
 		payloadBytes, errMarshal := json.Marshal(payloadMap)
 		if errMarshal != nil {
