@@ -133,7 +133,7 @@ components:
     # ── Location Public View ─────────────────────────────────────────────────
     LocationStatus:
       type: object
-      required: [id, name, slug, shop_status, queue_open, queue_length, estimated_wait_minutes, business_hours_today]
+      required: [id, name, slug, shop_status, queue_open, queue_length, estimated_wait_minutes, business_hours_today, queue_routing_mode]
       properties:
         id:
           $ref: '#/components/schemas/UUIDv7'
@@ -172,6 +172,51 @@ components:
           type: string
           format: date-time
           nullable: true
+        queue_routing_mode:
+          type: string
+          enum: [pooled, hybrid, barber_specific]
+          description: Drives whether the client shows a barber picker at join.
+        barbers:
+          type: array
+          nullable: true
+          description: >
+            Public-safe barber roster (no PII beyond display name). Populated only
+            when queue_routing_mode != pooled; null/absent under pooled.
+          items:
+            type: object
+            required: [id, display_name, presence_state]
+            properties:
+              id:
+                $ref: '#/components/schemas/UUIDv7'
+              display_name:
+                type: string
+              presence_state:
+                type: string
+                enum: [idle, cutting, break, offline]
+
+    LocationSettings:
+      type: object
+      required: [id, queue_routing_mode, arrival_radius_metres, geolocation_assist]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDv7'
+        queue_routing_mode:
+          type: string
+          enum: [pooled, hybrid, barber_specific]
+        gps_latitude:
+          type: number
+          format: double
+          nullable: true
+        gps_longitude:
+          type: number
+          format: double
+          nullable: true
+        arrival_radius_metres:
+          type: integer
+          minimum: 20
+          maximum: 500
+        geolocation_assist:
+          type: boolean
 
     # ── Service Catalog ──────────────────────────────────────────────────────
     ServiceVariant:
@@ -787,6 +832,14 @@ paths:
                   nullable: true
                   maxLength: 100
                   description: Optional. Carried into the intent and onto the queue_entry at resolution.
+                requested_barber_id:
+                  allOf:
+                    - $ref: '#/components/schemas/UUIDv7'
+                  nullable: true
+                  description: >
+                    Optional. Carried into the intent and onto the queue_entry at
+                    resolution. Only respected if location.queue_routing_mode is
+                    hybrid or barber_specific.
       responses:
         '201':
           description: Intent created. Open deep_link to hand the session to WhatsApp.
@@ -2135,6 +2188,100 @@ paths:
                     type: string
                     example: "8362"
                     description: Display once to owner. Then only accessible from /staff/shop/status.
+
+  /admin/locations/{location_id}/settings:
+    get:
+      tags: [Admin - Location]
+      summary: Read location settings (routing mode + arrival geofence)
+      operationId: getLocationSettings
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: location_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      responses:
+        '200':
+          description: Current settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocationSettings'
+        '403':
+          description: Barber role cannot read settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags: [Admin - Location]
+      summary: Update location settings (partial)
+      description: |
+        Consolidated owner settings endpoint. All fields optional — only fields
+        present in the body are applied.
+
+        Role gating (enforced in handler, StaffJWT has no scopes):
+        - queue_routing_mode: owner only. Shop-culture decision, not delegable.
+        - gps/radius/geolocation_assist: owner or manager (operational).
+        A request mixing routing_mode with any other field from a manager JWT is
+        rejected whole (403 INSUFFICIENT_ROLE) — no partial application.
+
+        Changing queue_routing_mode does NOT retroactively touch waiting entries;
+        dispatch reads the mode fresh on each call.
+      operationId: updateLocationSettings
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: location_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                queue_routing_mode:
+                  type: string
+                  enum: [pooled, hybrid, barber_specific]
+                gps_latitude:
+                  type: number
+                  format: double
+                  nullable: true
+                gps_longitude:
+                  type: number
+                  format: double
+                  nullable: true
+                arrival_radius_metres:
+                  type: integer
+                  minimum: 20
+                  maximum: 500
+                geolocation_assist:
+                  type: boolean
+      responses:
+        '200':
+          description: Applied settings state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocationSettings'
+        '400':
+          description: Validation failed (bad enum, radius out of range, lat without lng)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Role check failed (INSUFFICIENT_ROLE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /admin/locations/{location_id}/hours:
     get:

@@ -60,6 +60,17 @@
 		window.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
 	}
 
+	// Barber picker — driven by location.queue_routing_mode from the public
+	// status endpoint. pooled: never rendered. hybrid: optional, defaults to
+	// "any barber" (null). barber_specific: required before join.
+	// Server is still the source of truth; this validation is UX only.
+	const routingMode: string = data.location.queue_routing_mode ?? 'pooled';
+	const barbers: { id: string; display_name: string; presence_state: string }[] =
+		data.location.barbers ?? [];
+	const showBarberPicker = routingMode !== 'pooled' && barbers.length > 0;
+	let selectedBarberId = $state<string>('');
+	const barberRequired = $derived(routingMode === 'barber_specific' && !selectedBarberId);
+
 	// Cloudflare Turnstile state
 	let turnstileToken = $state<string | null>(null);
 	let turnstileWidgetId = $state<any>(null);
@@ -200,7 +211,7 @@
 
 	// Join Queue CTA
 	async function handleJoin() {
-		if (!turnstileToken || selectedVariantIds.length === 0) return;
+		if (!turnstileToken || selectedVariantIds.length === 0 || barberRequired) return;
 		isJoining = true;
 		joinError = null;
 		try {
@@ -213,7 +224,8 @@
 					},
 					body: JSON.stringify({
 						variant_ids: selectedVariantIds,
-						party_size: 1
+						party_size: 1,
+						requested_barber_id: selectedBarberId || undefined
 					})
 				}
 			);
@@ -451,6 +463,26 @@
 						{#if bookingOptions.allowed_entry_methods?.includes('walk_in')}
 							<!-- JOIN CTA FORM -->
 							<div class="join-form">
+								{#if showBarberPicker}
+									<div class="barber-picker">
+										<label class="barber-label" for="barber-select">
+											{routingMode === 'barber_specific' ? 'Choose your barber' : 'Barber preference'}
+										</label>
+										<select id="barber-select" class="barber-select" bind:value={selectedBarberId}>
+											{#if routingMode === 'hybrid'}
+												<option value="">Any available barber (fastest)</option>
+											{:else}
+												<option value="" disabled>Select a barber…</option>
+											{/if}
+											{#each barbers as barber}
+												<option value={barber.id}>
+													{barber.display_name}{barber.presence_state === 'break' ? ' (on break)' : ''}
+												</option>
+											{/each}
+										</select>
+									</div>
+								{/if}
+
 								<div class="turnstile-wrapper">
 									<div id="turnstile-container"></div>
 								</div>
@@ -461,10 +493,14 @@
 
 								<button
 									class="join-btn"
-									disabled={!turnstileToken || isJoining}
+									disabled={!turnstileToken || isJoining || barberRequired}
 									onclick={handleJoin}
 								>
-									{isJoining ? 'Securing Spot...' : 'Join via WhatsApp'}
+									{isJoining
+										? 'Securing Spot...'
+										: barberRequired
+											? 'Select a barber to join'
+											: 'Join via WhatsApp'}
 								</button>
 								<p class="join-hint">
 									Next: you'll see the exact WhatsApp message before anything is sent.
@@ -974,6 +1010,37 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1rem;
+	}
+
+	.barber-picker {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+
+	.barber-label {
+		font-size: 0.75rem;
+		color: var(--color-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		font-weight: 500;
+		font-family: var(--font-mono);
+	}
+
+	.barber-select {
+		width: 100%;
+		background: var(--color-canvas);
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		border-radius: 0.5rem;
+		padding: 0.75rem;
+		font-size: 0.9rem;
+		color: var(--color-primary);
+		appearance: auto;
+	}
+
+	.barber-select:focus-visible {
+		outline: 2px solid var(--color-gold-accent);
+		outline-offset: -1px;
 	}
 
 	.turnstile-wrapper {

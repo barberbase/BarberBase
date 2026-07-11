@@ -41,8 +41,8 @@ func getCheckinIntentLimiter(ip string) *rate.Limiter {
 // Returns one of: "open", "closing_soon", "temporarily_closed", "closed".
 func computeShopStatus(
 	override *repository.LocationOverrideRow,
-	hours    *repository.LocationHoursRow,
-	now      time.Time,
+	hours *repository.LocationHoursRow,
+	now time.Time,
 ) string {
 	if override != nil {
 		return override.Status
@@ -725,6 +725,12 @@ func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locat
 		tempClosureEndsAt = override.ExpiresAt
 	}
 
+	var routingMode string
+	if err := s.Pool.QueryRow(ctx, `SELECT queue_routing_mode FROM locations WHERE id = $1`, location.ID).Scan(&routingMode); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
 	response := map[string]interface{}{
 		"id":                     location.ID,
 		"name":                   location.Name,
@@ -733,6 +739,42 @@ func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locat
 		"queue_open":             queueOpen,
 		"queue_length":           stats.QueueLength,
 		"estimated_wait_minutes": stats.EstimatedWaitMinutes,
+		"queue_routing_mode":     routingMode,
+	}
+
+	// Public-safe barber roster — only when a picker is meaningful (Law 21-adjacent:
+	// no PII beyond display name). Off-shift barbers excluded: requesting an
+	// offline barber is a dead end.
+	if routingMode != "pooled" {
+		rows, err := s.Pool.Query(ctx, `
+			SELECT id, name, status
+			FROM staff_members
+			WHERE location_id = $1 AND is_active = true AND status != 'offline'
+			ORDER BY name
+		`, location.ID)
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+			return
+		}
+		barbers := []map[string]interface{}{}
+		for rows.Next() {
+			var id uuid.UUID
+			var name, status string
+			if err := rows.Scan(&id, &name, &status); err != nil {
+				rows.Close()
+				respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+				return
+			}
+			barbers = append(barbers, map[string]interface{}{
+				"id": id, "display_name": name, "presence_state": status,
+			})
+		}
+		rows.Close()
+		if rows.Err() != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+			return
+		}
+		response["barbers"] = barbers
 	}
 
 	if hours != nil {
@@ -1001,9 +1043,10 @@ func (s *Server) CreateCheckinIntent(w http.ResponseWriter, r *http.Request, loc
 	}
 
 	var req struct {
-		VariantIds   []string `json:"variant_ids"`
-		PartySize    *int     `json:"party_size"`
-		CustomerName *string  `json:"customer_name"`
+		VariantIds        []string `json:"variant_ids"`
+		PartySize         *int     `json:"party_size"`
+		CustomerName      *string  `json:"customer_name"`
+		RequestedBarberID *string  `json:"requested_barber_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request_body"})
@@ -1016,6 +1059,37 @@ func (s *Server) CreateCheckinIntent(w http.ResponseWriter, r *http.Request, loc
 	partySize := 1
 	if req.PartySize != nil && *req.PartySize > 0 {
 		partySize = *req.PartySize
+	}
+
+	// Barber preference: only respected when routing mode allows it (pooled →
+	// silently ignored per contract). Public input — verify the barber actually
+	// belongs to this location and is active before storing.
+	var requestedBarberID *uuid.UUID
+	if req.RequestedBarberID != nil && *req.RequestedBarberID != "" {
+		var routingMode string
+		if err := s.Pool.QueryRow(ctx, `SELECT queue_routing_mode FROM locations WHERE id = $1`, location.ID).Scan(&routingMode); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+			return
+		}
+		if routingMode != "pooled" {
+			barberID, err := uuid.Parse(*req.RequestedBarberID)
+			if err != nil {
+				respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid_barber"})
+				return
+			}
+			var exists bool
+			if err := s.Pool.QueryRow(ctx, `
+				SELECT EXISTS(SELECT 1 FROM staff_members WHERE id = $1 AND location_id = $2 AND is_active = true)
+			`, barberID, location.ID).Scan(&exists); err != nil {
+				respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+				return
+			}
+			if !exists {
+				respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid_barber"})
+				return
+			}
+			requestedBarberID = &barberID
+		}
 	}
 
 	rows, err := repository.GetVariantsByIDs(ctx, s.Pool, location.ID, req.VariantIds)
@@ -1119,17 +1193,17 @@ func (s *Server) CreateCheckinIntent(w http.ResponseWriter, r *http.Request, loc
 			INSERT INTO checkin_intents (
 				tenant_id, location_id, token_code, channel,
 				shop_status_at_creation, variant_ids, party_size,
-				customer_name, status, source_ip, expires_at
+				customer_name, requested_barber_id, status, source_ip, expires_at
 			) VALUES (
 				$1, $2, $3, 'whatsapp',
 				$4, $5, $6,
-				$7, 'created', $8::inet, NOW() + INTERVAL '23 hours'
+				$7, $8, 'created', $9::inet, NOW() + INTERVAL '23 hours'
 			) RETURNING id, expires_at
 		`
 		err = s.Pool.QueryRow(ctx, queryInsert,
 			location.TenantID, location.ID, tc,
 			shopStatus, variantIDsJSON, partySize,
-			req.CustomerName, remoteIP,
+			req.CustomerName, requestedBarberID, remoteIP,
 		).Scan(&insertedID, &expiresAt)
 
 		if err != nil {
@@ -1228,7 +1302,7 @@ func (s *Server) BookAppointment(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	
+
 	repo := &queue.QueueRepository{Pool: s.Pool}
 	res, err := repo.BookAppointment(r.Context(), tenantID, req)
 	if err != nil {
@@ -1266,7 +1340,7 @@ func (s *Server) CheckInAppointment(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body location_id required"})
 		return
 	}
-	
+
 	repo := &queue.QueueRepository{Pool: s.Pool}
 	res, err := repo.CheckInAppointment(r.Context(), tenantID, req.LocationID, appID)
 	if err != nil {
@@ -1412,5 +1486,3 @@ func (s *Server) SubmitFeedback(w http.ResponseWriter, r *http.Request) {
 		"id": responseID,
 	})
 }
-
-

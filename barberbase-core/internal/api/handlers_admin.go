@@ -76,16 +76,16 @@ func (s *Server) GetAdminLocationsLocationIdServices(w http.ResponseWriter, r *h
 	apiCategories := make([]ServiceCategory, len(categories))
 	for i, c := range categories {
 		cID, _ := uuid.Parse(c.ID)
-		
+
 		apiGroups := make([]ServiceGroup, len(c.Groups))
 		for j, g := range c.Groups {
 			gID, _ := uuid.Parse(g.ID)
-			
+
 			apiVariants := make([]ServiceVariant, len(g.Variants))
 			for k, v := range g.Variants {
 				vID, _ := uuid.Parse(v.ID)
 				isPopularVal := v.IsPopular
-				
+
 				apiVariants[k] = ServiceVariant{
 					Id:                  vID,
 					Name:                v.Name,
@@ -1014,4 +1014,158 @@ func (s *Server) SetLocationHours(w http.ResponseWriter, r *http.Request, locati
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// loadLocationSettings reads the settings view of a locations row, tenant-scoped (Law 11).
+func (s *Server) loadLocationSettings(ctx context.Context, locationID, tenantID uuid.UUID) (*LocationSettings, error) {
+	var (
+		id     uuid.UUID
+		mode   string
+		lat    *float64
+		lng    *float64
+		radius int
+		assist bool
+	)
+	err := s.Pool.QueryRow(ctx, `
+		SELECT id, queue_routing_mode, gps_latitude, gps_longitude,
+		       arrival_radius_metres, geolocation_assist
+		FROM locations
+		WHERE id = $1 AND tenant_id = $2 AND is_active = true
+	`, locationID, tenantID).Scan(&id, &mode, &lat, &lng, &radius, &assist)
+	if err != nil {
+		return nil, err
+	}
+	return &LocationSettings{
+		Id:                  UUIDv7(id),
+		QueueRoutingMode:    LocationSettingsQueueRoutingMode(mode),
+		GpsLatitude:         lat,
+		GpsLongitude:        lng,
+		ArrivalRadiusMetres: radius,
+		GeolocationAssist:   assist,
+	}, nil
+}
+
+// GetLocationSettings implements GET /admin/locations/{location_id}/settings
+func (s *Server) GetLocationSettings(w http.ResponseWriter, r *http.Request, locationId UUIDv7) {
+	ctx := r.Context()
+
+	role := auth.RoleFromCtx(ctx)
+	if role != "owner" && role != "manager" {
+		respondAdminJSON(w, http.StatusForbidden, map[string]string{"code": "INSUFFICIENT_ROLE", "message": "owner or manager role required"})
+		return
+	}
+	tenantID, err := uuid.Parse(auth.TenantIDFromCtx(ctx))
+	if err != nil {
+		respondAdminJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid tenant claim"})
+		return
+	}
+
+	settings, err := s.loadLocationSettings(ctx, uuid.UUID(locationId), tenantID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondAdminJSON(w, http.StatusNotFound, map[string]string{"code": "NOT_FOUND", "message": "location not found"})
+			return
+		}
+		log.Printf("[Error] GetLocationSettings: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	respondAdminJSON(w, http.StatusOK, settings)
+}
+
+// UpdateLocationSettings implements PATCH /admin/locations/{location_id}/settings
+//
+// Role gating (business decision, enforced here — StaffJWT has no scopes):
+//   - queue_routing_mode: owner only (shop-culture decision, not delegable).
+//   - geofence fields: owner or manager (operational).
+//
+// A manager request that includes queue_routing_mode is rejected whole —
+// no silent partial application (INSUFFICIENT_ROLE on the entire request).
+//
+// Law 1 not applicable: this mutates the locations row only, never
+// queue_sessions/queue_entries. Mode changes are not retroactive — dispatch
+// reads queue_routing_mode fresh on each call.
+func (s *Server) UpdateLocationSettings(w http.ResponseWriter, r *http.Request, locationId UUIDv7) {
+	ctx := r.Context()
+
+	role := auth.RoleFromCtx(ctx)
+	if role != "owner" && role != "manager" {
+		respondAdminJSON(w, http.StatusForbidden, map[string]string{"code": "INSUFFICIENT_ROLE", "message": "owner or manager role required"})
+		return
+	}
+	tenantID, err := uuid.Parse(auth.TenantIDFromCtx(ctx))
+	if err != nil {
+		respondAdminJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid tenant claim"})
+		return
+	}
+
+	var req UpdateLocationSettingsJSONBody
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondAdminJSON(w, http.StatusBadRequest, map[string]string{"code": "INVALID_BODY", "message": "invalid request body"})
+		return
+	}
+
+	if req.QueueRoutingMode != nil && role != "owner" {
+		respondAdminJSON(w, http.StatusForbidden, map[string]string{"code": "INSUFFICIENT_ROLE", "message": "queue_routing_mode can only be changed by the owner"})
+		return
+	}
+
+	if req.QueueRoutingMode != nil {
+		switch *req.QueueRoutingMode {
+		case Pooled, Hybrid, BarberSpecific:
+		default:
+			respondAdminJSON(w, http.StatusBadRequest, map[string]string{"code": "INVALID_ROUTING_MODE", "message": "queue_routing_mode must be pooled, hybrid, or barber_specific"})
+			return
+		}
+	}
+	if req.ArrivalRadiusMetres != nil && (*req.ArrivalRadiusMetres < 20 || *req.ArrivalRadiusMetres > 500) {
+		respondAdminJSON(w, http.StatusBadRequest, map[string]string{"code": "INVALID_RADIUS", "message": "arrival_radius_metres must be between 20 and 500"})
+		return
+	}
+	// Coordinates only make sense as a pair; a lone lat or lng is a client bug.
+	if (req.GpsLatitude == nil) != (req.GpsLongitude == nil) {
+		respondAdminJSON(w, http.StatusBadRequest, map[string]string{"code": "INVALID_COORDINATES", "message": "gps_latitude and gps_longitude must be provided together"})
+		return
+	}
+	if req.GpsLatitude != nil {
+		if *req.GpsLatitude < -90 || *req.GpsLatitude > 90 || *req.GpsLongitude < -180 || *req.GpsLongitude > 180 {
+			respondAdminJSON(w, http.StatusBadRequest, map[string]string{"code": "INVALID_COORDINATES", "message": "coordinates out of range"})
+			return
+		}
+	}
+
+	// ponytail: COALESCE partial update — nil field = leave unchanged. Explicit
+	// null-to-clear coordinates is not supported; re-set them instead.
+	var modeStr *string
+	if req.QueueRoutingMode != nil {
+		m := string(*req.QueueRoutingMode)
+		modeStr = &m
+	}
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE locations
+		SET queue_routing_mode    = COALESCE($1, queue_routing_mode),
+		    gps_latitude          = COALESCE($2, gps_latitude),
+		    gps_longitude         = COALESCE($3, gps_longitude),
+		    arrival_radius_metres = COALESCE($4, arrival_radius_metres),
+		    geolocation_assist    = COALESCE($5, geolocation_assist)
+		WHERE id = $6 AND tenant_id = $7 AND is_active = true
+	`, modeStr, req.GpsLatitude, req.GpsLongitude, req.ArrivalRadiusMetres, req.GeolocationAssist,
+		uuid.UUID(locationId), tenantID)
+	if err != nil {
+		log.Printf("[Error] UpdateLocationSettings: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		respondAdminJSON(w, http.StatusNotFound, map[string]string{"code": "NOT_FOUND", "message": "location not found"})
+		return
+	}
+
+	settings, err := s.loadLocationSettings(ctx, uuid.UUID(locationId), tenantID)
+	if err != nil {
+		log.Printf("[Error] UpdateLocationSettings: reload failed: %v", err)
+		respondAdminJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	respondAdminJSON(w, http.StatusOK, settings)
 }

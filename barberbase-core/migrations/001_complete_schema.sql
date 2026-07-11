@@ -565,6 +565,11 @@ CREATE TABLE checkin_intents (
     variant_ids             JSONB       NOT NULL DEFAULT '[]',
     party_size              INT         NOT NULL DEFAULT 1,
     customer_name           VARCHAR(100),
+    requested_barber_id     UUID        REFERENCES staff_members(id),
+                            -- Carried onto queue_entries.requested_barber_id at resolution.
+                            -- Only respected when location.queue_routing_mode != 'pooled'.
+                            -- Existing prod DBs: ALTER TABLE checkin_intents
+                            --   ADD COLUMN requested_barber_id UUID REFERENCES staff_members(id);
 
     -- Lifecycle
     status                  VARCHAR(20) NOT NULL DEFAULT 'created'

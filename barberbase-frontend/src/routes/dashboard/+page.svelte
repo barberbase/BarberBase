@@ -683,7 +683,8 @@
 									bind:value={walkInBarberId}
 								>
 									<option value="">-- Auto Route --</option>
-									{#each data.staffMembers as member}
+									<!-- ponytail: on-shift only — requesting an offline barber is a dead end -->
+									{#each onShift as member}
 										<option value={member.id}>{member.name}</option>
 									{/each}
 								</select>

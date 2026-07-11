@@ -51,6 +51,8 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 		variantIDsJSON       []byte
 		partySize            int
 		customerName         *string
+		requestedBarberID    *uuid.UUID
+		queueRoutingMode     string
 		locationSlug         string
 		locationName         string
 		timezone             string
@@ -63,6 +65,7 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 	queryIntent := `
 		SELECT ci.id, ci.tenant_id, ci.location_id, ci.status, ci.expires_at,
 		       ci.shop_status_at_creation, ci.variant_ids, ci.party_size, ci.customer_name,
+		       ci.requested_barber_id, l.queue_routing_mode,
 		       l.slug, l.name AS location_name, l.timezone, l.is_active,
 		       l.whatsapp_mode, l.business_whatsapp_number
 		FROM checkin_intents ci
@@ -73,6 +76,7 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 	err := r.pool.QueryRow(ctx, queryIntent, msg.TokenCode).Scan(
 		&intentID, &tenantID, &locationID, &intentStatus, &expiresAt,
 		&shopStatusAtCreation, &variantIDsJSON, &partySize, &customerName,
+		&requestedBarberID, &queueRoutingMode,
 		&locationSlug, &locationName, &timezone, &locationIsActive,
 		&whatsappMode, &businessPhone,
 	)
@@ -303,19 +307,27 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 	// 6f — INSERT queue_entries
 	var entryID uuid.UUID
 	tokenNumber := lastTokenNumber + 1
+	// Barber preference carried from the intent. Mode is read fresh at
+	// resolution: if the location flipped to pooled since the intent was
+	// created, the preference is dropped (dispatch would ignore it anyway).
+	if queueRoutingMode == "pooled" {
+		requestedBarberID = nil
+	}
 	queryInsertEntry := `
 		INSERT INTO queue_entries (
 			visit_id, queue_session_id, customer_id,
 			token_number, state, presence_state, is_dispatchable,
-			session_channel, priority_group, sort_key, remote_joined_at
+			session_channel, priority_group, sort_key, remote_joined_at,
+			requested_barber_id
 		) VALUES (
 			$1, $2, $3,
 			$4,
 			'waiting', 'remote', true,
-			'whatsapp', 100, EXTRACT(EPOCH FROM NOW())::BIGINT, NOW()
+			'whatsapp', 100, EXTRACT(EPOCH FROM NOW())::BIGINT, NOW(),
+			$5
 		) RETURNING id
 	`
-	err = tx.QueryRow(ctx, queryInsertEntry, visitID, sessionID, customerID, tokenNumber).Scan(&entryID)
+	err = tx.QueryRow(ctx, queryInsertEntry, visitID, sessionID, customerID, tokenNumber, requestedBarberID).Scan(&entryID)
 	if err != nil {
 		return "", fmt.Errorf("failed to insert queue entry: %w", err)
 	}
