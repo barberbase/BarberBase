@@ -435,15 +435,21 @@
 			<QueueTimeline state={currentEntry.state} presenceState={currentEntry.presence_state} />
 
 			<!-- NORMAL STATES CONTROLLER -->
+			<!-- {#key} remounts the block on any state/presence change so the CSS
+			     entrance runs — a soft rise instead of a hard DOM swap. -->
+			{#key `${currentEntry.state}:${currentEntry.presence_state}`}
+			<div class="state-enter">
 			{#if currentEntry.state === 'completed'}
 				<!-- STATE 6 — Completed -->
 				<div class="text-center py-6 space-y-4">
-					<div class="mx-auto w-16 h-16 rounded-full bg-gold-accent/10 border border-gold-accent/25 flex items-center justify-center text-gold-accent animate-float-slow">
+					<!-- Peak-end moment: one expanding gold halo on arrival, then the slow
+					     float. CSS-only; both disabled under prefers-reduced-motion. -->
+					<div class="mx-auto w-16 h-16 rounded-full bg-gold-accent/10 border border-gold-accent/25 flex items-center justify-center text-gold-accent animate-float-slow halo-once relative">
 						<Icon name="sparkles" size={28} />
 					</div>
-					<h1 class="text-2xl font-black text-primary">All Done!</h1>
+					<h1 class="text-2xl font-black text-primary">All done — looking sharp!</h1>
 					<p class="text-sm text-muted">
-						Thanks for visiting {currentEntry.shop_name || 'us'}.
+						Thanks for visiting {currentEntry.shop_name || 'us'}. See you next time.
 					</p>
 
 					<!-- Feedback Star Widget -->
@@ -478,10 +484,13 @@
 					<div class="mx-auto w-16 h-16 rounded-full bg-gold-accent text-canvas flex items-center justify-center shadow-[0_0_12px_rgba(200,169,107,0.15)] motion-safe:animate-pulse">
 						<Icon name="bell" size={28} />
 					</div>
-					<h1 class="text-2xl font-black text-gold-accent">It's Your Turn!</h1>
+					<h1 class="text-2xl font-black text-gold-accent">It's your turn!</h1>
+					<!-- Staff call out the token number — make it readable from arm's length. -->
+					<div class="font-mono font-bold text-5xl text-primary tracking-wider" aria-label="Your token number">
+						#{currentEntry.token_number}
+					</div>
 					<p class="text-sm text-gold-accent">
-						Please come to the counter now. Spots are held for a short window, so head in as soon
-						as you can.
+						Go to the counter now and show this screen. Your spot is held for a few minutes.
 					</p>
 				</div>
 			{:else if currentEntry.state === 'in_progress'}
@@ -492,8 +501,8 @@
 					<div class="mx-auto w-16 h-16 rounded-full bg-system-success/10 border border-system-success/30 flex items-center justify-center text-system-success">
 						<Icon name="scissors" size={28} />
 					</div>
-					<h1 class="text-2xl font-black text-system-success/80">In Progress</h1>
-					<p class="text-sm text-system-success">You're being served now — enjoy your service!</p>
+					<h1 class="text-2xl font-black text-system-success">In the chair</h1>
+					<p class="text-sm text-system-success">You're being served now — enjoy!</p>
 				</div>
 			{:else if currentEntry.state === 'cancelled' || currentEntry.state === 'expired'}
 				<!-- STATE — Terminal / Cancelled -->
@@ -514,15 +523,15 @@
 					<div class="mx-auto w-16 h-16 rounded-full bg-canvas/60 border border-white/[0.06] flex items-center justify-center text-system-warning">
 						<Icon name="pause-circle" size={28} />
 					</div>
-					<h1 class="text-2xl font-black text-primary">Spot Paused</h1>
+					<h1 class="text-2xl font-black text-primary">Your spot is paused</h1>
 					<p class="text-sm text-muted">
-						Your turn was passed. Ask staff to reactivate your spot.
+						Your turn was passed, but you haven't lost your place entirely.
 					</p>
 
 					<div class="pt-2">
 						<span class="text-sm text-muted font-bold block">{currentEntry.shop_name}</span>
 						<span class="text-xs text-dim mt-1 block"
-							>Please consult our front desk team.</span
+							>Show this screen at the counter and staff will put you back in line.</span
 						>
 					</div>
 				</div>
@@ -531,12 +540,12 @@
 				<div
 					class="text-center py-8 space-y-4 bg-canvas/40 border border-white/[0.03] rounded-3xl p-6"
 				>
-					<div class="mx-auto w-16 h-16 rounded-full bg-system-success/10 border border-system-success/30 flex items-center justify-center text-system-success">
+					<div class="mx-auto w-16 h-16 rounded-full bg-system-success/10 border border-system-success/30 flex items-center justify-center text-system-success pop-in">
 						<Icon name="check-circle" size={28} />
 					</div>
-					<h1 class="text-2xl font-black text-primary">You're Confirmed!</h1>
+					<h1 class="text-2xl font-black text-primary">You're confirmed!</h1>
 					<p class="text-sm text-muted">
-						Please wait inside the shop. We will call you when it is your turn.
+						Take a seat — we'll call your token when it's your turn.
 					</p>
 					<div
 						class="pt-2 flex justify-between items-center text-xs text-muted border-t border-white/[0.03] mt-4"
@@ -581,39 +590,56 @@
 					<!-- Arrival confirmation form -->
 					<div class="space-y-4">
 						<h3 class="text-sm font-bold text-primary uppercase tracking-wider text-center">
-							Verify Physical Arrival
+							Confirm you've arrived
 						</h3>
 						<p class="text-xs text-muted text-center">
-							Do this once you're physically at the shop — the 6-digit PIN is on the counter card.
+							At the shop? Enter the 6-digit PIN from the card on the counter.
 						</p>
 
 						<form onsubmit={handleConfirmArrivalPin} class="space-y-3">
 							<div>
-								<label for="pin-input" class="block text-xs font-semibold text-muted mb-1.5"
-									>Enter 6-Digit Counter PIN</label
+								<label for="pin-input" class="block text-xs font-semibold text-muted mb-1.5 text-center"
+									>Counter PIN</label
 								>
-								<div class="flex gap-2">
+								<!-- One real input laid invisibly over six display cells: segmented-PIN
+								     feel (auto-advance, active-cell highlight) with paste, backspace,
+								     and autofill all behaving like a normal single field. -->
+								<div class="pin-cells relative mx-auto max-w-[280px]">
+									<div class="grid grid-cols-6 gap-1.5" aria-hidden="true">
+										{#each Array(6) as _, i}
+											<span
+												class="h-12 rounded-xl border flex items-center justify-center text-xl font-mono font-bold
+													{i < pinInput.length
+														? 'border-gold-accent/40 bg-gold-accent/5 text-primary'
+														: i === pinInput.length && pinAttemptsRemaining !== 0
+															? 'border-gold-accent bg-canvas text-dim pin-cell-active'
+															: 'border-white/[0.06] bg-canvas text-dim'}"
+											>
+												{pinInput[i] ?? ''}
+											</span>
+										{/each}
+									</div>
 									<!-- text-base (16px) prevents iOS auto-zoom on focus -->
 									<input
 										type="tel"
 										id="pin-input"
 										inputmode="numeric"
+										autocomplete="one-time-code"
 										pattern="[0-9]*"
 										minlength="6"
 										maxlength="6"
-										placeholder="6-digit PIN"
-										class="flex-1 min-w-0 bg-canvas border border-white/[0.03] rounded-xl px-4 py-3 text-base font-mono tracking-[0.3em] text-center focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-gold-accent/30 placeholder:text-dim placeholder:tracking-normal placeholder:font-body min-h-[48px]"
+										class="absolute inset-0 w-full h-full opacity-0 text-base cursor-pointer disabled:cursor-not-allowed"
 										bind:value={pinInput}
 										disabled={pinAttemptsRemaining === 0 || isSubmitting}
 									/>
-									<button
-										type="submit"
-										class="px-5 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] disabled:opacity-40 disabled:hover:brightness-100 text-canvas font-bold text-sm rounded-xl cursor-pointer transition-all min-h-[48px]"
-										disabled={pinInput.length < 6 || pinAttemptsRemaining === 0 || isSubmitting}
-									>
-										Confirm
-									</button>
 								</div>
+								<button
+									type="submit"
+									class="w-full mt-3 py-3 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] disabled:opacity-40 disabled:hover:brightness-100 text-canvas font-bold text-sm rounded-xl cursor-pointer transition-all min-h-[48px]"
+									disabled={pinInput.length < 6 || pinAttemptsRemaining === 0 || isSubmitting}
+								>
+									{isSubmitting ? 'Checking the PIN…' : 'Confirm Arrival'}
+								</button>
 							</div>
 
 							{#if pinError}
@@ -652,10 +678,10 @@
 							>
 								{#if gpsLoading}
 									<span class="inline-block w-3.5 h-3.5 border-2 border-white/20 border-t-gold-accent rounded-full animate-spin motion-reduce:animate-none"></span>
-									<span>Retrieving GPS...</span>
+									<span>Checking your location…</span>
 								{:else}
 									<Icon name="map-pin" size={14} />
-									<span>Auto-Confirm using GPS</span>
+									<span>Confirm with GPS instead</span>
 								{/if}
 							</button>
 
@@ -728,8 +754,12 @@
 							onclick={handleOnTheWay}
 							disabled={isSubmitting}
 						>
-							<span>I'm On My Way</span>
-							<Icon name="arrow-right" size={16} />
+							{#if isSubmitting}
+								<span>Letting the shop know…</span>
+							{:else}
+								<span>I'm On My Way</span>
+								<Icon name="arrow-right" size={16} />
+							{/if}
 						</button>
 
 						<button
@@ -751,10 +781,12 @@
 					{/if}
 				</div>
 			{/if}
+			</div>
+			{/key}
 		{:else}
 			<div class="text-center py-10 space-y-4">
 				<span class="inline-block w-8 h-8 border-2 border-white/10 border-t-gold-accent/60 rounded-full animate-spin motion-reduce:animate-none mx-auto"></span>
-				<p class="text-sm text-muted font-medium">Fetching status details...</p>
+				<p class="text-sm text-muted font-medium">Loading your spot…</p>
 			</div>
 		{/if}
 	</div>
@@ -774,8 +806,80 @@
 		}
 	}
 
+	/* Soft rise on every state change (wrapped in {#key}) */
+	.state-enter {
+		animation: state-enter 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	@keyframes state-enter {
+		from {
+			opacity: 0;
+			transform: translateY(8px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	/* One-time check pop on arrival confirmation */
+	.pop-in {
+		animation: pop-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	@keyframes pop-in {
+		from {
+			transform: scale(0.6);
+			opacity: 0;
+		}
+		to {
+			transform: scale(1);
+			opacity: 1;
+		}
+	}
+
+	/* Peak-end: a single expanding gold ring behind the completed icon */
+	.halo-once::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		border-radius: 999px;
+		border: 1px solid rgba(200, 169, 107, 0.6);
+		animation: halo 1s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
+		pointer-events: none;
+	}
+
+	@keyframes halo {
+		from {
+			transform: scale(1);
+			opacity: 1;
+		}
+		to {
+			transform: scale(2.2);
+			opacity: 0;
+		}
+	}
+
+	/* Active PIN cell: soft breathing border while it waits for the next digit */
+	.pin-cell-active {
+		animation: cell-breathe 1.2s ease-in-out infinite;
+	}
+
+	@keyframes cell-breathe {
+		0%, 100% {
+			border-color: rgba(200, 169, 107, 1);
+		}
+		50% {
+			border-color: rgba(200, 169, 107, 0.35);
+		}
+	}
+
 	@media (prefers-reduced-motion: reduce) {
-		:global(.animate-float-slow) {
+		:global(.animate-float-slow),
+		.state-enter,
+		.pop-in,
+		.halo-once::after,
+		.pin-cell-active {
 			animation: none;
 		}
 	}

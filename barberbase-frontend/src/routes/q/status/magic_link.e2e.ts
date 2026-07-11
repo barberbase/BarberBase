@@ -81,7 +81,7 @@ test.beforeAll(async () => {
 				arrivalRequests.push(parsed);
 
 				if (parsed.method === 'pin') {
-					if (parsed.pin === '4729') {
+					if (parsed.pin === '472913') {
 						mockEntry.presence_state = 'arrived';
 						res.writeHead(200, { 'Content-Type': 'application/json' });
 						res.end(JSON.stringify({ presence_state: 'arrived', message: 'Welcome!' }));
@@ -184,24 +184,24 @@ test('PIN success transitions the page to the arrived state', async ({ page }) =
 	mockEntry.presence_state = 'on_the_way';
 	await page.goto(`/q/status?t=${testToken}`);
 
-	await expect(page.locator('text=Verify Physical Arrival')).toBeVisible();
+	await expect(page.locator("text=Confirm you've arrived")).toBeVisible();
 	const pinInput = page.locator('input[id="pin-input"]');
 	const confirmBtn = page.locator('form button[type="submit"]');
 
 	// Try wrong PIN first
-	await pinInput.fill('0000');
+	await pinInput.fill('000000');
 	await confirmBtn.click();
 	await expect(page.locator('text=Incorrect PIN. 3 attempts remaining.')).toBeVisible();
 
 	// Enter correct PIN
-	await pinInput.fill('4729');
+	await pinInput.fill('472913');
 	await confirmBtn.click();
 
 	// Verify transitions to arrived state
-	await expect(page.locator("text=You're Confirmed!")).toBeVisible();
-	await expect(page.locator('text=Please wait inside the shop')).toBeVisible();
+	await expect(page.locator("text=You're confirmed!")).toBeVisible();
+	await expect(page.locator("text=Take a seat")).toBeVisible();
 	expect(arrivalRequests.length).toBe(2);
-	expect(arrivalRequests[1].pin).toBe('4729');
+	expect(arrivalRequests[1].pin).toBe('472913');
 });
 
 test('GPS accuracy too low fallback to PIN', async ({ page }) => {
@@ -226,7 +226,7 @@ test('GPS accuracy too low fallback to PIN', async ({ page }) => {
 		};
 	});
 
-	await page.locator('button:has-text("Auto-Confirm using GPS")').click();
+	await page.locator('button:has-text("Confirm with GPS instead")').click();
 	await expect(
 		page.locator('text=GPS accuracy too low. Please enter the PIN instead.')
 	).toBeVisible();

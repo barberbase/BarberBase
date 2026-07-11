@@ -207,7 +207,7 @@ test('q/status on_the_way — PIN cue', async ({ page }) => {
 	entry.state = 'waiting';
 	entry.presence_state = 'on_the_way';
 	await page.goto(`/q/status?t=${magicToken}`);
-	await page.waitForSelector('text=Verify Physical Arrival');
+	await page.waitForSelector('text=Confirm you've arrived');
 	await page.screenshot({ path: shot('q-status-ontheway-360'), fullPage: true });
 });
 
