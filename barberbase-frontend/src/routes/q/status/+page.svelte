@@ -593,7 +593,7 @@
 							Confirm you've arrived
 						</h3>
 						<p class="text-xs text-muted text-center">
-							At the shop? Enter the 6-digit PIN from the card on the counter.
+							At the shop? Enter the 4-digit PIN from the card on the counter.
 						</p>
 
 						<form onsubmit={handleConfirmArrivalPin} class="space-y-3">
@@ -604,9 +604,9 @@
 								<!-- One real input laid invisibly over six display cells: segmented-PIN
 								     feel (auto-advance, active-cell highlight) with paste, backspace,
 								     and autofill all behaving like a normal single field. -->
-								<div class="pin-cells relative mx-auto max-w-[280px]">
-									<div class="grid grid-cols-6 gap-1.5" aria-hidden="true">
-										{#each Array(6) as _, i}
+								<div class="pin-cells relative mx-auto max-w-[220px]">
+									<div class="grid grid-cols-4 gap-1.5" aria-hidden="true">
+										{#each Array(4) as _, i}
 											<span
 												class="h-12 rounded-xl border flex items-center justify-center text-xl font-mono font-bold
 													{i < pinInput.length
@@ -626,8 +626,8 @@
 										inputmode="numeric"
 										autocomplete="one-time-code"
 										pattern="[0-9]*"
-										minlength="6"
-										maxlength="6"
+										minlength="4"
+										maxlength="4"
 										class="absolute inset-0 w-full h-full opacity-0 text-base cursor-pointer disabled:cursor-not-allowed"
 										bind:value={pinInput}
 										disabled={pinAttemptsRemaining === 0 || isSubmitting}
@@ -636,7 +636,7 @@
 								<button
 									type="submit"
 									class="w-full mt-3 py-3 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] disabled:opacity-40 disabled:hover:brightness-100 text-canvas font-bold text-sm rounded-xl cursor-pointer transition-all min-h-[48px]"
-									disabled={pinInput.length < 6 || pinAttemptsRemaining === 0 || isSubmitting}
+									disabled={pinInput.length < 4 || pinAttemptsRemaining === 0 || isSubmitting}
 								>
 									{isSubmitting ? 'Checking the PIN…' : 'Confirm Arrival'}
 								</button>

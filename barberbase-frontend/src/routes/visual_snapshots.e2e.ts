@@ -159,7 +159,7 @@ test.beforeAll(async () => {
 				queue_session_status: 'active',
 				tenant_slug: 'star-salon',
 				location_slug: 'star-salon/koramangala',
-				arrival_pin: '476212',
+				arrival_pin: '4762',
 				manual_override_active: false
 			});
 		if (url.includes('/v1/staff/queue/snapshot'))

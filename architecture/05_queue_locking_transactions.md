@@ -240,7 +240,7 @@ Returns: `total_duration_minutes`, `total_price_paise`, `allowed_modes[]`, `queu
  
 ## Arrival PIN System
  
-Static 6-digit PIN per location. Printed on counter card/QR standee. Permanent until owner regenerates.
+Static 4-digit PIN per location. Printed on counter card/QR standee. Permanent until owner regenerates.
  
 ```
 POST /v1/queue/confirm-arrival  (CustomerSession)

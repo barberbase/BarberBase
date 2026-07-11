@@ -81,7 +81,7 @@ test.beforeAll(async () => {
 				arrivalRequests.push(parsed);
 
 				if (parsed.method === 'pin') {
-					if (parsed.pin === '472913') {
+					if (parsed.pin === '4729') {
 						mockEntry.presence_state = 'arrived';
 						res.writeHead(200, { 'Content-Type': 'application/json' });
 						res.end(JSON.stringify({ presence_state: 'arrived', message: 'Welcome!' }));
@@ -189,19 +189,19 @@ test('PIN success transitions the page to the arrived state', async ({ page }) =
 	const confirmBtn = page.locator('form button[type="submit"]');
 
 	// Try wrong PIN first
-	await pinInput.fill('000000');
+	await pinInput.fill('0000');
 	await confirmBtn.click();
 	await expect(page.locator('text=Incorrect PIN. 3 attempts remaining.')).toBeVisible();
 
 	// Enter correct PIN
-	await pinInput.fill('472913');
+	await pinInput.fill('4729');
 	await confirmBtn.click();
 
 	// Verify transitions to arrived state
 	await expect(page.locator("text=You're confirmed!")).toBeVisible();
 	await expect(page.locator("text=Take a seat")).toBeVisible();
 	expect(arrivalRequests.length).toBe(2);
-	expect(arrivalRequests[1].pin).toBe('472913');
+	expect(arrivalRequests[1].pin).toBe('4729');
 });
 
 test('GPS accuracy too low fallback to PIN', async ({ page }) => {

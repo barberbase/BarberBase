@@ -538,7 +538,7 @@ func TestProvisionTenant_Integration(t *testing.T) {
 		require.NotEmpty(t, resp.TenantID)
 		require.NotEmpty(t, resp.LocationID)
 		require.NotEmpty(t, resp.OwnerStaffMemberID)
-		require.Len(t, resp.ArrivalPin, 6)
+		require.Len(t, resp.ArrivalPin, 4)
 
 		// Verify database state
 		var ownerPhone string

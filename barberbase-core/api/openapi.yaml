@@ -1939,7 +1939,7 @@ paths:
           2. The tenant's first location (slug, name, address, timezone)
           3. An owner staff_member (role=owner, phone=owner_phone) so the owner can
              immediately request an OTP via POST /auth/staff/request-otp and log in.
-          4. Initializes the arrival PIN (6-digit crypto/rand, bcrypt-hashed).
+          4. Initializes the arrival PIN (4-digit crypto/rand, bcrypt-hashed).
 
         StaffJWT cannot authorize this endpoint — no staff exist yet at setup time.
         Gated by PlatformAdminKey (env: PLATFORM_ADMIN_KEY, constant-time compare).
@@ -2022,7 +2022,7 @@ paths:
                     type: string
                     minLength: 6
                     maxLength: 6
-                    example: "836214"
+                    example: "8362"
                     description: Plaintext PIN shown once. Laminate on counter. Staff dashboard shows it thereafter.
         '409':
           description: tenant_slug, location_slug, or owner_phone already exists

@@ -465,7 +465,7 @@ func (s *Server) PlatformAdminKeyMiddleware(next http.Handler) http.Handler {
 func generateArrivalPIN() (string, error) {
 	const digits = "0123456789"
 	var pin []byte
-	bytes := make([]byte, 6)
+	bytes := make([]byte, 4)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
 	}
@@ -538,7 +538,7 @@ func (s *Server) ProvisionTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Generate secure 6-digit arrival PIN
+	// 2. Generate secure 4-digit arrival PIN
 	plainPin, err := generateArrivalPIN()
 	if err != nil {
 		log.Printf("[Error] Failed to generate arrival PIN: %v", err)
