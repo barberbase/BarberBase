@@ -164,8 +164,24 @@ test.beforeAll(async () => {
 			});
 		if (url.includes('/v1/staff/queue/snapshot'))
 			return json(200, { queue_version: 1, session_status: 'active', entries: [] });
-		if (url.includes('/v1/staff/members')) return json(200, { staff: [] });
-		if (url.includes('/v1/staff/analytics/daily')) return json(200, {});
+		if (url.includes('/v1/staff/members'))
+			return json(200, {
+				staff: [
+					{ id: 's-1', name: 'Arjun', role: 'barber', status: 'cutting' },
+					{ id: 's-2', name: 'Vikram', role: 'barber', status: 'idle' },
+					{ id: 's-3', name: 'Sameer', role: 'barber', status: 'break' }
+				]
+			});
+		if (url.includes('/v1/staff/analytics/daily'))
+			return json(200, {
+				business_date: '2026-07-04',
+				total_visits: 12,
+				total_revenue_paise: 184500,
+				average_wait_minutes: 18,
+				no_show_count: 1,
+				cancelled_count: 0,
+				barber_breakdown: []
+			});
 		json(200, {});
 	});
 	server.listen(mockPort);
@@ -240,4 +256,16 @@ test('dashboard — role-gated admin link', async ({ page, context }) => {
 	await page.goto('/dashboard');
 	await page.waitForSelector('text=Staff Dashboard');
 	await page.screenshot({ path: shot('dashboard-admin-link-360') });
+});
+
+test('dashboard — today-at-a-glance strip', async ({ page, context }) => {
+	await context.addCookies([
+		{ name: 'access_token', value: ownerJwt, domain: 'localhost', path: '/' }
+	]);
+	await page.goto('/dashboard');
+	await page.waitForSelector('text=Revenue Today');
+	await page.screenshot({ path: shot('dashboard-glance-360'), fullPage: true });
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await page.waitForTimeout(200);
+	await page.screenshot({ path: shot('dashboard-glance-1280') });
 });

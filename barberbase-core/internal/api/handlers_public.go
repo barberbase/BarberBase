@@ -67,6 +67,17 @@ func computeShopStatus(
 	return "open"
 }
 
+// hhmm formats a Postgres time-of-day value as "HH:MM" for JSON.
+// The pgx scan of a `time` column lands on the 2000-01-01 zero date; only
+// the wall-clock part is real, so never marshal the time.Time directly.
+func hhmm(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	s := t.Format("15:04")
+	return &s
+}
+
 // JoinQueue handles POST /v1/queue/join
 func (s *Server) JoinQueue(w http.ResponseWriter, r *http.Request) {
 	var req JoinQueueJSONBody
@@ -726,8 +737,8 @@ func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locat
 
 	if hours != nil {
 		response["business_hours_today"] = map[string]interface{}{
-			"opens_at":      hours.OpensAt,
-			"closes_at":     hours.ClosesAt,
+			"opens_at":      hhmm(hours.OpensAt),
+			"closes_at":     hhmm(hours.ClosesAt),
 			"is_open_today": hours.IsOpen,
 		}
 	} else {

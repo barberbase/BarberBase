@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { tick } from 'svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import { formatHHMM } from '$lib';
 
 	let { data }: { data: any } = $props();
 
@@ -327,7 +328,9 @@
 			<div class="closed-icon"><Icon name="clock" size={36} /></div>
 			<h2>We are currently closed</h2>
 			{#if data.location.business_hours_today?.opens_at}
-				<p class="hours-info">We open today at {data.location.business_hours_today.opens_at}</p>
+				<p class="hours-info">
+					We open today at {formatHHMM(data.location.business_hours_today.opens_at)}
+				</p>
 			{:else}
 				<p class="hours-info">Please check back during our regular business hours.</p>
 			{/if}

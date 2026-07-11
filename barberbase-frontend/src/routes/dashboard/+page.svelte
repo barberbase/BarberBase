@@ -4,6 +4,9 @@
 	import { connectSSE } from '$lib/sse';
 	import CheckoutModal from '$lib/components/CheckoutModal.svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import * as Card from '$lib/components/ui/card/index.js';
+	import { Badge } from '$lib/components/ui/badge/index.js';
+	import { formatHHMM } from '$lib';
 
 	// SvelteKit SSR data
 	let { data } = $props<{
@@ -37,6 +40,33 @@
 			sseClient.close();
 		}
 	});
+
+	// Today-at-a-glance (from /v1/staff/analytics/daily, loaded server-side)
+	const daily = initialData.dailyAnalytics;
+	function formatRupees(paise: number | undefined | null): string {
+		return `₹${((paise ?? 0) / 100).toLocaleString('en-IN')}`;
+	}
+
+	// Shop open/closed + today's hours (public status endpoint, loaded server-side)
+	const shopToday = initialData.shopToday;
+	const shopHours = shopToday?.business_hours_today;
+	const SHOP_STATUS_LABEL: Record<string, string> = {
+		open: 'Open',
+		closing_soon: 'Closing soon',
+		temporarily_closed: 'Temp. closed',
+		closed: 'Closed'
+	};
+
+	// Who's on shift — staff/members is already fetched for the barber dropdowns;
+	// ponytail: status is load-time only, wire to SSE if live presence matters
+	const onShift = (initialData.staffMembers ?? []).filter(
+		(m: any) => m.status && m.status !== 'offline'
+	);
+	const PRESENCE_DOT: Record<string, string> = {
+		cutting: 'bg-gold-accent',
+		idle: 'bg-system-success',
+		break: 'bg-system-warning'
+	};
 
 	// UI States
 	let showWalkInForm = $state<boolean>(false);
@@ -389,6 +419,29 @@
 				</div>
 			{/if}
 
+			<!-- Shop open/closed + today's hours -->
+			{#if shopToday?.shop_status}
+				<div
+					class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-white/[0.05] bg-canvas flex items-center"
+				>
+					Shop:
+					<span
+						class="ml-1.5 {shopToday.shop_status === 'open'
+							? 'text-system-success/80'
+							: shopToday.shop_status === 'closing_soon' || shopToday.shop_status === 'temporarily_closed'
+								? 'text-system-warning'
+								: 'text-muted'}"
+					>
+						{SHOP_STATUS_LABEL[shopToday.shop_status] ?? shopToday.shop_status}
+					</span>
+					{#if shopHours?.opens_at && shopHours?.closes_at}
+						<span class="ml-2 text-muted font-medium normal-case tracking-normal">
+							{formatHHMM(shopHours.opens_at)} – {formatHHMM(shopHours.closes_at)}
+						</span>
+					{/if}
+				</div>
+			{/if}
+
 			<!-- Barber Name -->
 			<div class="text-sm text-primary">
 				Hello, <span class="font-bold text-primary">{data.snapshot ? 'Barber' : 'Staff'}</span>
@@ -454,6 +507,57 @@
 				No active queue yet. The first check-in will start today's queue.
 			</div>
 		</div>
+	{/if}
+
+	<!-- Today at a glance (from staff/analytics/daily) + who's on shift -->
+	{#if daily || onShift.length > 0}
+		<section aria-label="Today at a glance" class="max-w-7xl w-full mx-auto px-6 pt-6">
+			{#if daily}
+			<Card.Root class="rounded-2xl border-white/[0.05] py-0 gap-0">
+				<Card.Content
+					class="p-0 grid grid-cols-2 sm:grid-cols-4 gap-px bg-white/[0.04] rounded-2xl overflow-hidden [&>div]:bg-matte"
+				>
+					<div class="px-4 py-3.5" id="glance-revenue">
+						<div class="text-xs font-medium text-muted">Revenue Today</div>
+						<div class="text-xl font-mono font-bold text-gold-accent mt-0.5">
+							{formatRupees(daily.total_revenue_paise)}
+						</div>
+					</div>
+					<div class="px-4 py-3.5" id="glance-served">
+						<div class="text-xs font-medium text-muted">Served</div>
+						<div class="text-xl font-mono font-bold text-primary mt-0.5">
+							{daily.total_visits ?? 0}
+						</div>
+					</div>
+					<div class="px-4 py-3.5" id="glance-avg-wait">
+						<div class="text-xs font-medium text-muted">Avg Wait</div>
+						<div class="text-xl font-mono font-bold text-primary mt-0.5">
+							{daily.average_wait_minutes ?? 0}<span class="text-sm text-muted font-normal ml-1">min</span>
+						</div>
+					</div>
+					<div class="px-4 py-3.5" id="glance-no-shows">
+						<div class="text-xs font-medium text-muted">No-shows</div>
+						<div class="text-xl font-mono font-bold {(daily.no_show_count ?? 0) > 0 ? 'text-system-warning' : 'text-primary'} mt-0.5">
+							{daily.no_show_count ?? 0}
+						</div>
+					</div>
+				</Card.Content>
+			</Card.Root>
+			{/if}
+
+			{#if onShift.length > 0}
+				<div class="flex flex-wrap items-center gap-2 {daily ? 'mt-3' : ''} px-1">
+					<span class="text-xs font-medium text-muted">On shift:</span>
+					{#each onShift as member (member.id)}
+						<Badge variant="secondary" class="gap-1.5 border border-white/[0.05]">
+							<span class="size-1.5 rounded-full {PRESENCE_DOT[member.status] ?? 'bg-dim'}"></span>
+							{member.name}
+							<span class="text-muted">{member.status === 'break' ? 'on break' : member.status}</span>
+						</Badge>
+					{/each}
+				</div>
+			{/if}
+		</section>
 	{/if}
 
 	<main id="main-content" class="flex-1 max-w-7xl w-full mx-auto p-6 flex flex-col lg:flex-row gap-6">
