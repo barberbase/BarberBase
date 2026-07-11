@@ -24,6 +24,36 @@
 	// Derived categories matching active tab to avoid HTML template implicit any errors
 	let filteredCategories = $derived(categories.filter((c: any) => c.gender === activeTab));
 
+	// Progressive disclosure: large catalogs collapse to category headers (native
+	// <details>, zero JS). Small catalogs stay fully open — collapsing 5 services
+	// would add a tap without removing any scroll.
+	const totalVariants = categories.reduce(
+		(n: number, c: any) => n + c.groups.reduce((m: number, g: any) => m + g.variants.length, 0),
+		0
+	);
+	const variantCount = (c: any) =>
+		c.groups.reduce((m: number, g: any) => m + g.variants.length, 0);
+	// Initial-open set computed ONCE (not reactive) so selecting a service never
+	// yanks a category the customer deliberately closed; URL-restored selections
+	// still open their category on load, keeping the page URL-resumable.
+	const initiallyOpen = new Set(
+		categories
+			.filter(
+				(c: any) =>
+					totalVariants <= 8 ||
+					c.groups.some((g: any) =>
+						g.variants.some((v: any) => (data.variantIds || []).includes(v.id))
+					)
+			)
+			.map((c: any) => c.id)
+	);
+	const selectedInCategory = (c: any) =>
+		c.groups.reduce(
+			(m: number, g: any) =>
+				m + g.variants.filter((v: any) => selectedVariantIds.includes(v.id)).length,
+			0
+		);
+
 	// Scroll affordance: how many service cards sit fully below the fold.
 	// Recomputed on scroll/resize/tab-switch (rAF-throttled, passive) — cheap at
 	// catalog scale (tens of cards) and avoids customers never discovering
@@ -367,11 +397,23 @@
 					</div>
 				{/if}
 
-				<!-- CATEGORIES & GROUPS -->
+				<!-- CATEGORIES & GROUPS — one decision at a time: pick a category,
+				     then see its services (native <details>, no JS) -->
 				<div class="catalog-tree">
-					{#each filteredCategories as category}
-						<div class="category-block">
-							<h3 class="category-name">{category.name}</h3>
+					{#each filteredCategories as category (category.id)}
+						<details class="category-block" open={initiallyOpen.has(category.id)}>
+							<summary class="category-summary">
+								<h3 class="category-name">{category.name}</h3>
+								<span class="category-meta">
+									{#if selectedInCategory(category) > 0}
+										<span class="category-selected">{selectedInCategory(category)} selected</span>
+									{/if}
+									<span class="category-count">{variantCount(category)} services</span>
+									<span class="category-chevron" aria-hidden="true">
+										<Icon name="chevron-down" size={14} />
+									</span>
+								</span>
+							</summary>
 
 							{#each category.groups as group}
 								<div class="group-block">
@@ -406,7 +448,7 @@
 									</div>
 								</div>
 							{/each}
-						</div>
+						</details>
 					{:else}
 						<p class="empty-catalog">No services available for this gender category.</p>
 					{/each}
@@ -799,13 +841,76 @@
 		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 	}
 
+	.category-summary {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 0.75rem;
+		cursor: pointer;
+		list-style: none;
+		-webkit-tap-highlight-color: transparent;
+		min-height: 48px;
+	}
+
+	.category-summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.category-summary:focus-visible {
+		outline: 2px solid var(--color-gold-accent);
+		outline-offset: 2px;
+		border-radius: 0.5rem;
+	}
+
 	.category-name {
 		font-size: 1.15rem;
 		font-weight: 700;
-		margin: 0 0 1.25rem 0;
+		margin: 0;
 		color: var(--color-primary);
+	}
+
+	.category-meta {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.6rem;
+		flex-shrink: 0;
+	}
+
+	.category-count {
+		font-size: 0.75rem;
+		color: var(--color-muted);
+	}
+
+	.category-selected {
+		font-size: 0.72rem;
+		font-weight: 700;
+		color: var(--color-gold-accent);
+		background: rgba(200, 169, 107, 0.1);
+		border: 1px solid rgba(200, 169, 107, 0.25);
+		padding: 0.15rem 0.5rem;
+		border-radius: 999px;
+	}
+
+	.category-chevron {
+		display: inline-flex;
+		color: var(--color-dim);
+		transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	details[open] .category-chevron {
+		transform: rotate(180deg);
+	}
+
+	details[open] .category-summary {
 		border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 		padding-bottom: 0.5rem;
+		margin-bottom: 1.25rem;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.category-chevron {
+			transition: none;
+		}
 	}
 
 	.group-block {
