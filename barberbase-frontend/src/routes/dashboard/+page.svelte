@@ -675,7 +675,7 @@
 							<!-- Barber -->
 							<div>
 								<label for="walk-in-barber" class="block text-xs font-medium text-muted mb-1"
-									>Assigned Barber</label
+									>Preferred Barber</label
 								>
 								<select
 									id="walk-in-barber"
