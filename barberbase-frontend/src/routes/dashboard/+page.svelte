@@ -58,15 +58,46 @@
 	};
 
 	// Who's on shift — staff/members is already fetched for the barber dropdowns;
-	// ponytail: status is load-time only, wire to SSE if live presence matters
-	const onShift = (initialData.staffMembers ?? []).filter(
-		(m: any) => m.status && m.status !== 'offline'
+	// ponytail: status is load-time only (plus local PATCH echo), wire to SSE if live presence matters
+	let staffStatuses = $state<Record<string, string>>(
+		Object.fromEntries((initialData.staffMembers ?? []).map((m: any) => [m.id, m.status]))
+	);
+	const onShift = $derived(
+		(initialData.staffMembers ?? []).filter(
+			(m: any) => staffStatuses[m.id] && staffStatuses[m.id] !== 'offline'
+		)
 	);
 	const PRESENCE_DOT: Record<string, string> = {
 		cutting: 'bg-gold-accent',
 		idle: 'bg-system-success',
 		break: 'bg-system-warning'
 	};
+
+	// Barber self-status toggle ('cutting' is system-set at dispatch, never offered here)
+	const me = data.staff;
+	const isManager = me?.role === 'owner' || me?.role === 'manager';
+	// Owner/manager see the full roster incl. offline; barbers see only who's on shift
+	const rosterMembers = $derived(isManager ? (initialData.staffMembers ?? []) : onShift);
+	const SELF_STATUS_OPTIONS = [
+		{ value: 'idle', label: 'Available' },
+		{ value: 'break', label: 'Break' },
+		{ value: 'offline', label: 'Off' }
+	] as const;
+	let statusSaving = $state(false);
+	async function setMyStatus(status: 'idle' | 'break' | 'offline') {
+		if (!me?.staff_member_id || statusSaving || staffStatuses[me.staff_member_id] === status) return;
+		const previous = staffStatuses[me.staff_member_id];
+		staffStatuses[me.staff_member_id] = status; // optimistic
+		statusSaving = true;
+		try {
+			await store.setBarberStatus(me.staff_member_id, status);
+		} catch (err: any) {
+			staffStatuses[me.staff_member_id] = previous;
+			showToast(err?.data?.message || 'Failed to update your status.');
+		} finally {
+			statusSaving = false;
+		}
+	}
 
 	// UI States
 	let showWalkInForm = $state<boolean>(false);
@@ -442,6 +473,38 @@
 				</div>
 			{/if}
 
+			<!-- Self status toggle: idle ⇄ break ⇄ offline ('cutting' is system-set, not offered) -->
+			{#if me?.staff_member_id && staffStatuses[me.staff_member_id]}
+				<div
+					class="flex items-center text-xs bg-canvas border border-white/[0.05] rounded-full p-0.5 font-semibold"
+					role="group"
+					aria-label="My status"
+				>
+					{#if staffStatuses[me.staff_member_id] === 'cutting'}
+						<span class="px-3 py-1 text-gold-accent uppercase tracking-wider text-[10px] font-mono font-bold">
+							Cutting
+						</span>
+					{/if}
+					{#each SELF_STATUS_OPTIONS as opt (opt.value)}
+						<button
+							type="button"
+							disabled={statusSaving}
+							aria-pressed={staffStatuses[me.staff_member_id] === opt.value}
+							class="px-3 py-1 rounded-full cursor-pointer transition-colors {staffStatuses[me.staff_member_id] === opt.value
+								? opt.value === 'idle'
+									? 'bg-system-success/15 text-system-success'
+									: opt.value === 'break'
+										? 'bg-system-warning/15 text-system-warning'
+										: 'bg-titanium text-primary'
+								: 'text-muted hover:text-primary'}"
+							onclick={() => setMyStatus(opt.value)}
+						>
+							{opt.label}
+						</button>
+					{/each}
+				</div>
+			{/if}
+
 			<!-- Barber Name -->
 			<div class="text-sm text-primary">
 				Hello, <span class="font-bold text-primary">{data.snapshot ? 'Barber' : 'Staff'}</span>
@@ -510,7 +573,7 @@
 	{/if}
 
 	<!-- Today at a glance (from staff/analytics/daily) + who's on shift -->
-	{#if daily || onShift.length > 0}
+	{#if daily || rosterMembers.length > 0}
 		<section aria-label="Today at a glance" class="max-w-7xl w-full mx-auto px-6 pt-6">
 			{#if daily}
 			<Card.Root class="rounded-2xl border-white/[0.05] py-0 gap-0">
@@ -545,14 +608,19 @@
 			</Card.Root>
 			{/if}
 
-			{#if onShift.length > 0}
+			{#if rosterMembers.length > 0}
+				<!-- Owner/manager see all barbers incl. offline; barbers see on-shift only -->
 				<div class="flex flex-wrap items-center gap-2 {daily ? 'mt-3' : ''} px-1">
-					<span class="text-xs font-medium text-muted">On shift:</span>
-					{#each onShift as member (member.id)}
-						<Badge variant="secondary" class="gap-1.5 border border-white/[0.05]">
-							<span class="size-1.5 rounded-full {PRESENCE_DOT[member.status] ?? 'bg-dim'}"></span>
+					<span class="text-xs font-medium text-muted">{isManager ? 'Staff:' : 'On shift:'}</span>
+					{#each rosterMembers as member (member.id)}
+						{@const status = staffStatuses[member.id]}
+						<Badge
+							variant="secondary"
+							class="gap-1.5 border border-white/[0.05] {status === 'offline' ? 'opacity-50' : ''}"
+						>
+							<span class="size-1.5 rounded-full {PRESENCE_DOT[status] ?? 'bg-dim'}"></span>
 							{member.name}
-							<span class="text-muted">{member.status === 'break' ? 'on break' : member.status}</span>
+							<span class="text-muted">{status === 'break' ? 'on break' : status}</span>
 						</Badge>
 					{/each}
 				</div>

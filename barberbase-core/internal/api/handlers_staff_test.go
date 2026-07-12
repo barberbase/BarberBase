@@ -983,3 +983,98 @@ func TestGetStaffMembers(t *testing.T) {
 
 
 
+
+func TestUpdateBarberStatus(t *testing.T) {
+	s, pool, tenantID, locationID, staffID, _ := setupTestServer(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM staff_members")
+		_, _ = pool.Exec(ctx, "DELETE FROM locations")
+		_, _ = pool.Exec(ctx, "DELETE FROM tenants")
+	})
+
+	// Second barber in same tenant
+	otherBarberID := uuid.New()
+	if _, err := pool.Exec(ctx, "INSERT INTO staff_members (id, tenant_id, location_id, name, phone_number, role, is_active) VALUES ($1, $2, $3, 'Barber Two', '+919999999996', 'barber', true)", otherBarberID, tenantID, locationID); err != nil {
+		t.Fatalf("seed barber two: %v", err)
+	}
+
+	statusReq := func(callerID uuid.UUID, role string, targetID uuid.UUID, status string) *http.Request {
+		body := bytes.NewBufferString(fmt.Sprintf(`{"status":%q}`, status))
+		req := httptest.NewRequest(http.MethodPatch, "/v1/staff/members/"+targetID.String()+"/status", body)
+		c := req.Context()
+		c = context.WithValue(c, auth.CtxTenantID, tenantID.String())
+		c = context.WithValue(c, auth.CtxLocationID, locationID.String())
+		c = context.WithValue(c, auth.CtxStaffMemberID, callerID.String())
+		c = context.WithValue(c, auth.CtxRole, role)
+		return req.WithContext(c)
+	}
+
+	dbStatus := func(id uuid.UUID) string {
+		var st string
+		if err := pool.QueryRow(ctx, "SELECT status FROM staff_members WHERE id = $1", id).Scan(&st); err != nil {
+			t.Fatalf("read status: %v", err)
+		}
+		return st
+	}
+
+	t.Run("barber sets own status", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		s.UpdateBarberStatus(rec, statusReq(staffID, "barber", staffID, "break"), UUIDv7(staffID))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if st := dbStatus(staffID); st != "break" {
+			t.Errorf("expected status 'break', got %q", st)
+		}
+	})
+
+	t.Run("barber cannot set another barber's status", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		s.UpdateBarberStatus(rec, statusReq(staffID, "barber", otherBarberID, "offline"), UUIDv7(otherBarberID))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("owner sets any barber's status", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		s.UpdateBarberStatus(rec, statusReq(staffID, "owner", otherBarberID, "idle"), UUIDv7(otherBarberID))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if st := dbStatus(otherBarberID); st != "idle" {
+			t.Errorf("expected status 'idle', got %q", st)
+		}
+	})
+
+	t.Run("cutting is not manually settable", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		s.UpdateBarberStatus(rec, statusReq(staffID, "barber", staffID, "cutting"), UUIDv7(staffID))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("cross-tenant target is 404", func(t *testing.T) {
+		strangerID := uuid.New()
+		otherTenant := uuid.New()
+		otherLoc := uuid.New()
+		if _, err := pool.Exec(ctx, "INSERT INTO tenants (id, name, slug, owner_phone_number) VALUES ($1, 'T2', 'tenant-two', '+917777777777')", otherTenant); err != nil {
+			t.Fatalf("seed tenant: %v", err)
+		}
+		if _, err := pool.Exec(ctx, "INSERT INTO locations (id, tenant_id, name, slug) VALUES ($1, $2, 'L2', 'loc-two')", otherLoc, otherTenant); err != nil {
+			t.Fatalf("seed location: %v", err)
+		}
+		if _, err := pool.Exec(ctx, "INSERT INTO staff_members (id, tenant_id, location_id, name, phone_number, role, is_active) VALUES ($1, $2, $3, 'Stranger', '+917777777776', 'barber', true)", strangerID, otherTenant, otherLoc); err != nil {
+			t.Fatalf("seed stranger: %v", err)
+		}
+		rec := httptest.NewRecorder()
+		s.UpdateBarberStatus(rec, statusReq(staffID, "owner", strangerID, "offline"), UUIDv7(strangerID))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+}

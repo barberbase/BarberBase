@@ -93,6 +93,11 @@ export class QueueStore {
 		return res;
 	}
 
+	// Not queue state — no snapshot refetch, no SSE; caller updates its own view optimistically
+	async setBarberStatus(staffId: string, status: 'idle' | 'break' | 'offline') {
+		await this.client.patch<void>(`/v1/staff/members/${staffId}/status`, { status });
+	}
+
 	async completeService(entryId: string, body: any) {
 		const res = await this.client.post<any>(`/v1/staff/queue/entries/${entryId}/complete`, body);
 		await this.fetchSnapshot();

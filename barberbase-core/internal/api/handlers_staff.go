@@ -690,7 +690,51 @@ func (s *Server) GetStaffMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) UpdateBarberStatus(w http.ResponseWriter, r *http.Request, staffId UUIDv7) {
-	w.WriteHeader(http.StatusNotImplemented)
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"code": "INVALID_BODY", "message": "failed to decode request body",
+		})
+		return
+	}
+	// 'cutting' is system-set at call-next dispatch, never manually settable
+	if body.Status != "idle" && body.Status != "break" && body.Status != "offline" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"code": "INVALID_STATUS", "message": "status must be one of: idle, break, offline",
+		})
+		return
+	}
+
+	ctx := r.Context()
+	// Barber sets own status; owner sets anyone's. Law 20: 403 for scope rejection.
+	if auth.StaffMemberIDFromCtx(ctx) != staffId.String() && auth.RoleFromCtx(ctx) != "owner" {
+		respondJSON(w, http.StatusForbidden, map[string]string{
+			"code": "FORBIDDEN", "message": "cannot set another barber's status",
+		})
+		return
+	}
+	tenantID, err := uuid.Parse(auth.TenantIDFromCtx(ctx))
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid tenant id claim"})
+		return
+	}
+
+	// Law 11: tenant isolation from JWT claims
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE staff_members SET status = $1 WHERE id = $2 AND tenant_id = $3
+	`, body.Status, uuid.UUID(staffId), tenantID)
+	if err != nil {
+		log.Printf("[Error] UpdateBarberStatus failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		respondJSON(w, http.StatusNotFound, map[string]string{"code": "STAFF_NOT_FOUND", "message": "staff member not found"})
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": body.Status})
 }
 
 func (s *Server) AddWalkIn(w http.ResponseWriter, r *http.Request) {
