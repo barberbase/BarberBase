@@ -249,6 +249,9 @@ func (w *Watchdog) triggerNearTurn(ctx context.Context, s session, cand candidat
 			"from_business_phone": w.cfg.BhejnaFromPhone,
 			"location_id":         s.LocationID.String(),
 			"notification_type":   "near_turn",
+			"customer_id":         cand.CustomerID.String(),
+			"source_type":         "queue_entry", // dedup key: same template + entry within window sends once
+			"source_id":           cand.EntryID.String(),
 			"components": []interface{}{
 				map[string]interface{}{
 					"type": "body",

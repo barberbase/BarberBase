@@ -347,6 +347,9 @@ func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMo
 				"from_business_phone": fromPhone,
 				"location_id":         params.LocationID.String(),
 				"notification_type":   "you_are_next",
+				"customer_id":         customerID.String(),
+				"source_type":         "queue_entry", // dedup key: same template + entry within window sends once
+				"source_id":           entryID.String(),
 				"components": []any{
 					map[string]any{
 						"type": "body",

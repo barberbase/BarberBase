@@ -649,6 +649,9 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 			"location_id":         params.LocationID.String(),
 			"notification_type":   notificationType,
 			"components":          components,
+			"customer_id":         customerID.String(),
+			"source_type":         "queue_entry", // dedup key: same template + entry within window sends once
+			"source_id":           entryID.String(),
 		}
 		payloadBytes, errMarshal := json.Marshal(payloadMap)
 		if errMarshal != nil {

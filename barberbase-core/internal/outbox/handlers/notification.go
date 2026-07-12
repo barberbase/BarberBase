@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/repository"
@@ -115,6 +116,42 @@ func (h *Handler) Handle(ctx context.Context, pool *pgxpool.Pool, event *OutboxE
 	eventID, err := uuid.Parse(event.ID)
 	if err != nil {
 		return newTerminalError("invalid event id: %v", err)
+	}
+
+	// Dedup gate: two producers can each legitimately enqueue the same effective
+	// notification for the same source within moments of each other (e.g. a join
+	// that lands call-next-eligible enqueues bb_you_are_next, then staff call-next
+	// enqueues it again). Each gets its own outbox_event.id, so Bhejna's
+	// per-event idempotency key sees two distinct sends. If the same template
+	// already went to this source recently, skip silently — correct no-op, not a
+	// failure. (No assigned law number; closes an uncredentialed gap.)
+	// Window: the loser re-checks on every attempt, so the largest realistic gap
+	// between the winner's send and the loser's next check is the first retry
+	// backoff (30s); 2 minutes gives 4x margin.
+	// ponytail: single-choke-point check, not per-producer; two workers racing the
+	// same pair could still double-send — add a unique partial index if that bites.
+	if payload.SourceType != "" && payload.SourceID != nil && *payload.SourceID != "" {
+		if srcUUID, srcErr := uuid.Parse(*payload.SourceID); srcErr == nil {
+			var one int
+			dupErr := pool.QueryRow(ctx, `
+				SELECT 1 FROM notification_events
+				WHERE template_code = $1
+				  AND source_type = $2
+				  AND source_id = $3
+				  AND status IN ('queued', 'sent')
+				  AND created_at > NOW() - INTERVAL '2 minutes'
+				LIMIT 1`,
+				payload.TemplateCode, payload.SourceType, srcUUID,
+			).Scan(&one)
+			if dupErr == nil {
+				log.Printf("outbox: dedup skip: template=%s source=%s/%s event=%s",
+					payload.TemplateCode, payload.SourceType, srcUUID, eventID)
+				return nil
+			}
+			if !errors.Is(dupErr, pgx.ErrNoRows) {
+				return dupErr
+			}
+		}
 	}
 
 	blocked, err := consumeQuota(ctx, pool, h.repo, tenantUUID, eventID, payload.TemplateCode)

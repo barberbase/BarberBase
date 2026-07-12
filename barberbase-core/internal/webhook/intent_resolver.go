@@ -456,6 +456,9 @@ func (r *IntentResolver) ResolveJoin(ctx context.Context, msg ClassifiedMessage)
 		"location_id":         locationID.String(), // required by handler for credential resolution
 		"notification_type":   notificationType,
 		"components":          components,
+		"customer_id":         customerID.String(),
+		"source_type":         "queue_entry", // dedup key: same template + entry within window sends once
+		"source_id":           entryID.String(),
 	}
 
 	payloadBytes, err := json.Marshal(outboxPayload)
