@@ -1,5 +1,5 @@
 # Purpose
-Complete specification of all 13 WhatsApp message templates registered on BarberBase's WABA via Bhejna. Includes exact body copy, button definitions, parameter mapping, trigger conditions, cost, and registration priority.
+Complete specification of all 14 WhatsApp message templates registered on BarberBase's WABA via Bhejna. Includes exact body copy, button definitions, parameter mapping, trigger conditions, cost, and registration priority.
  
 # Use This File When
 - Registering templates in Bhejna portal
@@ -37,9 +37,16 @@ Register all templates in Bhejna's template manager. Submit for Meta approval (u
 | 10 | `bb_appointment_reminder` | UTILITY | Appointment feature |
 | 11 | `bb_weekly_summary` | UTILITY | Weekly summary cron |
 | 12 | `bb_marketing_broadcast` | MARKETING | Phase 2 campaigns |
-| 13 | `bb_queue_noshow` | UTILITY | Go-live |
+| 13 | `bb_spot_released` | UTILITY | Go-live |
+| 14 | `bb_queue_delayed` | UTILITY | Go-live |
  
 Templates 1–8 and 13 must be ACTIVE before BarberBase serves any shop.
+
+**`bb_spot_released` status (2026-07-12):** pending Meta review, NOT yet Active — replaces
+deleted `bb_queue_noshow` (same template_code slot, same 3 params). Until Meta approves it,
+sends to this template will be rejected by Bhejna; see `07_webhooks_outbox_workers.md` for
+retry/terminal-failure classification of that rejection. Do not treat "code deployed" as
+"safe to rely on" until Active is confirmed in the Bhejna/Meta template manager.
  
 ---
  
@@ -449,11 +456,14 @@ Footer: BarberBase
  
 ---
  
-## Template 13: `bb_queue_noshow`
+## Template 13: `bb_spot_released`
 
 **Category:** UTILITY | **Cost:** ₹0 (within 24h session)
 **Trigger:** Staff marks a `called` entry as no_show (terminal — no reactivate path)
 **Quota:** `whatsapp_transactional`
+**Status (2026-07-12):** pending Meta review — NOT yet Active. Replaces deleted
+`bb_queue_noshow` (Meta deleted the old template; this is a fresh registration,
+not a rename on Meta's side). Producer: `handlers_staff.go` `MarkNoShow`.
 
 ```
 Body:
@@ -471,12 +481,47 @@ Footer: BarberBase
 | {{3}} | location_slug | "star-salon/koramangala" |
 
 ---
+
+## Template 14: `bb_queue_delayed`
+
+**Category:** UTILITY | **Cost:** ₹0 (within 24h session)
+**Trigger:** Staff reactivates an entry (`ReactivateEntry`) and it displaces a remote
+customer (`presence_state` in `remote`, `notified`, `on_the_way`) further back in queue —
+notifies the displaced customer their wait just got longer.
+**Quota:** `whatsapp_transactional`
+
+```
+Header: Sorry for the inconvenience
+Body:
+Quick update from {{1}} — the queue order shifted slightly.
+Your token #{{2}} is now about {{3}} minutes away.
+You have a little more time before heading over. Tap below to see your live position.
+
+Footer: BarberBase
+
+Button 1 — URL: "Check My Status"
+  Static: https://barberbase.in/q/status?t=  Dynamic suffix: ENABLED
+```
+
+| # | Field | Example |
+|---|---|---|
+| {{1}} | shop_name | "Star Salon" |
+| {{2}} | token_number | "18" |
+| {{3}} | estimated_wait_minutes | "22" |
+| Button 1 suffix | magic_link_token | "eyJhbGci..." |
+
+Button component is conditional: only appended when `customer_id`, `visit_id`, and
+`magic_link_expires_at` are all present on the displaced entry; if any is missing, the
+button is omitted and a warning is logged (`handlers_staff.go:1581`), not treated as a
+failure.
+
+---
  
 ## Cost Summary
  
 | Bucket | Templates | Monthly cost/shop |
 |---|---|---|
-| transactional (queue flow) | 1,2,3,4,6,7,8,10,11,12,13 | ~₹55–68 total |
+| transactional (queue flow) | 1,2,3,4,6,7,8,10,11,12,13,14 | ~₹55–68 total |
 | authentication (OTP) | 5 | ~₹0.15/staff/month |
 | appointment notifications | 6,7 | ~₹0.14/appointment |
 | weekly summary | 8 | ~₹0.14/week |

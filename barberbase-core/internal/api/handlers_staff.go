@@ -1292,10 +1292,12 @@ func (s *Server) MarkNoShow(w http.ResponseWriter, r *http.Request, entryId UUID
 			return fmt.Errorf("mark no_show: %w", err)
 		}
 
-		// Law 7: "we missed you" WhatsApp inside the same tx. bb_queue_noshow is the
-		// dedicated no-show template: terminal removal, no reactivate path (unlike
-		// bb_queue_snoozed). Same gate as watchdog snooze: whatsapp-joined customers
-		// with a phone only.
+		// Law 7: "we missed you" WhatsApp inside the same tx. bb_spot_released is the
+		// dedicated no-show template (replaces deleted bb_queue_noshow): terminal
+		// removal, no reactivate path (unlike bb_queue_snoozed). Same gate as
+		// watchdog snooze: whatsapp-joined customers with a phone only.
+		// ponytail: bb_spot_released is pending Meta review as of 2026-07-12 — not yet
+		// Active. Sends will 4xx from Bhejna until approved; do not flip assuming success.
 		if sessionChannel == "whatsapp" && customerPhone != nil && *customerPhone != "" {
 			// locations.slug is already the compound "tenant/location" slug
 			// (e.g. "star-salon/bhayander") — never prepend tenant slug again.
@@ -1308,7 +1310,7 @@ func (s *Server) MarkNoShow(w http.ResponseWriter, r *http.Request, entryId UUID
 				return fmt.Errorf("read location slug: %w", err)
 			}
 			outboxPayload := map[string]interface{}{
-				"template_code":       "bb_queue_noshow",
+				"template_code":       "bb_spot_released",
 				"to":                  *customerPhone,
 				"from_business_phone": s.Config.BhejnaFromPhone,
 				"location_id":         locationID.String(),

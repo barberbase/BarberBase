@@ -196,7 +196,7 @@ func TestMarkNoShow_ConcurrentDoubleTap(t *testing.T) {
 	var outboxCount int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM outbox_events
-		WHERE type='notification.send' AND payload->>'template_code'='bb_queue_noshow'`).Scan(&outboxCount))
+		WHERE type='notification.send' AND payload->>'template_code'='bb_spot_released'`).Scan(&outboxCount))
 	require.Equal(t, 1, outboxCount, "exactly one WhatsApp notification, never two")
 
 	var queueVersion int
@@ -395,7 +395,7 @@ func TestAddWalkIn_AnonymousIsDispatchable(t *testing.T) {
 	require.Equal(t, "called", state)
 }
 
-// Regression: bb_queue_noshow {{3}} must be the compound locations.slug alone.
+// Regression: bb_spot_released {{3}} must be the compound locations.slug alone.
 // Prod bug sent "star-salon/star-salon/bhayander" because tenant slug was
 // prepended onto the already-compound slug. Exact-match assertion on the
 // resolved URL — a format-validity check would not have caught this.
@@ -422,7 +422,7 @@ func TestMarkNoShow_NoshowLinkExactURL(t *testing.T) {
 	var payload []byte
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT payload FROM outbox_events
-		WHERE type='notification.send' AND payload->>'template_code'='bb_queue_noshow'
+		WHERE type='notification.send' AND payload->>'template_code'='bb_spot_released'
 		ORDER BY created_at DESC LIMIT 1`).Scan(&payload))
 
 	var parsed struct {
