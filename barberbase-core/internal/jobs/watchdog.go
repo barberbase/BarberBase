@@ -23,6 +23,10 @@ const (
 	advisoryLockWatchdog      = int64(0xBBC401) // 12304385
 	advisoryLockEndOfDay      = int64(0xBBC402) // 12304386
 	advisoryLockWeeklySummary = int64(0xBBC403) // 12304387
+
+	// Grace period: minimum wall-clock minutes since near_turn_notified_at
+	// before an entry is auto-snooze-eligible. Never notified = never snoozed.
+	snoozeGraceMinutes = 5
 )
 
 type Watchdog struct {
@@ -317,15 +321,21 @@ func (w *Watchdog) checkAutoSnooze(ctx context.Context, s session) {
 		CustomerID     *uuid.UUID
 		TokenNumber    int
 	}
+	var graceElapsed bool
+	// Grace period uses DB wall-clock (NOW() vs near_turn_notified_at), so a
+	// notification set earlier in this same tick cannot satisfy it.
+	// near_turn_notified_at IS NULL (never notified) is never snooze-eligible.
 	err := w.db.QueryRow(ctx, `
-		SELECT id, presence_state, session_channel, visit_id, customer_id, token_number
+		SELECT id, presence_state, session_channel, visit_id, customer_id, token_number,
+		       (near_turn_notified_at IS NOT NULL
+		        AND near_turn_notified_at <= NOW() - ($2 * INTERVAL '1 minute')) AS grace_elapsed
 		FROM queue_entries
 		WHERE queue_session_id = $1
 		  AND state = 'waiting'
 		  AND is_dispatchable = true
 		ORDER BY priority_group ASC, sort_key ASC
 		LIMIT 1
-	`, s.ID).Scan(&top.ID, &top.PresenceState, &top.SessionChannel, &top.VisitID, &top.CustomerID, &top.TokenNumber)
+	`, s.ID, snoozeGraceMinutes).Scan(&top.ID, &top.PresenceState, &top.SessionChannel, &top.VisitID, &top.CustomerID, &top.TokenNumber, &graceElapsed)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return
@@ -334,7 +344,7 @@ func (w *Watchdog) checkAutoSnooze(ctx context.Context, s session) {
 		return
 	}
 
-	if top.PresenceState == "remote" || top.PresenceState == "notified" {
+	if graceElapsed && (top.PresenceState == "remote" || top.PresenceState == "notified") {
 		w.triggerAutoSnooze(ctx, s, top)
 	}
 }
@@ -380,7 +390,9 @@ func (w *Watchdog) triggerAutoSnooze(ctx context.Context, s session, top struct 
 			WHERE id = $1
 			  AND presence_state IN ('remote', 'notified')
 			  AND state = 'waiting'
-		`, top.ID)
+			  AND near_turn_notified_at IS NOT NULL
+			  AND near_turn_notified_at <= NOW() - ($2 * INTERVAL '1 minute')
+		`, top.ID, snoozeGraceMinutes)
 		if err != nil {
 			return err
 		}

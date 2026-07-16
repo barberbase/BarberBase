@@ -249,8 +249,8 @@ func TestWatchdog_AutoSnooze(t *testing.T) {
 
 	entryID1 := uuid.New()
 	_, _ = pool.Exec(ctx, `
-		INSERT INTO queue_entries (id, visit_id, queue_session_id, customer_id, token_number, state, presence_state, is_dispatchable, session_channel, priority_group, sort_key)
-		VALUES ($1, $2, $3, $4, 1, 'waiting', 'notified', true, 'whatsapp', 100, 1000)
+		INSERT INTO queue_entries (id, visit_id, queue_session_id, customer_id, token_number, state, presence_state, is_dispatchable, session_channel, priority_group, sort_key, near_turn_notified_at)
+		VALUES ($1, $2, $3, $4, 1, 'waiting', 'notified', true, 'whatsapp', 100, 1000, NOW() - INTERVAL '6 minutes')
 	`, entryID1, visitID1, sessionID, customerID)
 
 	// Run watchdog check
@@ -311,6 +311,95 @@ func TestWatchdog_AutoSnooze(t *testing.T) {
 	_ = pool.QueryRow(ctx, "SELECT COUNT(*) FROM outbox_events").Scan(&outboxCount)
 	if outboxCount != 0 {
 		t.Errorf("Expected 0 outbox events for web channel customer, got %d", outboxCount)
+	}
+}
+
+func TestWatchdog_AutoSnoozeGracePeriod(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+
+	ctx := context.Background()
+	cfg := &config.Config{
+		HMACSecret:      "test-hmac-secret-123456789012345",
+		BhejnaFromPhone: "+912200000001",
+	}
+	manager := realtime.NewManager()
+	watchdog := NewWatchdog(pool, manager, cfg)
+
+	tenantID := uuid.New()
+	locationID := uuid.New()
+	_, _ = pool.Exec(ctx, "INSERT INTO tenants (id, name, slug, owner_phone_number) VALUES ($1, 'Tenant', 'slug', '+919876543210')", tenantID)
+	_, _ = pool.Exec(ctx, `
+		INSERT INTO locations (id, tenant_id, name, slug, timezone, is_active, notify_when_people_ahead, notify_when_wait_minutes)
+		VALUES ($1, $2, 'Loc', 'slug/loc', 'Asia/Kolkata', true, 2, 20)
+	`, locationID, tenantID)
+
+	sessionID := uuid.New()
+	_, _ = pool.Exec(ctx, `
+		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
+		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+	`, sessionID, tenantID, locationID)
+
+	customerID := uuid.New()
+	_, _ = pool.Exec(ctx, "INSERT INTO customers (id, tenant_id, phone_number, name) VALUES ($1, $2, '+919999999999', 'Customer')", customerID, tenantID)
+
+	visitID := uuid.New()
+	_, _ = pool.Exec(ctx, `
+		INSERT INTO visits (id, tenant_id, location_id, customer_id, entry_type, status, party_size, total_duration_minutes, magic_link_expires_at)
+		VALUES ($1, $2, $3, $4, 'walk_in', 'active', 1, 15, NOW() + INTERVAL '23 hours')
+	`, visitID, tenantID, locationID, customerID)
+
+	// The bug scenario: customer joins directly into position 1, remote, never notified
+	entryID := uuid.New()
+	_, _ = pool.Exec(ctx, `
+		INSERT INTO queue_entries (id, visit_id, queue_session_id, customer_id, token_number, state, presence_state, is_dispatchable, session_channel, priority_group, sort_key)
+		VALUES ($1, $2, $3, $4, 1, 'waiting', 'remote', true, 'whatsapp', 100, 1000)
+	`, entryID, visitID, sessionID, customerID)
+
+	// First tick: notifies (near_turn) but must NOT snooze in the same pass
+	watchdog.runJob(ctx)
+
+	var presence string
+	var notifiedAt *time.Time
+	if err := pool.QueryRow(ctx, "SELECT presence_state, near_turn_notified_at FROM queue_entries WHERE id = $1", entryID).Scan(&presence, &notifiedAt); err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if presence != "notified" {
+		t.Errorf("Expected presence 'notified' after first tick, got '%s'", presence)
+	}
+	if notifiedAt == nil {
+		t.Fatal("Expected near_turn_notified_at to be set by first tick")
+	}
+
+	// Second tick, still inside the grace window: must NOT snooze
+	watchdog.runJob(ctx)
+	_ = pool.QueryRow(ctx, "SELECT presence_state FROM queue_entries WHERE id = $1", entryID).Scan(&presence)
+	if presence != "notified" {
+		t.Errorf("Expected presence 'notified' within grace period, got '%s'", presence)
+	}
+
+	// Backdate notification past the grace period: next tick MUST snooze
+	_, _ = pool.Exec(ctx, "UPDATE queue_entries SET near_turn_notified_at = NOW() - INTERVAL '6 minutes' WHERE id = $1", entryID)
+	watchdog.runJob(ctx)
+	var dispatchable bool
+	_ = pool.QueryRow(ctx, "SELECT presence_state, is_dispatchable FROM queue_entries WHERE id = $1", entryID).Scan(&presence, &dispatchable)
+	if presence != "snoozed" || dispatchable {
+		t.Errorf("Expected snoozed and not dispatchable after grace period, got presence=%s, dispatchable=%t", presence, dispatchable)
+	}
+
+	// Never-notified entry is never snoozed, no matter how long it waited.
+	// Web channel never receives near-turn, so near_turn_notified_at stays NULL.
+	_, _ = pool.Exec(ctx, `
+		UPDATE queue_entries
+		SET presence_state = 'remote', is_dispatchable = true, session_channel = 'web',
+		    near_turn_notified_at = NULL, snoozed_at = NULL,
+		    remote_joined_at = NOW() - INTERVAL '3 hours'
+		WHERE id = $1
+	`, entryID)
+	watchdog.runJob(ctx)
+	_ = pool.QueryRow(ctx, "SELECT presence_state FROM queue_entries WHERE id = $1", entryID).Scan(&presence)
+	if presence != "remote" {
+		t.Errorf("Expected never-notified entry to stay 'remote', got '%s'", presence)
 	}
 }
 

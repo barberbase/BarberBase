@@ -108,11 +108,13 @@ is_dispatchable = TRUE:
  
 Executed by watchdog (60-second ticker):
  
-When a `remote` or `notified` entry is next in dispatch order AND no `arrived` customer is ahead:
+When a `remote` or `notified` entry is next in dispatch order AND no `arrived` customer is ahead AND the grace period has elapsed:
 ```
 UPDATE queue_entry SET presence_state='snoozed', is_dispatchable=false
 INSERT outbox_event: bb_queue_snoozed
 ```
+ 
+**Grace period:** an entry is snooze-eligible only when ≥5 minutes of wall-clock time have passed since `near_turn_notified_at` was set. An entry with `near_turn_notified_at` NULL (never notified) is NEVER snooze-eligible, regardless of position or how long it has waited — notification must happen first. This prevents a customer who joins directly into position 1 from being snoozed by the next watchdog tick before they had any chance to act on the near-turn notification. The check compares against DB wall-clock (`NOW()`), so a notification written earlier in the same watchdog tick cannot satisfy it. Consequence: entries whose channel never receives a near-turn notification (e.g. `session_channel = 'web'`) are never auto-snoozed.
  
 The queue does not pause. The next `arrived` customer is called instead.
  
