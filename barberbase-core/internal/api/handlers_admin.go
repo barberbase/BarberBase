@@ -807,6 +807,12 @@ func (s *Server) DisconnectWhatsAppModeB(w http.ResponseWriter, r *http.Request,
 func (s *Server) RegenerateArrivalPin(w http.ResponseWriter, r *http.Request, locationId UUIDv7) {
 	ctx := r.Context()
 
+	// Law 20: 403 for scope rejection. Same boundary as every other /admin endpoint.
+	if role := auth.RoleFromCtx(ctx); role != "owner" && role != "manager" {
+		respondAdminJSON(w, http.StatusForbidden, map[string]string{"code": "FORBIDDEN", "message": "insufficient role"})
+		return
+	}
+
 	tenantIDStr := auth.TenantIDFromCtx(ctx)
 	tenantID, err := uuid.Parse(tenantIDStr)
 	if err != nil {

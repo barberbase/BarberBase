@@ -959,7 +959,9 @@
 							<div
 								class="flex flex-col justify-between items-end gap-3 min-w-[200px] w-full md:w-auto"
 							>
-								<!-- Barber Routing Selector (reassign) -->
+								<!-- Barber Routing Selector (reassign) — backend allows manager/owner only
+								     (403 for barbers), so barbers get a read-only label instead -->
+								{#if isManager}
 								<div class="w-full text-right">
 									<label
 										for="barber-select-{entry.id}"
@@ -986,6 +988,14 @@
 										{/each}
 									</select>
 								</div>
+								{:else}
+								<div class="w-full text-right">
+									<div class="text-[10px] font-medium text-dim mb-1">Assigned Barber</div>
+									<div class="text-xs text-primary py-1.5">
+										{data.staffMembers.find((m: any) => m.id === entry.assigned_barber_id)?.name ?? 'Unassigned'}
+									</div>
+								</div>
+								{/if}
 
 								<!-- Action Buttons: one dominant primary per state, secondaries ghost -->
 								<div class="flex flex-wrap gap-2 justify-end w-full">
