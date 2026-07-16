@@ -361,6 +361,11 @@
 					</span>
 				{/if}
 			</div>
+			{#if data.location.shop_status === 'open' || data.location.shop_status === 'closing_soon'}
+				<p class="shop-tagline">
+					Pick your services below to join the line — no app, no account, just one WhatsApp message.
+				</p>
+			{/if}
 		</div>
 	</header>
 
@@ -655,6 +660,13 @@
 		display: flex;
 		gap: 0.5rem;
 		flex-wrap: wrap;
+	}
+
+	.shop-tagline {
+		font-size: 0.9rem;
+		color: var(--color-muted);
+		line-height: 1.5;
+		margin: 0.85rem 0 0 0;
 	}
 
 	.status-badge,
