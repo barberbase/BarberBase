@@ -43,7 +43,18 @@
 	async function enablePush() {
 		try {
 			const reg = await navigator.serviceWorker.register('/service-worker.js', { scope: '/dashboard/' });
-			await navigator.serviceWorker.ready;
+			// navigator.serviceWorker.ready waits for a registration matching the PAGE
+			// URL (/dashboard), which is outside the SW scope (/dashboard/) — it never
+			// resolves here. Wait on this registration's own worker instead.
+			if (!reg.active) {
+				await new Promise<void>((resolve) => {
+					const sw = reg.installing || reg.waiting;
+					if (!sw) return resolve();
+					sw.addEventListener('statechange', () => {
+						if (sw.state === 'activated') resolve();
+					});
+				});
+			}
 
 			const permission = await Notification.requestPermission();
 			if (permission !== 'granted') {

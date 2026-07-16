@@ -224,6 +224,8 @@ func (w *WeeklySummary) RunJob(ctx context.Context, now time.Time) {
 		outboxPayload := map[string]interface{}{
 			"template_code":       "bb_weekly_summary",
 			"to":                  r.OwnerPhoneNumber,
+			"location_id":         r.LocationID.String(), // required by the notification handler for credential resolution
+			"notification_type":   "weekly_summary",
 			"from_business_phone": w.cfg.BhejnaFromPhone,
 			"components": []interface{}{
 				map[string]interface{}{

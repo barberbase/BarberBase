@@ -12,10 +12,18 @@ import (
 )
 
 type countingBhejna struct {
-	sends int
+	sends        int
+	textSends    int
+	lastTextReq  bhejna.SendTextReq
+	lastTextTid  uuid.UUID
+	lastTextLoc  uuid.UUID
 }
 
 func (c *countingBhejna) SendText(ctx context.Context, tenantID, locationID uuid.UUID, req bhejna.SendTextReq) (*bhejna.SendResult, error) {
+	c.textSends++
+	c.lastTextReq = req
+	c.lastTextTid = tenantID
+	c.lastTextLoc = locationID
 	return &bhejna.SendResult{JobID: "text-job"}, nil
 }
 
@@ -117,6 +125,41 @@ func TestNotificationHandle_DedupSameTemplateSameEntry(t *testing.T) {
 	}
 	if mock.sends != 3 {
 		t.Errorf("expected different-template send to go through (3 total), got %d", mock.sends)
+	}
+}
+
+// Free-text payloads (unknown-message "Reply JOIN" fallback) must route to
+// SendText — with platform sender class when tenant/location are unresolvable,
+// and shop credentials when both are known. No DB access on this path.
+func TestNotificationHandle_TextPayload(t *testing.T) {
+	ctx := context.Background()
+	mock := &countingBhejna{}
+	h := &Handler{bhejna: mock}
+
+	textPayload := []byte(`{"type":"text","to":"+919876500001","text":{"body":"Reply JOIN"}}`)
+
+	// Nil tenant (previously failed with "tenant id is nil") → platform sender.
+	evt := &OutboxEvent{ID: uuid.NewString(), Type: "notification.send", Payload: textPayload}
+	if err := h.Handle(ctx, nil, evt); err != nil {
+		t.Fatalf("Handle nil-tenant text: %v", err)
+	}
+	if mock.textSends != 1 || mock.lastTextReq.SenderClass != bhejna.SenderPlatform {
+		t.Errorf("expected 1 platform text send, got sends=%d class=%q", mock.textSends, mock.lastTextReq.SenderClass)
+	}
+
+	// Known tenant + location → default (customer) sender class with real IDs.
+	tid := uuid.NewString()
+	locID := uuid.New()
+	payload, _ := json.Marshal(map[string]any{
+		"type": "text", "to": "+919876500001", "location_id": locID.String(),
+		"text": map[string]string{"body": "Reply JOIN"},
+	})
+	evt2 := &OutboxEvent{ID: uuid.NewString(), TenantID: &tid, Type: "notification.send", Payload: payload}
+	if err := h.Handle(ctx, nil, evt2); err != nil {
+		t.Fatalf("Handle tenant text: %v", err)
+	}
+	if mock.textSends != 2 || mock.lastTextReq.SenderClass != "" || mock.lastTextLoc != locID {
+		t.Errorf("expected shop-credential text send, got class=%q loc=%s", mock.lastTextReq.SenderClass, mock.lastTextLoc)
 	}
 }
 

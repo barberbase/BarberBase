@@ -93,6 +93,21 @@ func NewHandler(pool *pgxpool.Pool, bhejna bhejna.Client) *Handler {
 }
 
 func (h *Handler) Handle(ctx context.Context, pool *pgxpool.Pool, event *OutboxEvent) error {
+	// Free-text sends (e.g. the unknown-message "Reply JOIN" fallback) carry a raw
+	// {"type":"text"} payload — no template, no quota, no notification_events row.
+	// They ride the customer's open 24h session, so tenant/location may be unknown.
+	var probe struct {
+		Type       string `json:"type"`
+		To         string `json:"to"`
+		LocationID string `json:"location_id"`
+		Text       struct {
+			Body string `json:"body"`
+		} `json:"text"`
+	}
+	if err := json.Unmarshal(event.Payload, &probe); err == nil && probe.Type == "text" {
+		return h.handleText(ctx, event, probe.To, probe.Text.Body, probe.LocationID)
+	}
+
 	var payload NotificationPayload
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return newTerminalError("failed to unmarshal payload: %w", err)
@@ -234,6 +249,43 @@ func (h *Handler) Handle(ctx context.Context, pool *pgxpool.Pool, event *OutboxE
 	}
 
 	h.writeSuccessNotificationEvent(ctx, tenantUUID, locUUID, payload, quotaType, sendResult.JobID)
+	return nil
+}
+
+// handleText sends a free-text WhatsApp message. When tenant/location can't be
+// resolved (e.g. unknown inbound sender), it falls back to the shared platform number.
+func (h *Handler) handleText(ctx context.Context, event *OutboxEvent, to, body, locationID string) error {
+	if to == "" || body == "" {
+		return newTerminalError("text payload missing to/body")
+	}
+
+	req := bhejna.SendTextReq{
+		To:             to,
+		Body:           body,
+		IdempotencyKey: "barberbase:outbox:" + event.ID,
+	}
+
+	var tenantUUID, locUUID uuid.UUID
+	if event.TenantID != nil {
+		if t, err := uuid.Parse(*event.TenantID); err == nil {
+			tenantUUID = t
+		}
+	}
+	if l, err := uuid.Parse(locationID); err == nil {
+		locUUID = l
+	}
+	if tenantUUID == uuid.Nil || locUUID == uuid.Nil {
+		req.SenderClass = bhejna.SenderPlatform
+	}
+
+	_, err := h.bhejna.SendText(ctx, tenantUUID, locUUID, req)
+	if err != nil {
+		var bhejnaErr bhejna.BhejnaError
+		if errors.As(err, &bhejnaErr) && !bhejnaErr.Retriable {
+			return newTerminalError("bhejna permanent error: %w", err)
+		}
+		return err
+	}
 	return nil
 }
 

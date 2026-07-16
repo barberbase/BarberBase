@@ -628,6 +628,11 @@ func (p *Processor) handleUnknown(ctx context.Context, msg ClassifiedMessage) er
 			"body": "Reply JOIN <shopname> <code> to join the queue. Reply STOP to opt out.",
 		},
 	}
+	// Location (when resolvable) lets the notification handler send from the shop's
+	// own number; without it the handler falls back to the platform number.
+	if tenantID != nil && msg.LocationID != nil {
+		payloadMap["location_id"] = msg.LocationID.String()
+	}
 	payloadBytes, err := json.Marshal(payloadMap)
 	if err != nil {
 		return fmt.Errorf("failed to marshal unknown response outbox payload: %w", err)

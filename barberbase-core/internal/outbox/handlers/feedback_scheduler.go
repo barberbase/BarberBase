@@ -181,7 +181,9 @@ func (fs *FeedbackScheduler) Handle(ctx context.Context, pool *pgxpool.Pool, eve
 				Parameters: []feedbackComponentParam{
 					{Type: "text", Text: staffName},
 					{Type: "text", Text: shopName},
-					{Type: "text", Text: visitIDStr},
+					// Template body has exactly {{1}} staff_name and {{2}} shop_name;
+					// visit_id travels only in the button payloads. A third body param
+					// makes Bhejna reject with TEMPLATE_PARAM_MISMATCH.
 				},
 			},
 			map[string]interface{}{
