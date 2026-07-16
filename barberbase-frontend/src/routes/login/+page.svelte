@@ -7,6 +7,7 @@
 			step?: 'phone' | 'otp';
 			phone_number?: string;
 			error?: string;
+			code?: string;
 		};
 	}>();
 
@@ -15,14 +16,68 @@
 	let phoneNumber = $state<string>('');
 	let otp = $state<string>('');
 	let loading = $state<boolean>(false);
+	let resending = $state<boolean>(false);
+	let wrongAttempts = $state<number>(0);
+	let locked = $state<boolean>(false);
 
-	// Sync local state when form props change from server-side action responses
+	// Resend cooldown: 200s = the token bucket's refill interval (burst 3,
+	// 1 token/200s), so waiting this long between sends never trips the limit.
+	const RESEND_COOLDOWN_S = 200;
+	let resendSecondsLeft = $state<number>(0);
+	let resendTimer: ReturnType<typeof setInterval> | undefined;
+
+	function startResendCooldown() {
+		clearInterval(resendTimer);
+		resendSecondsLeft = RESEND_COOLDOWN_S;
+		resendTimer = setInterval(() => {
+			resendSecondsLeft -= 1;
+			if (resendSecondsLeft <= 0) {
+				clearInterval(resendTimer);
+			}
+		}, 1000);
+	}
+
 	$effect(() => {
-		if (form?.step) {
+		return () => clearInterval(resendTimer);
+	});
+
+	function formatCountdown(s: number) {
+		const m = Math.floor(s / 60);
+		const rest = String(s % 60).padStart(2, '0');
+		return `${m}:${rest}`;
+	}
+
+	// Sync local state when form props change from server-side action responses.
+	// lastForm (non-reactive) makes each response process exactly once: without
+	// it, wrongAttempts += 1 self-triggers the effect, and a `step` change
+	// re-runs it against the same stale 401 response.
+	let lastForm: unknown = null;
+	$effect(() => {
+		if (form === lastForm) return;
+		lastForm = form;
+		// A 429 on resend must not knock the user back to the phone step.
+		if (form?.step && !(form.code === 'rate_limited' && step === 'otp')) {
 			step = form.step;
 		}
 		if (form?.phone_number) {
 			phoneNumber = form.phone_number;
+		}
+		if (form?.step === 'otp' && !form?.error) {
+			// Successful send/resend: fresh OTP, reset wrong-attempt tracking.
+			otp = '';
+			wrongAttempts = 0;
+			locked = false;
+			startResendCooldown();
+		}
+		if (form?.code === 'invalid_otp') {
+			wrongAttempts += 1;
+			if (wrongAttempts >= 5) {
+				locked = true;
+			}
+		}
+		if (form?.code === 'rate_limited') {
+			// Another tab/request burned the burst — restart the wait.
+			startResendCooldown();
 		}
 	});
 
@@ -30,6 +85,8 @@
 	function handleChangeNumber() {
 		step = 'phone';
 		otp = '';
+		clearInterval(resendTimer);
+		resendSecondsLeft = 0;
 	}
 </script>
 
@@ -187,7 +244,14 @@
 				</div>
 
 				<!-- Inline Error Display -->
-				{#if form?.error && step === 'otp'}
+				{#if locked}
+					<div
+						class="bg-system-error/10 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error flex items-start space-x-3 animate-fade-in"
+					>
+						<span class="shrink-0 mt-0.5"><Icon name="alert" size={18} /></span>
+						<div>Too many wrong attempts — that code is now locked. Resend to get a new code.</div>
+					</div>
+				{:else if form?.error && step === 'otp'}
 					<div
 						class="bg-system-error/10 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error flex items-start space-x-3 animate-fade-in"
 					>
@@ -199,7 +263,7 @@
 				<div class="space-y-3">
 					<button
 						type="submit"
-						disabled={loading || otp.length !== 6}
+						disabled={loading || locked || otp.length !== 6}
 						class="w-full py-4 bg-gold-accent hover:brightness-110 active:brightness-90 active:scale-[0.98] disabled:opacity-40 disabled:hover:brightness-100 text-canvas font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
 					>
 						{#if loading}
@@ -238,6 +302,33 @@
 						Change number
 					</button>
 				</div>
+			</form>
+
+			<form
+				method="POST"
+				action="?/requestOtp"
+				use:enhance={() => {
+					resending = true;
+					return async ({ update }) => {
+						await update();
+						resending = false;
+					};
+				}}
+			>
+				<input type="hidden" name="phone_number" value={phoneNumber} />
+				<button
+					type="submit"
+					disabled={resending || resendSecondsLeft > 0}
+					class="w-full py-3 bg-transparent hover:bg-titanium text-muted hover:text-primary font-semibold text-sm rounded-2xl transition-all duration-150 cursor-pointer text-center disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted"
+				>
+					{#if resendSecondsLeft > 0}
+						Resend code in {formatCountdown(resendSecondsLeft)}
+					{:else if resending}
+						Resending...
+					{:else}
+						Resend code
+					{/if}
+				</button>
 			</form>
 		{/if}
 	</div>

@@ -47,8 +47,10 @@ export const actions: Actions = {
 				return { step: 'otp', phone_number };
 			} else if (res.status === 429) {
 				return fail(429, {
-					error: 'Too many requests. Wait 10 minutes.',
-					step: 'phone'
+					error: 'Too many attempts — try again in about 3½ minutes.',
+					code: 'rate_limited',
+					step: 'phone',
+					phone_number
 				});
 			} else {
 				return fail(500, {
@@ -127,6 +129,7 @@ export const actions: Actions = {
 			} else if (res.status === 401) {
 				errorResponse = fail(401, {
 					error: 'Invalid or expired code.',
+					code: 'invalid_otp',
 					step: 'otp',
 					phone_number
 				});
