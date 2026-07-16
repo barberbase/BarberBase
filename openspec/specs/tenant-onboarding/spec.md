@@ -11,7 +11,7 @@ The system SHALL perform the following setup atomically within a single database
 1. Insert a new tenant.
 2. Insert a new location referencing the tenant.
 3. Insert a new owner staff member referencing the tenant and location.
-The system SHALL generate a secure 6-digit arrival PIN, storing its plaintext value in `arrival_pin_plain` and its bcrypt hash in `arrival_pin_hash`.
+The system SHALL generate a secure 4-digit arrival PIN, storing its plaintext value in `arrival_pin_plain` and its bcrypt hash in `arrival_pin_hash`.
 The system SHALL return the provisioned identifiers and the plaintext PIN.
 If any database insert fails or is rolled back, the entire transaction MUST roll back.
 

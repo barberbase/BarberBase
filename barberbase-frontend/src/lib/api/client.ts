@@ -952,7 +952,7 @@ export interface paths {
 		 *       2. The tenant's first location (slug, name, address, timezone)
 		 *       3. An owner staff_member (role=owner, phone=owner_phone) so the owner can
 		 *          immediately request an OTP via POST /auth/staff/request-otp and log in.
-		 *       4. Initializes the arrival PIN (6-digit crypto/rand, bcrypt-hashed).
+		 *       4. Initializes the arrival PIN (4-digit crypto/rand, bcrypt-hashed).
 		 *
 		 *     StaffJWT cannot authorize this endpoint — no staff exist yet at setup time.
 		 *     Gated by PlatformAdminKey (env: PLATFORM_ADMIN_KEY, constant-time compare).
