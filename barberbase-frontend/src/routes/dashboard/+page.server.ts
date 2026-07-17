@@ -20,7 +20,7 @@ export const load: PageServerLoad = async (event) => {
 	const client = new ApiClient(accessToken, platformMock);
 
 	// Fetch snapshot, staff list, service catalog, and today's analytics in parallel
-	const [snapshot, staffMembersRes, catalog, dailyAnalytics, staffShopStatus] = await Promise.all([
+	const [snapshot, staffMembersRes, catalog, dailyAnalytics, staffShopStatus, appointments] = await Promise.all([
 		client.get<any>('/v1/staff/queue/snapshot').catch((err) => {
 			console.error('[PageLoad] snapshot failed:', JSON.stringify(err));
 			return { entries: [], session: null };
@@ -29,7 +29,8 @@ export const load: PageServerLoad = async (event) => {
 		client.get<any>(`/v1/public/locations/${locationId}/service-catalog`).catch(() => ({ categories: [] })),
 		// ponytail: loaded once per page load; add SSE-triggered refetch if stale numbers bother anyone
 		client.get<any>('/v1/staff/analytics/daily').catch(() => null),
-		client.get<any>('/v1/staff/shop/status').catch(() => null)
+		client.get<any>('/v1/staff/shop/status').catch(() => null),
+		client.get<any>('/v1/staff/appointments').catch(() => null)
 	]);
 
 	// Shop open/closed + today's hours for the header. The staff endpoint has no
@@ -54,6 +55,7 @@ export const load: PageServerLoad = async (event) => {
 		catalog,
 		dailyAnalytics,
 		shopToday,
+		appointments,
 		apiBase
 	};
 };

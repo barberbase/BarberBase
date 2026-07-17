@@ -378,6 +378,10 @@ components:
           enum: [remote, notified, on_the_way, arrived, snoozed, unknown]
         is_dispatchable:
           type: boolean
+        entry_type:
+          type: string
+          enum: [walk_in, appointment, staff_created]
+          description: Visit origin — dashboard renders appointments distinctly from walk-ins
         customer:
           type: object
           properties:
@@ -1469,6 +1473,69 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/QueueSnapshot'
+
+  /staff/appointments:
+    get:
+      tags: [Staff - Queue]
+      summary: List appointments for a date (default today)
+      description: |
+        Staff dashboard view of booked appointments at the JWT's location_id,
+        ordered by scheduled_start_at. Shows scheduled and checked_in so staff
+        see the full day at a glance.
+      operationId: getStaffAppointments
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Business date in the location's timezone. Defaults to today.
+      responses:
+        '200':
+          description: Appointments for the date
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [date, appointments]
+                properties:
+                  date:
+                    type: string
+                    format: date
+                  appointments:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, status, scheduled_start_at, total_duration_minutes, party_size, services]
+                      properties:
+                        id:
+                          $ref: '#/components/schemas/UUIDv7'
+                        status:
+                          type: string
+                          enum: [scheduled, checked_in, cancelled, no_show, rescheduled]
+                        scheduled_start_at:
+                          type: string
+                          format: date-time
+                        total_duration_minutes:
+                          type: integer
+                        party_size:
+                          type: integer
+                        customer_name:
+                          type: string
+                          nullable: true
+                        customer_phone_masked:
+                          type: string
+                          nullable: true
+                        requested_barber_id:
+                          $ref: '#/components/schemas/UUIDv7'
+                          nullable: true
+                        services:
+                          type: array
+                          items:
+                            type: string
 
   /staff/queue/call-next:
     post:

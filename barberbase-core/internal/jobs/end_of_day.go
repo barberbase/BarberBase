@@ -151,6 +151,23 @@ func (e *EndOfDay) runEODForSession(ctx context.Context, row locationEODInfo) {
 			return err
 		}
 
+		// Appointments whose day has passed without a check-in become no_show here.
+		// This is the ONLY automatic path for unresponsive appointment customers —
+		// appointment entries never touch the queue's near-turn/auto-snooze machinery
+		// (they enter the queue as presence='arrived' at check-in, see CheckInAppointment).
+		_, err = tx.Exec(ctx, `
+			UPDATE appointments a
+			SET status = 'no_show', cancelled_by = 'system', updated_at = NOW()
+			FROM queue_sessions qs
+			WHERE qs.id = $1
+			  AND a.location_id = qs.location_id
+			  AND a.status = 'scheduled'
+			  AND a.scheduled_start_at < (qs.business_date + 1)::timestamp AT TIME ZONE $2
+		`, row.SessionID, row.Timezone)
+		if err != nil {
+			return err
+		}
+
 		err = tx.QueryRow(ctx, `
 			UPDATE queue_sessions
 			SET status = 'archived',

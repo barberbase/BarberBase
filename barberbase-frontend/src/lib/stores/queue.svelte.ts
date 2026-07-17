@@ -103,4 +103,38 @@ export class QueueStore {
 		await this.fetchSnapshot();
 		return res;
 	}
+
+	// Appointments — not part of the queue snapshot; caller refetches separately
+	async fetchAppointments() {
+		return this.client.get<any>('/v1/staff/appointments');
+	}
+
+	async checkinAppointment(appointmentId: string) {
+		const res = await this.client.post<any>(`/v1/staff/appointments/${appointmentId}/checkin`, {});
+		await this.fetchSnapshot();
+		return res;
+	}
+
+	async getAppointmentSlots(locationId: string, date: string, variantIds: string[]) {
+		const qs = new URLSearchParams({ date });
+		for (const id of variantIds) qs.append('variant_ids', id);
+		return this.client.get<any>(`/v1/public/locations/${locationId}/appointment-slots?${qs}`);
+	}
+
+	async bookAppointment(body: {
+		location_id: string;
+		variant_ids: string[];
+		party_size?: number;
+		scheduled_start_at: string;
+		customer_name?: string;
+		phone_number: string;
+		requested_barber_id?: string;
+	}) {
+		const res = await this.client.post<any>('/v1/appointments/book', {
+			...body,
+			initiated_via: 'staff_dashboard',
+			idempotency_key: crypto.randomUUID()
+		});
+		return res;
+	}
 }

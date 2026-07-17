@@ -5,7 +5,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -211,10 +210,11 @@ type ServiceSummary struct {
 }
 
 type CheckInAppointmentResult struct {
-	VisitID      uuid.UUID
-	QueueEntryID uuid.UUID
-	TokenNumber  int
-	MagicLink    string // generated from visit's magic_link_token_hash
+	VisitID         uuid.UUID
+	QueueEntryID    uuid.UUID
+	TokenNumber     int
+	NewQueueVersion int // for post-commit SSE broadcast (Law 8)
+	MagicLink       string // generated from visit's magic_link_token_hash
 }
 
 type QueueRepository struct {
@@ -262,10 +262,12 @@ func (r *QueueRepository) BookAppointment(ctx context.Context, tenantID uuid.UUI
 			return errors.New("request still in flight")
 		}
 
-		// Step 2 — Validate location
-		var timezone string
+		// Step 2 — Validate location (name/address also feed the WhatsApp templates)
+		var timezone, locationName string
+		var address *string
 		var isActive bool
-		err = tx.QueryRow(ctx, `SELECT timezone, is_active FROM locations WHERE id=$1`, req.LocationID).Scan(&timezone, &isActive)
+		err = tx.QueryRow(ctx, `SELECT timezone, name, address, is_active FROM locations WHERE id=$1 AND tenant_id=$2`,
+			req.LocationID, tenantID).Scan(&timezone, &locationName, &address, &isActive)
 		if err != nil {
 			return err
 		}
@@ -273,24 +275,37 @@ func (r *QueueRepository) BookAppointment(ctx context.Context, tenantID uuid.UUI
 			return errors.New("location is inactive")
 		}
 
-		// Step 3 — Validate shop open (day of week)
+		// Step 3 — Validate shop open at the requested time
 		loc, err := time.LoadLocation(timezone)
 		if err != nil {
 			loc = time.Local
 		}
-		dow := int(req.ScheduledStartAt.In(loc).Weekday())
+		localStartAt := req.ScheduledStartAt.In(loc)
+		if localStartAt.Before(time.Now().In(loc)) {
+			return errors.New("scheduled time is in the past")
+		}
+		dow := int(localStartAt.Weekday())
+		var opensAt, closesAt *time.Time
 		var isOpen bool
 		err = tx.QueryRow(ctx, `
-			SELECT EXISTS(
-				SELECT 1 FROM location_business_hours
-				WHERE location_id=$1 AND day_of_week=$2 AND is_closed=false
-			)
-		`, req.LocationID, dow).Scan(&isOpen)
+			SELECT is_open, opens_at, closes_at FROM location_hours
+			WHERE location_id=$1 AND day_of_week=$2
+		`, req.LocationID, dow).Scan(&isOpen, &opensAt, &closesAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			isOpen = false
+			err = nil
+		}
 		if err != nil {
 			return err
 		}
-		if !isOpen {
+		if !isOpen || opensAt == nil || closesAt == nil {
 			return errors.New("shop is closed on this day")
+		}
+		startMin := localStartAt.Hour()*60 + localStartAt.Minute()
+		opensMin := opensAt.Hour()*60 + opensAt.Minute()
+		closesMin := closesAt.Hour()*60 + closesAt.Minute()
+		if startMin < opensMin || startMin >= closesMin {
+			return errors.New("scheduled time is outside business hours")
 		}
 
 		// Step 4 — Validate variants + compute totals
@@ -332,19 +347,16 @@ func (r *QueueRepository) BookAppointment(ctx context.Context, tenantID uuid.UUI
 			}
 		}
 
-		// Step 6 — Upsert customer
+		// Step 6 — Upsert customer (column is customers.name; a NULL new name never
+		// clobbers an existing one)
 		var customerID uuid.UUID
-		cName := ""
-		if req.CustomerName != nil {
-			cName = *req.CustomerName
-		}
 		err = tx.QueryRow(ctx, `
-			INSERT INTO customers (tenant_id, phone_number, display_name)
+			INSERT INTO customers (tenant_id, phone_number, name)
 			VALUES ($1, $2, $3)
 			ON CONFLICT (tenant_id, phone_number) DO UPDATE
-			SET display_name = COALESCE(EXCLUDED.display_name, customers.display_name)
+			SET name = COALESCE(EXCLUDED.name, customers.name)
 			RETURNING id;
-		`, tenantID, req.PhoneNumber, cName).Scan(&customerID)
+		`, tenantID, req.PhoneNumber, req.CustomerName).Scan(&customerID)
 		if err != nil {
 			return err
 		}
@@ -363,7 +375,7 @@ func (r *QueueRepository) BookAppointment(ctx context.Context, tenantID uuid.UUI
 			  status, scheduled_start_at, scheduled_end_at, variant_ids, party_size, total_duration_minutes, idempotency_key
 			) VALUES (
 			  $1, $2, $3, $4,
-			  'scheduled', $5, $5::timestamp + ($6 * interval '1 minute'), $7, $8, $9, $10
+			  'scheduled', $5::timestamptz, $5::timestamptz + ($6 * interval '1 minute'), $7, $8, $9, $10
 			) RETURNING id;
 		`, tenantID, req.LocationID, customerID, req.RequestedBarberID,
 			req.ScheduledStartAt, totalDuration, variantJSON, req.PartySize, totalDuration, req.IdempotencyKey).Scan(&appointmentID)
@@ -371,24 +383,70 @@ func (r *QueueRepository) BookAppointment(ctx context.Context, tenantID uuid.UUI
 			return err
 		}
 
-		// generate magic link
-		expiresUnix := time.Now().Add(23 * time.Hour).Unix()
+		// Appointment magic link token: base64url(apt_id:expires) + "." + base64url(HMAC).
+		// The template URL button carries only the token as its dynamic suffix
+		// (static prefix https://barberbase.in/q/appointment?t= lives in the template).
+		// Valid until 2h past the scheduled end — the reminder (day before) must
+		// still carry a live token, so a booking-time 23h TTL would be wrong here.
+		expiresUnix := req.ScheduledStartAt.Add(time.Duration(totalDuration)*time.Minute + 2*time.Hour).Unix()
 		payloadStr := fmt.Sprintf("%s:%d", appointmentID.String(), expiresUnix)
 		payloadB64 := base64.RawURLEncoding.EncodeToString([]byte(payloadStr))
-		
+
 		mac := hmac.New(sha256.New, []byte(os.Getenv("HMAC_SECRET")))
 		mac.Write([]byte(payloadB64))
 		macB64 := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-		
-		token := payloadB64 + "." + macB64
-		magicLink := "https://barberbase.in/q/appointment?id=" + appointmentID.String() + "&t=" + token
 
-		// Step 8 — Outbox: appointment confirmation
+		token := payloadB64 + "." + macB64
+		magicLink := "https://barberbase.in/q/appointment?t=" + token
+
+		serviceNames := ""
+		for i, sv := range services {
+			if i > 0 {
+				serviceNames += ", "
+			}
+			serviceNames += sv.Name
+		}
+		localStart := req.ScheduledStartAt.In(loc)
+		aptIDStr := appointmentID.String()
+		locAddr := locationName
+		if address != nil && *address != "" {
+			locAddr = *address
+		}
+		textParam := func(t string) map[string]interface{} {
+			return map[string]interface{}{"type": "text", "text": t}
+		}
+
+		// Step 8 — Outbox: appointment confirmation (template 6: {{1}} shop,
+		// {{2}} date, {{3}} time, {{4}} services, {{5}} duration)
 		confPayload := map[string]interface{}{
-			"template_code":      "bb_appointment_confirmed",
-			"appointment_id":     appointmentID,
-			"magic_link":         magicLink,
-			"total_duration_min": totalDuration,
+			"template_code":       "bb_appointment_confirmed",
+			"to":                  req.PhoneNumber,
+			"location_id":         req.LocationID.String(),
+			"language":            "en",
+			"notification_type":   "appointment_confirmed",
+			"customer_id":         customerID.String(),
+			"source_type":         "appointment",
+			"source_id":           aptIDStr,
+			"components": []interface{}{
+				map[string]interface{}{
+					"type": "body",
+					"parameters": []interface{}{
+						textParam(locationName),
+						textParam(localStart.Format("Mon, 2 Jan 2006")),
+						textParam(localStart.Format("3:04 PM")),
+						textParam(serviceNames),
+						textParam(fmt.Sprintf("%d", totalDuration)),
+					},
+				},
+				map[string]interface{}{
+					"type": "button", "sub_type": "url", "index": 0,
+					"parameters": []interface{}{textParam(token)},
+				},
+				map[string]interface{}{
+					"type": "button", "sub_type": "quick_reply", "index": 1,
+					"parameters": []interface{}{map[string]interface{}{"type": "payload", "payload": "CANCEL_APT:" + aptIDStr}},
+				},
+			},
 		}
 		confJSON, _ := json.Marshal(confPayload)
 		_, err = tx.Exec(ctx, `
@@ -399,23 +457,48 @@ func (r *QueueRepository) BookAppointment(ctx context.Context, tenantID uuid.UUI
 			return err
 		}
 
-		// Step 9 — Outbox: appointment reminder
-		remPayload := map[string]interface{}{
-			"template_code":      "bb_appointment_reminder",
-			"appointment_id":     appointmentID,
-			"magic_link":         magicLink,
-			"total_duration_min": totalDuration,
-		}
-		remJSON, _ := json.Marshal(remPayload)
-		localStart := req.ScheduledStartAt.In(loc)
+		// Step 9 — Outbox: reminder at 6 PM the day before (template 7: {{1}} shop,
+		// {{2}} time, {{3}} services, {{4}} address). Skipped for same/next-day
+		// bookings whose reminder time is already past — the confirmation suffices.
 		localDayBefore := time.Date(localStart.Year(), localStart.Month(), localStart.Day()-1, 18, 0, 0, 0, loc)
-		remTime := localDayBefore.UTC()
-		_, err = tx.Exec(ctx, `
-			INSERT INTO outbox_events(tenant_id, type, payload, process_after)
-			VALUES ($1, 'notification.send', $2, $3)
-		`, tenantID, remJSON, remTime)
-		if err != nil {
-			return err
+		if localDayBefore.After(time.Now().In(loc)) {
+			remPayload := map[string]interface{}{
+				"template_code":       "bb_appointment_reminder",
+				"to":                  req.PhoneNumber,
+				"location_id":         req.LocationID.String(),
+				"language":            "en",
+				"notification_type":   "appointment_reminder",
+				"customer_id":         customerID.String(),
+				"source_type":         "appointment",
+				"source_id":           aptIDStr,
+				"components": []interface{}{
+					map[string]interface{}{
+						"type": "body",
+						"parameters": []interface{}{
+							textParam(locationName),
+							textParam(localStart.Format("3:04 PM")),
+							textParam(serviceNames),
+							textParam(locAddr),
+						},
+					},
+					map[string]interface{}{
+						"type": "button", "sub_type": "url", "index": 0,
+						"parameters": []interface{}{textParam(token)},
+					},
+					map[string]interface{}{
+						"type": "button", "sub_type": "quick_reply", "index": 1,
+						"parameters": []interface{}{map[string]interface{}{"type": "payload", "payload": "CANCEL_APT:" + aptIDStr}},
+					},
+				},
+			}
+			remJSON, _ := json.Marshal(remPayload)
+			_, err = tx.Exec(ctx, `
+				INSERT INTO outbox_events(tenant_id, type, payload, process_after)
+				VALUES ($1, 'notification.send', $2, $3)
+			`, tenantID, remJSON, localDayBefore.UTC())
+			if err != nil {
+				return err
+			}
 		}
 
 		result = &BookAppointmentResult{
@@ -452,11 +535,19 @@ func (r *QueueRepository) CheckInAppointment(
 	var res CheckInAppointmentResult
 
 	err := repository.WithTx(ctx, r.Pool, func(tx pgx.Tx) error {
-		// Step 1 - Upsert-then-lock queue session
-		loc, _ := time.LoadLocation("Asia/Kolkata")
+		// Step 0 - Location timezone drives the business date
+		var timezone string
+		if err := tx.QueryRow(ctx, `SELECT timezone FROM locations WHERE id=$1 AND tenant_id=$2`,
+			locationID, tenantID).Scan(&timezone); err != nil {
+			return err
+		}
+		loc, err := time.LoadLocation(timezone)
+		if err != nil {
+			loc, _ = time.LoadLocation("Asia/Kolkata")
+		}
 		businessDateStr := time.Now().In(loc).Format("2006-01-02")
 
-		_, err := tx.Exec(ctx, `
+		_, err = tx.Exec(ctx, `
 			INSERT INTO queue_sessions (tenant_id, location_id, business_date)
 			VALUES ($1, $2, $3::DATE)
 			ON CONFLICT (location_id, business_date) DO NOTHING
@@ -483,16 +574,20 @@ func (r *QueueRepository) CheckInAppointment(
 		var customerID uuid.UUID
 		var partySize int
 		var totalDuration int
+		var scheduledStartAt time.Time
 		err = tx.QueryRow(ctx, `
-			SELECT status, customer_id, party_size, total_duration_minutes
+			SELECT status, customer_id, party_size, total_duration_minutes, scheduled_start_at
 			FROM appointments
-			WHERE id = $1 AND tenant_id = $2
-		`, appointmentID, tenantID).Scan(&status, &customerID, &partySize, &totalDuration)
+			WHERE id = $1 AND tenant_id = $2 AND location_id = $3
+		`, appointmentID, tenantID, locationID).Scan(&status, &customerID, &partySize, &totalDuration, &scheduledStartAt)
 		if err != nil {
 			return err
 		}
 		if status != "scheduled" {
 			return errors.New("appointment is not scheduled")
+		}
+		if scheduledStartAt.In(loc).Format("2006-01-02") != businessDateStr {
+			return errors.New("appointment is not scheduled for today")
 		}
 
 		// Step 3 - Create visit
@@ -510,19 +605,16 @@ func (r *QueueRepository) CheckInAppointment(
 			return err
 		}
 
-		// generate magic link hash (HMAC-SHA256(visit_id||location_id||expires_at, HMAC_SECRET), hex)
-		expiresAt := time.Now().Add(23 * time.Hour)
-		expiresUnix := expiresAt.Unix()
-		payload := fmt.Sprintf("%s%s%d", visitID.String(), locationID.String(), expiresUnix)
-		mac := hmac.New(sha256.New, []byte(os.Getenv("HMAC_SECRET")))
-		mac.Write([]byte(payload))
-		magicHash := hex.EncodeToString(mac.Sum(nil))
+		// Magic link: canonical token format (same generator as JoinQueue/webhook —
+		// /q/status verification and the SSE stream both expect exactly this shape).
+		expiresAt := time.Now().Add(23 * time.Hour) // Law 13: 23h
+		magicToken := generateMagicLinkToken(customerID.String(), locationID.String(), visitID.String(), expiresAt, []byte(os.Getenv("HMAC_SECRET")))
 
 		_, err = tx.Exec(ctx, `
 			UPDATE visits
 			SET magic_link_token_hash = $1, magic_link_expires_at = $2
 			WHERE id = $3
-		`, magicHash, expiresAt, visitID)
+		`, magicToken, expiresAt, visitID)
 		if err != nil {
 			return err
 		}
@@ -548,7 +640,13 @@ func (r *QueueRepository) CheckInAppointment(
 			return err
 		}
 
-		// Step 5 - Increment token and create queue_entry
+		// Step 5 - Increment token and create queue_entry.
+		// presence_state='arrived': check-in requires physical presence, which keeps
+		// appointment entries structurally outside the watchdog's near-turn/auto-snooze
+		// path (that path only ever touches 'remote'/'notified' entries). Unresponsive
+		// appointment no-shows are handled at the appointments level — staff cancel or
+		// the end-of-day job marking stale 'scheduled' rows 'no_show' — never by queue
+		// auto-snooze. priority_group=50 protects the position over walk-ins (100).
 		tokenNumber := lastTokenNumber + 1
 		var entryID uuid.UUID
 		err = tx.QueryRow(ctx, `
@@ -576,25 +674,25 @@ func (r *QueueRepository) CheckInAppointment(
 			return err
 		}
 
-		// Step 7 - Increment queue_version
-		_, err = tx.Exec(ctx, `
+		// Step 7 - Increment queue_version (returned so the handler can broadcast — Law 8)
+		var newQueueVersion int
+		err = tx.QueryRow(ctx, `
 			UPDATE queue_sessions
 			SET last_token_number = last_token_number + 1, queue_version = queue_version + 1
 			WHERE id = $1
-		`, sessionID)
+			RETURNING queue_version
+		`, sessionID).Scan(&newQueueVersion)
 		if err != nil {
 			return err
 		}
 
 		res = CheckInAppointmentResult{
-			VisitID:      visitID,
-			QueueEntryID: entryID,
-			TokenNumber:  tokenNumber,
-			MagicLink:    "", // to be populated
+			VisitID:         visitID,
+			QueueEntryID:    entryID,
+			TokenNumber:     tokenNumber,
+			NewQueueVersion: newQueueVersion,
+			MagicLink:       "https://barberbase.in/q/status?t=" + magicToken,
 		}
-		
-		tokenStr := base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-		res.MagicLink = "https://barberbase.in/q/visit?id=" + visitID.String() + "&t=" + tokenStr
 
 		return nil
 	})

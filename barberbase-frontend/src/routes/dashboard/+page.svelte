@@ -41,6 +41,39 @@
 		}
 	});
 
+	// Today's appointments (from /v1/staff/appointments, loaded server-side; refetched after mutations)
+	let appointmentsData = $state<any>(initialData.appointments);
+	const todaysAppointments = $derived(appointmentsData?.appointments ?? []);
+	async function refetchAppointments() {
+		try {
+			appointmentsData = await store.fetchAppointments();
+		} catch (err) {
+			console.error('[Dashboard] Failed to refetch appointments:', err);
+		}
+	}
+	function formatApptTime(iso: string): string {
+		return new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+	}
+	const APPT_STATUS_LABELS: Record<string, string> = {
+		scheduled: 'Scheduled',
+		checked_in: 'Checked In',
+		cancelled: 'Cancelled',
+		no_show: 'No-show'
+	};
+	let checkinPending = $state<Record<string, boolean>>({});
+	async function handleCheckIn(appointmentId: string) {
+		if (checkinPending[appointmentId]) return;
+		checkinPending[appointmentId] = true;
+		try {
+			await store.checkinAppointment(appointmentId);
+			await refetchAppointments();
+		} catch (err: any) {
+			showToast(err?.data?.message || 'Failed to check in appointment.');
+		} finally {
+			checkinPending[appointmentId] = false;
+		}
+	}
+
 	// Today-at-a-glance (from /v1/staff/analytics/daily, loaded server-side)
 	const daily = initialData.dailyAnalytics;
 	function formatRupees(paise: number | undefined | null): string {
@@ -112,6 +145,98 @@
 	let walkInBarberId = $state<string>('');
 	let walkInSelectedVariants = $state<string[]>([]);
 	let walkInError = $state<string>('');
+
+	// Book Appointment form inputs
+	let showBookAppointmentForm = $state<boolean>(false);
+	let apptName = $state<string>('');
+	let apptPhone = $state<string>('');
+	let apptDate = $state<string>(new Date().toISOString().slice(0, 10));
+	let apptSelectedVariants = $state<string[]>([]);
+	let apptBarberId = $state<string>('');
+	let apptSlots = $state<any[]>([]);
+	let apptSelectedTime = $state<string>('');
+	let apptLoadingSlots = $state<boolean>(false);
+	let apptError = $state<string>('');
+	let apptSubmitting = $state<boolean>(false);
+	const todayISODate = new Date().toISOString().slice(0, 10);
+
+	// Slots depend on date + services; fetched fresh whenever either changes (progressive disclosure)
+	$effect(() => {
+		const date = apptDate;
+		const variants = apptSelectedVariants;
+		apptSelectedTime = '';
+		if (!date || variants.length === 0) {
+			apptSlots = [];
+			return;
+		}
+		apptLoadingSlots = true;
+		store
+			.getAppointmentSlots(initialData.locationId, date, variants)
+			.then((res: any) => {
+				apptSlots = res?.slots ?? [];
+			})
+			.catch(() => {
+				apptSlots = [];
+			})
+			.finally(() => {
+				apptLoadingSlots = false;
+			});
+	});
+
+	function resetAppointmentForm() {
+		apptName = '';
+		apptPhone = '';
+		apptDate = todayISODate;
+		apptSelectedVariants = [];
+		apptBarberId = '';
+		apptSlots = [];
+		apptSelectedTime = '';
+		apptError = '';
+		showBookAppointmentForm = false;
+	}
+
+	async function handleBookAppointment(e: Event) {
+		e.preventDefault();
+		apptError = '';
+
+		if (apptSelectedVariants.length === 0) {
+			apptError = 'Please select at least one service variant.';
+			return;
+		}
+		if (!apptSelectedTime) {
+			apptError = 'Please pick a time slot.';
+			return;
+		}
+		const phone = preparePhoneNumber(apptPhone);
+		const e164Pattern = /^\+[1-9]\d{1,14}$/;
+		if (!e164Pattern.test(phone)) {
+			apptError = 'Phone number must be in E.164 format (e.g. +919876543210).';
+			return;
+		}
+
+		const scheduledStartAt = new Date(`${apptDate}T${apptSelectedTime}:00`).toISOString();
+
+		apptSubmitting = true;
+		try {
+			await store.bookAppointment({
+				location_id: initialData.locationId,
+				variant_ids: apptSelectedVariants,
+				scheduled_start_at: scheduledStartAt,
+				customer_name: apptName.trim() || undefined,
+				phone_number: phone,
+				requested_barber_id: apptBarberId || undefined
+			});
+
+			const bookedTime = apptSelectedTime;
+			resetAppointmentForm();
+			showToast(`Appointment booked for ${bookedTime}`);
+			await refetchAppointments();
+		} catch (err: any) {
+			apptError = err?.data?.error || err?.data?.message || 'Failed to book appointment.';
+		} finally {
+			apptSubmitting = false;
+		}
+	}
 
 	// ponytail: two-tap confirm for Call Next — auto-resets after 3s
 	let callNextArmed = $state<boolean>(false);
@@ -628,6 +753,45 @@
 		</section>
 	{/if}
 
+	<!-- Today's Appointments — scheduled bookings for today, separate from the live walk-in queue -->
+	{#if todaysAppointments.length > 0}
+		<section aria-label="Today's appointments" class="max-w-7xl w-full mx-auto px-6 pt-6">
+			<h2 class="text-xs font-bold uppercase tracking-wider text-muted mb-2">Today's Appointments</h2>
+			<div class="flex gap-3 overflow-x-auto pb-2">
+				{#each todaysAppointments as appt (appt.id)}
+					<div
+						class="shrink-0 w-64 bg-matte border border-white/[0.03] rounded-2xl p-4 space-y-2"
+					>
+						<div class="flex items-center justify-between">
+							<span class="font-mono text-sm font-bold text-gold-accent">{formatApptTime(appt.scheduled_start_at)}</span>
+							<span
+								class="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border {appt.status === 'scheduled'
+									? 'bg-titanium border-white/[0.08] text-muted'
+									: appt.status === 'checked_in'
+										? 'bg-system-success/10 border-system-success/30 text-system-success'
+										: 'bg-canvas/50 border-white/[0.03] text-dim'}"
+							>
+								{APPT_STATUS_LABELS[appt.status] ?? appt.status}
+							</span>
+						</div>
+						<div class="text-sm font-bold text-primary truncate">{appt.customer_name || 'Customer'}</div>
+						<div class="text-xs text-dim truncate">{(appt.services ?? []).join(' · ')}</div>
+						{#if appt.status === 'scheduled'}
+							<button
+								type="button"
+								class="w-full mt-1 py-1.5 bg-gold-accent hover:brightness-110 active:brightness-90 disabled:opacity-40 text-canvas font-bold text-xs rounded-lg cursor-pointer transition-all"
+								disabled={checkinPending[appt.id]}
+								onclick={() => handleCheckIn(appt.id)}
+							>
+								Check In
+							</button>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		</section>
+	{/if}
+
 	<main id="main-content" class="flex-1 max-w-7xl w-full mx-auto p-6 flex flex-col lg:flex-row gap-6">
 		<!-- Left Side: Queue Controls and Add Walk-in -->
 		<section class="w-full lg:w-1/3 flex flex-col space-y-6">
@@ -674,17 +838,28 @@
 
 			<!-- Add Walk-in Console Panel -->
 			<div class="bg-matte border border-white/[0.03] rounded-2xl p-6 shadow-lg">
-				<div class="flex justify-between items-center">
+				<div class="flex justify-between items-center gap-2">
 					<h2 class="text-lg font-bold text-primary tracking-wide">Add Walk-in Client</h2>
-					<button
-						type="button"
-						class="px-3 py-1.5 text-xs font-bold rounded-xl border border-white/[0.05] hover:bg-titanium transition-colors"
-						onclick={() => {
-							showWalkInForm = !showWalkInForm;
-						}}
-					>
-						{showWalkInForm ? 'Collapse Form' : 'Expand Form'}
-					</button>
+					<div class="flex gap-2">
+						<button
+							type="button"
+							class="px-3 py-1.5 text-xs font-bold rounded-xl border border-gold-accent/30 text-gold-accent hover:bg-gold-accent/10 transition-colors"
+							onclick={() => {
+								showBookAppointmentForm = !showBookAppointmentForm;
+							}}
+						>
+							Book Appointment
+						</button>
+						<button
+							type="button"
+							class="px-3 py-1.5 text-xs font-bold rounded-xl border border-white/[0.05] hover:bg-titanium transition-colors"
+							onclick={() => {
+								showWalkInForm = !showWalkInForm;
+							}}
+						>
+							{showWalkInForm ? 'Collapse Form' : 'Expand Form'}
+						</button>
+					</div>
 				</div>
 
 				{#if showWalkInForm}
@@ -883,6 +1058,15 @@
 									>
 										#{entry.token_number}
 									</span>
+
+									<!-- Appointment origin chip — subtle, gold is ≤5% of surface -->
+									{#if entry.entry_type === 'appointment'}
+										<span
+											class="text-[10px] font-mono uppercase text-gold-accent border border-gold-accent/30 rounded px-1.5"
+										>
+											APPT
+										</span>
+									{/if}
 
 									<!-- State Status Badge -->
 									<span
@@ -1149,6 +1333,210 @@
 				selectedEntryForCheckout = null;
 			}}
 		/>
+	{/if}
+
+	<!-- Book Appointment Modal -->
+	{#if showBookAppointmentForm}
+		<div
+			class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+			role="dialog"
+			aria-modal="true"
+		>
+			<div
+				class="w-full max-w-lg bg-matte border border-white/[0.05] rounded-2xl shadow-2xl overflow-hidden text-primary flex flex-col max-h-[90vh]"
+			>
+				<!-- Modal Header -->
+				<div class="px-6 py-4 border-b border-white/[0.05] flex justify-between items-center bg-canvas">
+					<h2 class="text-xl font-bold tracking-tight">Book Appointment</h2>
+					<button
+						type="button"
+						class="text-muted hover:text-primary transition-colors p-1"
+						onclick={resetAppointmentForm}
+						aria-label="Close modal"
+					>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							class="h-6 w-6"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke="currentColor"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M6 18L18 6M6 6l12 12"
+							/>
+						</svg>
+					</button>
+				</div>
+
+				<!-- Modal Body -->
+				<form onsubmit={handleBookAppointment} class="flex-1 overflow-y-auto p-6 space-y-4">
+					<!-- Name -->
+					<div>
+						<label for="appt-name" class="block text-xs font-medium text-muted mb-1"
+							>Customer Name (Optional)</label
+						>
+						<input
+							type="text"
+							id="appt-name"
+							placeholder="e.g. Rahul, Guest, Uncle"
+							maxlength="80"
+							class="w-full bg-canvas border border-white/[0.03] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent placeholder:text-dim"
+							bind:value={apptName}
+						/>
+					</div>
+
+					<!-- Phone -->
+					<div>
+						<label for="appt-phone" class="block text-xs font-medium text-muted mb-1"
+							>Phone Number (Required)</label
+						>
+						<input
+							type="tel"
+							id="appt-phone"
+							required
+							placeholder="e.g. 9876543210"
+							class="w-full bg-canvas border border-white/[0.03] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent placeholder:text-dim"
+							bind:value={apptPhone}
+						/>
+						<span class="text-[10px] text-dim mt-0.5 block"
+							>10-digit number will automatically prefix with +91. Confirmation goes here.</span
+						>
+					</div>
+
+					<div class="grid grid-cols-2 gap-3">
+						<!-- Date -->
+						<div>
+							<label for="appt-date" class="block text-xs font-medium text-muted mb-1">Date</label>
+							<input
+								type="date"
+								id="appt-date"
+								min={todayISODate}
+								class="w-full bg-canvas border border-white/[0.03] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent"
+								bind:value={apptDate}
+							/>
+						</div>
+
+						<!-- Barber -->
+						<div>
+							<label for="appt-barber" class="block text-xs font-medium text-muted mb-1"
+								>Preferred Barber</label
+							>
+							<select
+								id="appt-barber"
+								class="w-full bg-canvas border border-white/[0.03] rounded-xl px-3 py-2 text-sm text-primary focus:outline-none focus:border-gold-accent"
+								bind:value={apptBarberId}
+							>
+								<option value="">-- Auto Route --</option>
+								{#each initialData.staffMembers ?? [] as member}
+									<option value={member.id}>{member.name}</option>
+								{/each}
+							</select>
+						</div>
+					</div>
+
+					<!-- Services (Variant Checklist) — same picker as the walk-in form -->
+					<div class="space-y-1">
+						<span class="block text-xs font-medium text-muted mb-1.5"
+							>Select Service Variants (Required)</span
+						>
+						<div
+							class="max-h-48 overflow-y-auto bg-canvas border border-white/[0.03] rounded-xl p-3 space-y-2 divide-y divide-white/[0.04]"
+						>
+							{#if allVariants().length === 0}
+								<p class="text-xs text-dim py-2 text-center">
+									No services configured. Add services in <a
+										href="/admin/services"
+										class="text-gold-accent hover:underline">Admin → Services</a
+									>.
+								</p>
+							{:else}
+								{#each allVariants() as v}
+									<label class="flex items-start space-x-3 pt-2 first:pt-0 cursor-pointer">
+										<input
+											type="checkbox"
+											value={v.id}
+											class="mt-1 rounded text-gold-accent bg-matte border-white/[0.03] focus:ring-offset-canvas"
+											bind:group={apptSelectedVariants}
+										/>
+										<div class="text-xs">
+											<div class="font-bold text-primary">{v.name}</div>
+											<div class="text-[10px] text-dim">
+												{v.categoryName} • {v.duration} min • {formatCurrency(v.price)}
+											</div>
+										</div>
+									</label>
+								{/each}
+							{/if}
+						</div>
+					</div>
+
+					<!-- Slots — only shown once date + services are both chosen (progressive disclosure) -->
+					{#if apptDate && apptSelectedVariants.length > 0}
+						<div class="space-y-1.5">
+							<span class="block text-xs font-medium text-muted mb-1.5">Available Times</span>
+							{#if apptLoadingSlots}
+								<p class="text-xs text-dim py-2">Loading times…</p>
+							{:else if apptSlots.length === 0}
+								<p class="text-xs text-dim py-2">No slots available for this date.</p>
+							{:else}
+								<div class="flex flex-wrap gap-2">
+									{#each apptSlots as slot}
+										<button
+											type="button"
+											disabled={!slot.available}
+											class="px-3 py-1.5 text-xs font-mono font-bold rounded-lg border transition-colors {apptSelectedTime === slot.time
+												? 'bg-gold-accent border-gold-accent text-canvas'
+												: slot.available
+													? 'bg-canvas border-white/[0.05] text-primary hover:border-gold-accent/50'
+													: 'bg-canvas/40 border-white/[0.02] text-dim opacity-40 cursor-not-allowed'}"
+											onclick={() => {
+												if (slot.available) apptSelectedTime = slot.time;
+											}}
+										>
+											{slot.time}
+										</button>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/if}
+
+					<!-- Error Display -->
+					{#if apptError}
+						<div
+							class="bg-system-error/10 border border-system-error/30 rounded-xl p-3 text-xs text-system-error flex items-start space-x-2"
+						>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								class="h-4 w-4 shrink-0 mt-0.5"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke="currentColor"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+								/>
+							</svg>
+							<div>{apptError}</div>
+						</div>
+					{/if}
+
+					<button
+						type="submit"
+						disabled={apptSubmitting}
+						class="w-full bg-gold-accent hover:brightness-110 active:brightness-90 disabled:opacity-40 text-canvas font-bold py-2.5 rounded-xl transition-all duration-150 text-sm cursor-pointer"
+					>
+						{apptSubmitting ? 'Booking…' : 'Book Appointment'}
+					</button>
+				</form>
+			</div>
+		</div>
 	{/if}
 </div>
 

@@ -2063,6 +2063,7 @@ func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {
 			qe.started_at,
 			qe.stale_warning,
 			v.id        AS visit_id,
+			v.entry_type,
 			v.party_size,
 			v.total_duration_minutes,
 			c.id        AS customer_id,
@@ -2111,6 +2112,7 @@ func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {
 		startedAt         *time.Time
 		staleWarning      *string
 		visitID           uuid.UUID
+		entryType         string
 		partySize         int
 		totalDuration     int
 		customerID        *uuid.UUID
@@ -2137,6 +2139,7 @@ func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {
 			&se.startedAt,
 			&se.staleWarning,
 			&se.visitID,
+			&se.entryType,
 			&se.partySize,
 			&se.totalDuration,
 			&se.customerID,
@@ -2294,6 +2297,8 @@ func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {
 		qes.State = QueueEntryStaffState(se.state)
 		qes.PresenceState = QueueEntryStaffPresenceState(se.presenceState)
 		qes.IsDispatchable = se.isDispatchable
+		et := QueueEntryStaffEntryType(se.entryType)
+		qes.EntryType = &et
 		qes.TotalDurationMinutes = se.totalDuration
 
 		ps := se.partySize
@@ -2680,4 +2685,134 @@ func (s *Server) SubscribeToQueueStream(
 			return
 		}
 	}
+}
+
+// GetStaffAppointments returns the day's appointments for the staff dashboard.
+// Date defaults to today in the location's timezone. Law 11: tenant/location from JWT.
+func (s *Server) GetStaffAppointments(w http.ResponseWriter, r *http.Request, params GetStaffAppointmentsParams) {
+	ctx := r.Context()
+
+	tenantID, err := uuid.Parse(auth.TenantIDFromCtx(ctx))
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid tenant id claim"})
+		return
+	}
+	locationID, err := uuid.Parse(auth.LocationIDFromCtx(ctx))
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid location id claim"})
+		return
+	}
+
+	var timezone string
+	if err := s.Pool.QueryRow(ctx, `SELECT timezone FROM locations WHERE id=$1 AND tenant_id=$2`,
+		locationID, tenantID).Scan(&timezone); err != nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"code": "NOT_FOUND", "message": "location not found"})
+		return
+	}
+	tz, err := time.LoadLocation(timezone)
+	if err != nil {
+		tz, _ = time.LoadLocation("Asia/Kolkata")
+	}
+
+	dateStr := time.Now().In(tz).Format("2006-01-02")
+	if params.Date != nil {
+		dateStr = params.Date.Time.Format("2006-01-02")
+	}
+	dayStart, err := time.ParseInLocation("2006-01-02", dateStr, tz)
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"code": "INVALID_DATE", "message": "invalid date"})
+		return
+	}
+
+	rows, err := s.Pool.Query(ctx, `
+		SELECT a.id, a.status, a.scheduled_start_at, a.total_duration_minutes, a.party_size,
+		       a.requested_barber_id, a.variant_ids,
+		       c.name AS customer_name, c.phone_number
+		FROM appointments a
+		JOIN customers c ON c.id = a.customer_id
+		WHERE a.tenant_id = $1 AND a.location_id = $2
+		  AND a.scheduled_start_at >= $3 AND a.scheduled_start_at < $4
+		ORDER BY a.scheduled_start_at ASC`,
+		tenantID, locationID, dayStart, dayStart.AddDate(0, 0, 1))
+	if err != nil {
+		log.Printf("[Error] GetStaffAppointments query failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	type aptRow struct {
+		ID                uuid.UUID  `json:"id"`
+		Status            string     `json:"status"`
+		ScheduledStartAt  time.Time  `json:"scheduled_start_at"`
+		TotalDurationMin  int        `json:"total_duration_minutes"`
+		PartySize         int        `json:"party_size"`
+		RequestedBarberID *uuid.UUID `json:"requested_barber_id,omitempty"`
+		CustomerName      *string    `json:"customer_name,omitempty"`
+		CustomerPhone     *string    `json:"customer_phone_masked,omitempty"`
+		Services          []string   `json:"services"`
+	}
+
+	appointments := []aptRow{}
+	variantSet := map[uuid.UUID]bool{}
+	var variantLists [][]uuid.UUID
+	for rows.Next() {
+		var a aptRow
+		var variantJSON []byte
+		var phone *string
+		if err := rows.Scan(&a.ID, &a.Status, &a.ScheduledStartAt, &a.TotalDurationMin, &a.PartySize,
+			&a.RequestedBarberID, &variantJSON, &a.CustomerName, &phone); err != nil {
+			log.Printf("[Error] GetStaffAppointments scan failed: %v", err)
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+			return
+		}
+		if phone != nil {
+			m := maskPhone(*phone)
+			a.CustomerPhone = &m
+		}
+		var vidStrs []string
+		_ = json.Unmarshal(variantJSON, &vidStrs)
+		var vids []uuid.UUID
+		for _, vs := range vidStrs {
+			if vid, err := uuid.Parse(vs); err == nil {
+				vids = append(vids, vid)
+				variantSet[vid] = true
+			}
+		}
+		variantLists = append(variantLists, vids)
+		a.Services = []string{}
+		appointments = append(appointments, a)
+	}
+
+	// Resolve variant names in one query
+	if len(variantSet) > 0 {
+		ids := make([]uuid.UUID, 0, len(variantSet))
+		for id := range variantSet {
+			ids = append(ids, id)
+		}
+		nameByID := map[uuid.UUID]string{}
+		vRows, err := s.Pool.Query(ctx, `SELECT id, name FROM service_variants WHERE id = ANY($1)`, ids)
+		if err == nil {
+			defer vRows.Close()
+			for vRows.Next() {
+				var id uuid.UUID
+				var name string
+				if err := vRows.Scan(&id, &name); err == nil {
+					nameByID[id] = name
+				}
+			}
+		}
+		for i := range appointments {
+			for _, vid := range variantLists[i] {
+				if n, ok := nameByID[vid]; ok {
+					appointments[i].Services = append(appointments[i].Services, n)
+				}
+			}
+		}
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"date":         dateStr,
+		"appointments": appointments,
+	})
 }

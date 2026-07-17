@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -21,6 +22,7 @@ import (
 	"barberbase-core/internal/auth"
 	"barberbase-core/internal/domain/presence"
 	"barberbase-core/internal/domain/queue"
+	"barberbase-core/internal/realtime"
 	"barberbase-core/internal/repository"
 	"barberbase-core/internal/webhook"
 )
@@ -1271,11 +1273,109 @@ func (s *Server) GetAppointmentSlots(w http.ResponseWriter, r *http.Request, loc
 	for _, r := range rows {
 		totalDuration += r.DurationMinutes
 	}
+	if totalDuration == 0 {
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid_variants"})
+		return
+	}
+
+	tz, err := time.LoadLocation(location.Timezone)
+	if err != nil {
+		tz, _ = time.LoadLocation("Asia/Kolkata")
+	}
+	day, err := time.ParseInLocation("2006-01-02", dateStr, tz)
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_date"})
+		return
+	}
+
+	// Business hours for that weekday
+	var isOpen bool
+	var opensAt, closesAt *time.Time
+	err = s.Pool.QueryRow(ctx, `
+		SELECT is_open, opens_at, closes_at FROM location_hours
+		WHERE location_id = $1 AND day_of_week = $2
+	`, location.ID, int(day.Weekday())).Scan(&isOpen, &opensAt, &closesAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		isOpen = false
+		err = nil
+	}
+	if err != nil {
+		log.Printf("[Error] GetAppointmentSlots hours query: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	if !isOpen || opensAt == nil || closesAt == nil {
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"date": dateStr, "total_duration_minutes": totalDuration, "slots": []interface{}{},
+		})
+		return
+	}
+
+	// Capacity = active staff at the location; a slot is unavailable when the
+	// number of scheduled appointments overlapping it reaches capacity.
+	// ponytail: barber count as chair count; per-barber calendars if that misfits.
+	var capacity int
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM staff_members WHERE location_id = $1 AND is_active = true
+	`, location.ID).Scan(&capacity); err != nil || capacity == 0 {
+		capacity = 1
+	}
+
+	type apt struct{ start, end time.Time }
+	var existing []apt
+	aptRows, err := s.Pool.Query(ctx, `
+		SELECT scheduled_start_at, scheduled_end_at FROM appointments
+		WHERE location_id = $1
+		  AND status IN ('scheduled', 'checked_in')
+		  AND scheduled_start_at >= $2 AND scheduled_start_at < $3
+	`, location.ID, day, day.AddDate(0, 0, 1))
+	if err != nil {
+		log.Printf("[Error] GetAppointmentSlots appointments query: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+	defer aptRows.Close()
+	for aptRows.Next() {
+		var a apt
+		if err := aptRows.Scan(&a.start, &a.end); err == nil {
+			existing = append(existing, a)
+		}
+	}
+
+	// 30-minute grid from open to the last start that still finishes by close.
+	const slotStepMinutes = 30
+	openT := time.Date(day.Year(), day.Month(), day.Day(), opensAt.Hour(), opensAt.Minute(), 0, 0, tz)
+	closeT := time.Date(day.Year(), day.Month(), day.Day(), closesAt.Hour(), closesAt.Minute(), 0, 0, tz)
+	now := time.Now().In(tz)
+
+	slots := []map[string]interface{}{}
+	for t := openT; !t.Add(time.Duration(totalDuration) * time.Minute).After(closeT); t = t.Add(slotStepMinutes * time.Minute) {
+		if t.Before(now) {
+			continue // past slots on today's date are omitted
+		}
+		end := t.Add(time.Duration(totalDuration) * time.Minute)
+		overlapping := 0
+		for _, a := range existing {
+			if a.start.Before(end) && a.end.After(t) {
+				overlapping++
+			}
+		}
+		slot := map[string]interface{}{
+			"time":               t.Format("15:04"),
+			"estimated_end_time": end.Format("15:04"),
+			"available":          overlapping < capacity,
+		}
+		if overlapping >= capacity {
+			slot["reason_unavailable"] = "fully_booked"
+		}
+		slots = append(slots, slot)
+	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"date":                   dateStr,
 		"total_duration_minutes": totalDuration,
-		"slots":                  []interface{}{},
+		"slots":                  slots,
 	})
 }
 
@@ -1297,20 +1397,72 @@ func (s *Server) BookAppointment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req queue.BookAppointmentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// Generated body type carries the snake_case json tags; the domain request
+	// struct has none, so decoding into it directly would zero every field.
+	var body BookAppointmentJSONBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
+	}
+	if len(body.VariantIds) == 0 || string(body.PhoneNumber) == "" || body.ScheduledStartAt.IsZero() {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "variant_ids, phone_number and scheduled_start_at are required"})
+		return
+	}
+
+	// Law 11: staff bookings are pinned to the JWT's location, never the body's.
+	locationID, err := uuid.Parse(auth.LocationIDFromCtx(r.Context()))
+	if err != nil {
+		locationID = uuid.UUID(body.LocationId)
+	}
+
+	req := queue.BookAppointmentRequest{
+		LocationID:       locationID,
+		PartySize:        1,
+		ScheduledStartAt: body.ScheduledStartAt,
+		PhoneNumber:      string(body.PhoneNumber),
+		CustomerName:     body.CustomerName,
+		InitiatedVia:     "staff_dashboard",
+		IdempotencyKey:   body.IdempotencyKey.String(),
+	}
+	for _, vid := range body.VariantIds {
+		req.VariantIDs = append(req.VariantIDs, uuid.UUID(vid))
+	}
+	if body.PartySize != nil && *body.PartySize > 0 {
+		req.PartySize = *body.PartySize
+	}
+	if body.RequestedBarberId != nil {
+		b := uuid.UUID(*body.RequestedBarberId)
+		req.RequestedBarberID = &b
+	}
+	if body.InitiatedVia != nil {
+		req.InitiatedVia = string(*body.InitiatedVia)
 	}
 
 	repo := &queue.QueueRepository{Pool: s.Pool}
 	res, err := repo.BookAppointment(r.Context(), tenantID, req)
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		switch err.Error() {
+		case "shop is closed on this day", "scheduled time is outside business hours",
+			"scheduled time is in the past":
+			respondJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		case "barber has an overlapping appointment":
+			respondJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		default:
+			log.Printf("[Error] BookAppointment failed: %v", err)
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		}
 		return
 	}
 
-	respondJSON(w, http.StatusOK, res)
+	// Domain result has no json tags — shape the wire response explicitly.
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"id":                     res.AppointmentID,
+		"status":                 res.Status,
+		"scheduled_start_at":     res.ScheduledStartAt,
+		"total_duration_minutes": res.TotalDurationMin,
+		"total_price_paise":      res.TotalPricePaise,
+		"magic_link":             res.MagicLink,
+	})
 }
 
 // CheckInAppointment handles POST /v1/staff/appointments/{appointment_id}/checkin
@@ -1333,22 +1485,42 @@ func (s *Server) CheckInAppointment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		LocationID uuid.UUID `json:"location_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body location_id required"})
+	// Law 11: location comes from the JWT claims, never the request body.
+	locationID, err := uuid.Parse(auth.LocationIDFromCtx(r.Context()))
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid location id claim"})
 		return
 	}
 
 	repo := &queue.QueueRepository{Pool: s.Pool}
-	res, err := repo.CheckInAppointment(r.Context(), tenantID, req.LocationID, appID)
+	res, err := repo.CheckInAppointment(r.Context(), tenantID, locationID, appID)
 	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		msg := err.Error()
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			respondJSON(w, http.StatusNotFound, map[string]string{"code": "NOT_FOUND", "message": "appointment not found"})
+		case msg == "appointment is not scheduled" || msg == "appointment is not scheduled for today":
+			respondJSON(w, http.StatusConflict, map[string]string{"code": "INVALID_STATE", "message": msg})
+		default:
+			log.Printf("[Error] CheckInAppointment failed: %v", err)
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		}
 		return
 	}
 
-	respondJSON(w, http.StatusOK, res)
+	// Law 8: SSE broadcast after commit
+	s.Manager.Broadcast(locationID.String(), realtime.SSEEvent{
+		Type:         "queue_changed",
+		LocationID:   locationID.String(),
+		QueueVersion: res.NewQueueVersion,
+	})
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"visit_id":       res.VisitID,
+		"queue_entry_id": res.QueueEntryID,
+		"token_number":   res.TokenNumber,
+		"magic_link":     res.MagicLink,
+	})
 }
 
 func (s *Server) SubmitFeedback(w http.ResponseWriter, r *http.Request) {

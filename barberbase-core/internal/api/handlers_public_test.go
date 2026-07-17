@@ -983,7 +983,7 @@ func TestC42_BookAppointment_Idempotency(t *testing.T) {
 	variantID := seedServiceVariant(t, pool, tenantID, locationID, "Haircut", 30, 300, true)
 
 	for d := 0; d < 7; d++ {
-		_, err := pool.Exec(context.Background(), `INSERT INTO location_hours (id, tenant_id, location_id, day_of_week, is_open) VALUES (gen_random_uuid(), $1, $2, $3, true)`, tenantID, locationID, d)
+		_, err := pool.Exec(context.Background(), `INSERT INTO location_hours (id, tenant_id, location_id, day_of_week, is_open, opens_at, closes_at) VALUES (gen_random_uuid(), $1, $2, $3, true, '00:00:00', '23:59:59')`, tenantID, locationID, d)
 		if err != nil {
 			// ignore if already seeded
 		}
@@ -1189,19 +1189,8 @@ func TestSubmitFeedback_DoubleSubmit(t *testing.T) {
 }
 
 func setupTestServerWrapped(t *testing.T) (*Server, *pgxpool.Pool, uuid.UUID, uuid.UUID, uuid.UUID, string) {
-	s, pool, tenantID, locationID, staffID, phone := setupTestServer(t)
-	_, _ = pool.Exec(context.Background(), `
-		ALTER TABLE customers ADD COLUMN IF NOT EXISTS display_name VARCHAR(100)
-	`)
-	_, _ = pool.Exec(context.Background(), `
-		ALTER TABLE appointments ALTER COLUMN scheduled_start_at TYPE TIMESTAMP;
-		ALTER TABLE appointments ALTER COLUMN scheduled_end_at TYPE TIMESTAMP;
-	`)
-	_, _ = pool.Exec(context.Background(), `
-		CREATE OR REPLACE VIEW location_business_hours AS
-		SELECT id, tenant_id, location_id, day_of_week, NOT is_open AS is_closed
-		FROM location_hours
-	`)
-	return s, pool, tenantID, locationID, staffID, phone
+	// No schema shims: BookAppointment now reads the real location_hours table
+	// and writes customers.name directly.
+	return setupTestServer(t)
 }
 
