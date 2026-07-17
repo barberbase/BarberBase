@@ -87,3 +87,48 @@ func TestAppointment_BookThenCheckIn(t *testing.T) {
 		t.Error("second check-in should fail (appointment no longer 'scheduled')")
 	}
 }
+
+// A requested barber on the appointment must survive check-in onto the queue
+// entry — barber_specific dispatch matches only requested_barber_id = caller
+// (Law 12); dropping it would strand the entry undispatchable.
+func TestAppointment_CheckInPropagatesRequestedBarber(t *testing.T) {
+	cleanDatabase(t, os.Getenv("DATABASE_URL"))
+	t.Cleanup(func() { cleanDatabase(t, os.Getenv("DATABASE_URL")) })
+	_, pool, tenantID, locationID, staffID, _ := setupTestServer(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	variantID := seedServiceVariant(t, pool, tenantID, locationID, "Haircut", 30, 30000, true)
+	for d := 0; d < 7; d++ {
+		_, _ = pool.Exec(ctx, `INSERT INTO location_hours (id, tenant_id, location_id, day_of_week, is_open, opens_at, closes_at)
+			VALUES (gen_random_uuid(), $1, $2, $3, true, '00:00:00', '23:59:59')`, tenantID, locationID, d)
+	}
+
+	repo := queue.QueueRepository{Pool: pool}
+	booked, err := repo.BookAppointment(ctx, tenantID, queue.BookAppointmentRequest{
+		LocationID:        locationID,
+		VariantIDs:        []uuid.UUID{variantID},
+		PartySize:         1,
+		ScheduledStartAt:  time.Now().Add(30 * time.Minute),
+		PhoneNumber:       "+919876543212",
+		RequestedBarberID: &staffID,
+		InitiatedVia:      "staff_dashboard",
+		IdempotencyKey:    uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("BookAppointment: %v", err)
+	}
+
+	res, err := repo.CheckInAppointment(ctx, tenantID, locationID, booked.AppointmentID)
+	if err != nil {
+		t.Fatalf("CheckInAppointment: %v", err)
+	}
+
+	var gotBarber *uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT requested_barber_id FROM queue_entries WHERE id=$1`, res.QueueEntryID).Scan(&gotBarber); err != nil {
+		t.Fatalf("entry query: %v", err)
+	}
+	if gotBarber == nil || *gotBarber != staffID {
+		t.Errorf("requested_barber_id = %v; want %s", gotBarber, staffID)
+	}
+}

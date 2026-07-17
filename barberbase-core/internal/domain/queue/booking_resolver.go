@@ -575,11 +575,12 @@ func (r *QueueRepository) CheckInAppointment(
 		var partySize int
 		var totalDuration int
 		var scheduledStartAt time.Time
+		var requestedBarberID *uuid.UUID
 		err = tx.QueryRow(ctx, `
-			SELECT status, customer_id, party_size, total_duration_minutes, scheduled_start_at
+			SELECT status, customer_id, party_size, total_duration_minutes, scheduled_start_at, requested_barber_id
 			FROM appointments
 			WHERE id = $1 AND tenant_id = $2 AND location_id = $3
-		`, appointmentID, tenantID, locationID).Scan(&status, &customerID, &partySize, &totalDuration, &scheduledStartAt)
+		`, appointmentID, tenantID, locationID).Scan(&status, &customerID, &partySize, &totalDuration, &scheduledStartAt, &requestedBarberID)
 		if err != nil {
 			return err
 		}
@@ -649,17 +650,21 @@ func (r *QueueRepository) CheckInAppointment(
 		// auto-snooze. priority_group=50 protects the position over walk-ins (100).
 		tokenNumber := lastTokenNumber + 1
 		var entryID uuid.UUID
+		// requested_barber_id MUST carry over: barber_specific dispatch matches only
+		// requested_barber_id = caller (Law 12) — dropping it here strands the entry.
 		err = tx.QueryRow(ctx, `
 			INSERT INTO queue_entries (
 				visit_id, queue_session_id, customer_id,
 				token_number, state, presence_state, is_dispatchable,
-				session_channel, priority_group, sort_key, remote_joined_at
+				session_channel, priority_group, sort_key, remote_joined_at,
+				requested_barber_id
 			) VALUES (
 				$1, $2, $3,
 				$4, 'waiting', 'arrived', true,
-				'whatsapp', 50, EXTRACT(EPOCH FROM NOW())::BIGINT, NOW()
+				'whatsapp', 50, EXTRACT(EPOCH FROM NOW())::BIGINT, NOW(),
+				$5
 			) RETURNING id
-		`, visitID, sessionID, customerID, tokenNumber).Scan(&entryID)
+		`, visitID, sessionID, customerID, tokenNumber, requestedBarberID).Scan(&entryID)
 		if err != nil {
 			return err
 		}
