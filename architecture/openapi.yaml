@@ -382,6 +382,9 @@ components:
           type: string
           enum: [walk_in, appointment, staff_created]
           description: Visit origin — dashboard renders appointments distinctly from walk-ins
+        priority_group:
+          type: integer
+          description: Dispatch priority band (50 = on-time appointment anchor, 100 = walk-in / lapsed appointment)
         customer:
           type: object
           properties:

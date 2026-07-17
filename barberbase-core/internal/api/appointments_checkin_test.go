@@ -88,6 +88,82 @@ func TestAppointment_BookThenCheckIn(t *testing.T) {
 	}
 }
 
+// Late check-in grace window: within scheduled+20min the entry keeps the
+// appointment anchor (50); after it, check-in still succeeds at walk-in
+// priority (100). Both land presence='arrived' — outside the near-turn/
+// auto-snooze path — regardless of priority band.
+func TestAppointment_CheckinGraceWindow(t *testing.T) {
+	cleanDatabase(t, os.Getenv("DATABASE_URL"))
+	t.Cleanup(func() { cleanDatabase(t, os.Getenv("DATABASE_URL")) })
+	_, pool, tenantID, locationID, _, _ := setupTestServer(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	variantID := seedServiceVariant(t, pool, tenantID, locationID, "Haircut", 30, 30000, true)
+	for d := 0; d < 7; d++ {
+		_, _ = pool.Exec(ctx, `INSERT INTO location_hours (id, tenant_id, location_id, day_of_week, is_open, opens_at, closes_at)
+			VALUES (gen_random_uuid(), $1, $2, $3, true, '00:00:00', '23:59:59')`, tenantID, locationID, d)
+	}
+	repo := queue.QueueRepository{Pool: pool}
+
+	book := func(phone string) uuid.UUID {
+		t.Helper()
+		res, err := repo.BookAppointment(ctx, tenantID, queue.BookAppointmentRequest{
+			LocationID: locationID, VariantIDs: []uuid.UUID{variantID}, PartySize: 1,
+			ScheduledStartAt: time.Now().Add(30 * time.Minute), PhoneNumber: phone,
+			InitiatedVia: "staff_dashboard", IdempotencyKey: uuid.NewString(),
+		})
+		if err != nil {
+			t.Fatalf("BookAppointment: %v", err)
+		}
+		return res.AppointmentID
+	}
+	backdate := func(aptID uuid.UUID, minutesAgo int) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `UPDATE appointments SET scheduled_start_at = NOW() - ($2 * INTERVAL '1 minute') WHERE id = $1`, aptID, minutesAgo); err != nil {
+			t.Fatalf("backdate: %v", err)
+		}
+	}
+	checkin := func(aptID uuid.UUID) *queue.CheckInAppointmentResult {
+		t.Helper()
+		res, err := repo.CheckInAppointment(ctx, tenantID, locationID, aptID)
+		if err != nil {
+			t.Fatalf("CheckInAppointment: %v", err)
+		}
+		return res
+	}
+	entryState := func(entryID uuid.UUID) (prio int, presence string) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, `SELECT priority_group, presence_state FROM queue_entries WHERE id=$1`, entryID).Scan(&prio, &presence); err != nil {
+			t.Fatalf("entry query: %v", err)
+		}
+		return
+	}
+
+	// 5 minutes past the slot — inside the grace window.
+	onTime := book("+919876543213")
+	backdate(onTime, 5)
+	resOn := checkin(onTime)
+	prio, presence := entryState(resOn.QueueEntryID)
+	if prio != 50 || resOn.PriorityLapsed || presence != "arrived" {
+		t.Errorf("+5min: prio %d lapsed %v presence %s; want 50/false/arrived", prio, resOn.PriorityLapsed, presence)
+	}
+
+	// 25 minutes past the slot — grace lapsed, still checked in.
+	late := book("+919876543214")
+	backdate(late, 25)
+	resLate := checkin(late)
+	prio, presence = entryState(resLate.QueueEntryID)
+	if prio != 100 || !resLate.PriorityLapsed || presence != "arrived" {
+		t.Errorf("+25min: prio %d lapsed %v presence %s; want 100/true/arrived", prio, resLate.PriorityLapsed, presence)
+	}
+
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT status FROM appointments WHERE id=$1`, late).Scan(&status); err != nil || status != "checked_in" {
+		t.Errorf("late appointment status = %s (err %v); want checked_in — lapse is not a rejection", status, err)
+	}
+}
+
 // A requested barber on the appointment must survive check-in onto the queue
 // entry — barber_specific dispatch matches only requested_barber_id = caller
 // (Law 12); dropping it would strand the entry undispatchable.

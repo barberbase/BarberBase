@@ -209,11 +209,18 @@ type ServiceSummary struct {
 	DurationMinutes int
 }
 
+// CheckinGraceMinutes is the late check-in grace window: check-in within
+// scheduled_start_at + grace keeps the appointment's protected priority_group
+// (50); later check-ins still succeed but join at walk-in priority (100).
+const CheckinGraceMinutes = 20
+
 type CheckInAppointmentResult struct {
 	VisitID         uuid.UUID
 	QueueEntryID    uuid.UUID
 	TokenNumber     int
 	NewQueueVersion int // for post-commit SSE broadcast (Law 8)
+	PriorityGroup   int // 50 on-time, 100 when the grace window lapsed
+	PriorityLapsed  bool
 	MagicLink       string // generated from visit's magic_link_token_hash
 }
 
@@ -650,6 +657,17 @@ func (r *QueueRepository) CheckInAppointment(
 		// auto-snooze. priority_group=50 protects the position over walk-ins (100).
 		tokenNumber := lastTokenNumber + 1
 		var entryID uuid.UUID
+		// Late check-in grace window: past scheduled_start_at + grace the entry
+		// still checks in (never rejected), but at walk-in priority — the slot's
+		// anchor privilege lapses. Both sides are timestamptz instants, so the
+		// comparison is timezone-safe.
+		priorityGroup := 50
+		priorityLapsed := false
+		if time.Now().After(scheduledStartAt.Add(CheckinGraceMinutes * time.Minute)) {
+			priorityGroup = 100
+			priorityLapsed = true
+		}
+
 		// requested_barber_id MUST carry over: barber_specific dispatch matches only
 		// requested_barber_id = caller (Law 12) — dropping it here strands the entry.
 		err = tx.QueryRow(ctx, `
@@ -661,10 +679,10 @@ func (r *QueueRepository) CheckInAppointment(
 			) VALUES (
 				$1, $2, $3,
 				$4, 'waiting', 'arrived', true,
-				'whatsapp', 50, EXTRACT(EPOCH FROM NOW())::BIGINT, NOW(),
-				$5
+				'whatsapp', $5, EXTRACT(EPOCH FROM NOW())::BIGINT, NOW(),
+				$6
 			) RETURNING id
-		`, visitID, sessionID, customerID, tokenNumber, requestedBarberID).Scan(&entryID)
+		`, visitID, sessionID, customerID, tokenNumber, priorityGroup, requestedBarberID).Scan(&entryID)
 		if err != nil {
 			return err
 		}
@@ -696,6 +714,8 @@ func (r *QueueRepository) CheckInAppointment(
 			QueueEntryID:    entryID,
 			TokenNumber:     tokenNumber,
 			NewQueueVersion: newQueueVersion,
+			PriorityGroup:   priorityGroup,
+			PriorityLapsed:  priorityLapsed,
 			MagicLink:       "https://barberbase.in/q/status?t=" + magicToken,
 		}
 

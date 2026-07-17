@@ -65,8 +65,16 @@
 		if (checkinPending[appointmentId]) return;
 		checkinPending[appointmentId] = true;
 		try {
-			await store.checkinAppointment(appointmentId);
+			const res = await store.checkinAppointment(appointmentId);
 			await refetchAppointments();
+			// Grace window outcome must be said plainly — a silent demotion reads
+			// as a broken app, not a policy.
+			showToast(
+				res?.priority_lapsed
+					? 'Checked in — the booked slot passed over 20 minutes ago, so they’ve joined at regular queue priority.'
+					: 'Checked in — appointment slot held.',
+				'info'
+			);
 		} catch (err: any) {
 			showToast(err?.data?.message || 'Failed to check in appointment.');
 		} finally {
@@ -242,11 +250,13 @@
 	let callNextArmed = $state<boolean>(false);
 	let callNextTimer: ReturnType<typeof setTimeout> | null = null;
 
-	// Toast for action errors (replaces alert())
+	// Toast for action feedback (replaces alert()); errors red, info neutral
 	let toastMessage = $state<string>('');
+	let toastTone = $state<'error' | 'info'>('error');
 	let toastTimer: ReturnType<typeof setTimeout> | null = null;
-	function showToast(msg: string) {
+	function showToast(msg: string, tone: 'error' | 'info' = 'error') {
 		toastMessage = msg;
+		toastTone = tone;
 		if (toastTimer) clearTimeout(toastTimer);
 		toastTimer = setTimeout(() => { toastMessage = ''; }, 4000);
 	}
@@ -518,7 +528,7 @@
 <div class="min-h-screen bg-canvas text-primary flex flex-col font-manrope">
 	<!-- Error toast -->
 	{#if toastMessage}
-		<div role="alert" aria-live="assertive" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-matte border border-system-error/40 text-system-error rounded-xl px-5 py-3 text-sm font-medium shadow-lg max-w-md animate-fade-in">
+		<div role="alert" aria-live="assertive" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-matte border rounded-xl px-5 py-3 text-sm font-medium shadow-lg max-w-md animate-fade-in {toastTone === 'error' ? 'border-system-error/40 text-system-error' : 'border-white/[0.08] text-primary'}">
 			{toastMessage}
 		</div>
 	{/if}
@@ -1059,13 +1069,23 @@
 										#{entry.token_number}
 									</span>
 
-									<!-- Appointment origin chip — subtle, gold is ≤5% of surface -->
+									<!-- Appointment origin chip — subtle, gold is ≤5% of surface and
+									     reserved for on-time anchors; lapsed check-ins go muted -->
 									{#if entry.entry_type === 'appointment'}
-										<span
-											class="text-[10px] font-mono uppercase text-gold-accent border border-gold-accent/30 rounded px-1.5"
-										>
-											APPT
-										</span>
+										{#if entry.priority_group >= 100}
+											<span
+												class="text-[10px] font-mono uppercase text-muted border border-white/[0.08] rounded px-1.5"
+												title="Checked in after the 20-minute grace window — queued at walk-in priority"
+											>
+												APPT · LATE
+											</span>
+										{:else}
+											<span
+												class="text-[10px] font-mono uppercase text-gold-accent border border-gold-accent/30 rounded px-1.5"
+											>
+												APPT
+											</span>
+										{/if}
 									{/if}
 
 									<!-- State Status Badge -->

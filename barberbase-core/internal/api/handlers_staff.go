@@ -2062,6 +2062,7 @@ func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {
 			qe.called_at,
 			qe.started_at,
 			qe.stale_warning,
+			qe.priority_group,
 			v.id        AS visit_id,
 			v.entry_type,
 			v.party_size,
@@ -2111,6 +2112,7 @@ func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {
 		calledAt          *time.Time
 		startedAt         *time.Time
 		staleWarning      *string
+		priorityGroup     int
 		visitID           uuid.UUID
 		entryType         string
 		partySize         int
@@ -2138,6 +2140,7 @@ func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {
 			&se.calledAt,
 			&se.startedAt,
 			&se.staleWarning,
+			&se.priorityGroup,
 			&se.visitID,
 			&se.entryType,
 			&se.partySize,
@@ -2299,6 +2302,8 @@ func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {
 		qes.IsDispatchable = se.isDispatchable
 		et := QueueEntryStaffEntryType(se.entryType)
 		qes.EntryType = &et
+		pg := se.priorityGroup
+		qes.PriorityGroup = &pg
 		qes.TotalDurationMinutes = se.totalDuration
 
 		ps := se.partySize

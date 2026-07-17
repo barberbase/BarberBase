@@ -1516,10 +1516,12 @@ func (s *Server) CheckInAppointment(w http.ResponseWriter, r *http.Request) {
 	})
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"visit_id":       res.VisitID,
-		"queue_entry_id": res.QueueEntryID,
-		"token_number":   res.TokenNumber,
-		"magic_link":     res.MagicLink,
+		"visit_id":        res.VisitID,
+		"queue_entry_id":  res.QueueEntryID,
+		"token_number":    res.TokenNumber,
+		"priority_group":  res.PriorityGroup,
+		"priority_lapsed": res.PriorityLapsed,
+		"magic_link":      res.MagicLink,
 	})
 }
 
