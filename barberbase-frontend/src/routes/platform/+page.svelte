@@ -114,7 +114,7 @@
 			<span class="text-sm font-semibold text-primary">Operator Console</span>
 		</div>
 		<div
-			class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-white/[0.05] bg-slate-800 text-primary"
+			class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-white/[0.05] bg-titanium text-primary"
 		>
 			Authorized Session
 		</div>

@@ -32,12 +32,13 @@ export const actions: Actions = {
 
 		const token = await signSession(secret, 8 * 3600);
 
+		// No maxAge: session cookie only — the operator session must never survive
+		// a browser restart. The signed token still hard-expires after 8h.
 		cookies.set('platform_session', token, {
 			httpOnly: true,
 			secure: true,
 			path: '/',
-			sameSite: 'lax',
-			maxAge: 8 * 3600
+			sameSite: 'lax'
 		});
 
 		throw redirect(303, '/platform');
