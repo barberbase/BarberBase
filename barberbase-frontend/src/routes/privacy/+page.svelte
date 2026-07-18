@@ -1,6 +1,7 @@
 <script lang="ts">
 	import SiteHeader from '$lib/components/SiteHeader.svelte';
 	import SiteFooter from '$lib/components/SiteFooter.svelte';
+	import Seo from '$lib/components/Seo.svelte';
 	import {
 		LEGAL_ENTITY_NAME,
 		CONTACT_EMAIL,
@@ -8,9 +9,7 @@
 	} from '$lib/site-config';
 </script>
 
-<svelte:head>
-	<title>Privacy Policy — {BRAND}</title>
-</svelte:head>
+<Seo title="Privacy Policy — {BRAND}" description="How {BRAND} collects, uses, and protects your data." path="/privacy" />
 
 <div class="min-h-screen bg-canvas text-primary font-manrope flex flex-col">
 	<SiteHeader />

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import SiteHeader from '$lib/components/SiteHeader.svelte';
 	import SiteFooter from '$lib/components/SiteFooter.svelte';
+	import Seo from '$lib/components/Seo.svelte';
 	import {
 		LEGAL_ENTITY_NAME,
 		CONTACT_EMAIL,
@@ -9,9 +10,7 @@
 	} from '$lib/site-config';
 </script>
 
-<svelte:head>
-	<title>Terms of Service — {BRAND}</title>
-</svelte:head>
+<Seo title="Terms of Service — {BRAND}" description="Terms governing use of {BRAND}'s queue and appointment service." path="/terms" />
 
 <div class="min-h-screen bg-canvas text-primary font-manrope flex flex-col">
 	<SiteHeader activePage="/terms" />

@@ -2,6 +2,7 @@
 	import {
 		LEGAL_ENTITY_NAME,
 		REGISTERED_ADDRESS,
+		UDYAM_NUMBER,
 		CONTACT_EMAIL,
 		CONTACT_PHONE
 	} from '$lib/site-config';
@@ -31,6 +32,8 @@
 		<div class="max-w-xl text-xs text-dim leading-relaxed">
 			<span class="font-semibold text-muted">Registered Address:</span>
 			{REGISTERED_ADDRESS}
+			<span class="text-dim">&middot;</span>
+			{UDYAM_NUMBER}
 		</div>
 
 		<!-- Contact Information -->
@@ -48,6 +51,8 @@
 		<!-- Navigation Links -->
 		<nav aria-label="Footer" class="flex flex-wrap justify-center gap-x-6 gap-y-2 text-xs font-medium text-primary">
 			<a href="/about" class="hover:text-gold-accent transition-colors">About Us</a>
+			<a href="/resources" class="hover:text-gold-accent transition-colors">Resources</a>
+			<a href="/case-studies" class="hover:text-gold-accent transition-colors">Case Studies</a>
 			<a href="/contact" class="hover:text-gold-accent transition-colors">Contact</a>
 			<a href="/privacy" class="hover:text-gold-accent transition-colors">Privacy Policy</a>
 			<a href="/terms" class="hover:text-gold-accent transition-colors">Terms of Service</a>

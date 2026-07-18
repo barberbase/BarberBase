@@ -1,14 +1,13 @@
 <script lang="ts">
 	import SiteFooter from '$lib/components/SiteFooter.svelte';
+	import Seo from '$lib/components/Seo.svelte';
 	import { resolve } from '$app/paths';
 	import logo from '$lib/assets/favicon.svg';
 	import { BRAND } from '$lib/site-config';
 	import Button from '$lib/components/Button.svelte';
 </script>
 
-<svelte:head>
-	<title>Try Demo — {BRAND}</title>
-</svelte:head>
+<Seo title="Try Demo — {BRAND}" description="See {BRAND}'s live queue and WhatsApp turn alerts in action." path="/demo" />
 
 <div class="min-h-screen bg-canvas text-primary font-manrope flex flex-col relative overflow-hidden">
 	<header class="w-full max-w-6xl mx-auto px-6 py-6 flex justify-between items-center relative z-10 border-b border-white/[0.03]">

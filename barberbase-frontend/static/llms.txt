@@ -1,0 +1,39 @@
+# BarberBase
+
+> Walk-in and appointment queue management for barbershops, with real-time WhatsApp
+> notifications. Customers join a queue or book an appointment from their phone — no app,
+> no account. Staff run one live dashboard for walk-ins, appointments, and checkouts.
+
+BarberBase is built and operated by CodeNXT Lab (Udyam UDYAM-MH-33-0763915), registered at
+307/B Waman Smruti, Navghar Road, Bhayandar East, Thane, MH 401105. Contact: hello@barberbase.in.
+
+## What BarberBase does
+
+- Customers join a shop's queue via a WhatsApp link or QR code — no app install, no account.
+- Live queue position and estimated wait update in real time.
+- Customers tap "on my way" when heading back to the shop, then confirm arrival by entering the 4-digit PIN posted at the shop counter.
+- Customers can book an appointment by picking a service and time slot, with WhatsApp
+  confirmation.
+- WhatsApp messages notify customers when they're next, if their spot is released, or if
+  there's a delay.
+- Staff use one dashboard to call the next customer, start and complete service, add
+  walk-ins, and assign a specific barber.
+
+## Pages
+
+- [Homepage](https://barberbase.in/): what BarberBase is, who it's for, and an FAQ answering
+  common questions about the company and how the queue works.
+- [About](https://barberbase.in/about): company background and registered-entity details.
+- [Blog](https://barberbase.in/blog): articles on running a walk-in barbershop queue.
+- [Resources](https://barberbase.in/resources): guides and reference material (in progress).
+- [Case Studies](https://barberbase.in/case-studies): how shops use BarberBase (in progress).
+- [Contact](https://barberbase.in/contact): contact details.
+- Shop pages (e.g. `https://barberbase.in/{tenant-slug}/{location-slug}`): a live page per
+  barbershop location, showing current queue status, service catalog, and the WhatsApp join
+  flow for that specific shop.
+
+## Not included
+
+Staff dashboard, admin console, platform operator console, and customer session pages
+(`/dashboard`, `/admin`, `/platform`, `/q/status`, `/q/appointment`) require authentication
+and are not part of the public site — do not crawl or index them.

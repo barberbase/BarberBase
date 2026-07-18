@@ -1,18 +1,26 @@
 <script lang="ts">
 	import SiteHeader from '$lib/components/SiteHeader.svelte';
 	import SiteFooter from '$lib/components/SiteFooter.svelte';
+	import Seo from '$lib/components/Seo.svelte';
 	import {
 		LEGAL_ENTITY_NAME,
 		UDYAM_NUMBER,
 		REGISTERED_ADDRESS,
 		CONTACT_EMAIL,
 		CONTACT_PHONE,
-		BRAND
+		BRAND,
+		ORGANIZATION_JSON_LD
 	} from '$lib/site-config';
 </script>
 
+<Seo
+	title="About Us — {BRAND}"
+	description="{BRAND} is built by {LEGAL_ENTITY_NAME} — real-time walk-in queue and appointment management for barbershops."
+	path="/about"
+/>
+
 <svelte:head>
-	<title>About Us — {BRAND}</title>
+	{@html `<script type="application/ld+json">${JSON.stringify(ORGANIZATION_JSON_LD).replace(/</g, '\\u003c')}</script>`}
 </svelte:head>
 
 <div class="min-h-screen bg-canvas text-primary font-manrope flex flex-col">
@@ -24,11 +32,10 @@
 				About Us
 			</h1>
 			<p class="text-lg text-muted leading-relaxed max-w-[65ch]">
-				We built {BRAND} to solve one practical problem: walk-in queues break down when customers cannot predict their turn.
+				{BRAND} lets barbershop customers join a queue or book an appointment from their phone — no app, no account — and get WhatsApp updates as their turn approaches. Staff run walk-ins, appointments, and checkouts from one dashboard.
 			</p>
-			<p class="text-sm text-muted">
-				Powered by
-				<a href="https://codenxtlab.tech/" target="_blank" rel="noopener noreferrer" class="text-gold-accent hover:text-gold-accent/80 transition-colors">CodeNXT Lab</a>
+			<p class="text-sm text-muted max-w-[65ch]">
+				{BRAND} is built and operated by <a href="https://codenxtlab.tech/" target="_blank" rel="noopener noreferrer" class="text-gold-accent hover:text-gold-accent/80 transition-colors">{LEGAL_ENTITY_NAME}</a>, a registered MSME (Udyam {UDYAM_NUMBER}).
 			</p>
 		</div>
 

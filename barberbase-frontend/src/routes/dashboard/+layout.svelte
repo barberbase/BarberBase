@@ -6,6 +6,7 @@
 
 <svelte:head>
 	<link rel="manifest" href="/dashboard/manifest.json" />
+	<meta name="robots" content="noindex" />
 </svelte:head>
 
 {@render children()}

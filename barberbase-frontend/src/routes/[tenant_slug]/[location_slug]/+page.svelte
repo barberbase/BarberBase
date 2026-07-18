@@ -3,9 +3,48 @@
 	import { page } from '$app/stores';
 	import { tick } from 'svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import Seo from '$lib/components/Seo.svelte';
 	import { formatHHMM } from '$lib';
+	import { SITE_URL } from '$lib/site-config';
 
 	let { data }: { data: any } = $props();
+
+	const shopPath = `/${$page.params.tenant_slug}/${$page.params.location_slug}`;
+	const hours = data.location.business_hours_today;
+	const localBusinessJsonLd = {
+		'@context': 'https://schema.org',
+		'@type': 'LocalBusiness',
+		name: data.location.name,
+		url: `${SITE_URL}${shopPath}`,
+		...(hours?.is_open_today && hours.opens_at && hours.closes_at
+			? {
+					openingHoursSpecification: {
+						'@type': 'OpeningHoursSpecification',
+						opens: hours.opens_at,
+						closes: hours.closes_at
+					}
+				}
+			: {})
+	};
+
+	// Keep this list in sync verbatim with the visible <ol class="how-to-steps"> below.
+	const howToSteps = [
+		'Pick the services you want from the list above.',
+		'Review your message and send it on WhatsApp — this confirms your spot, no account needed.',
+		'Track your live position and estimated wait from the link WhatsApp sends you.',
+		'When you\'re heading back, tap "on my way" on your status page.',
+		'At the shop, confirm arrival with the 4-digit PIN posted at the counter.'
+	];
+	const howToJsonLd = {
+		'@context': 'https://schema.org',
+		'@type': 'HowTo',
+		name: `How to join the queue at ${data.location.name}`,
+		step: howToSteps.map((text, i) => ({
+			'@type': 'HowToStep',
+			position: i + 1,
+			text
+		}))
+	};
 
 	// Active selected variants
 	let selectedVariantIds = $state<string[]>(data.variantIds || []);
@@ -337,10 +376,17 @@
 	}
 </script>
 
+<Seo
+	title="{data.location.name} | Join the Queue"
+	description="Join the queue at {data.location.name} via WhatsApp — live position, wait time, and appointment booking."
+	path={shopPath}
+	type="business.business"
+/>
+
 <svelte:head>
-	<title>{data.location.name} | Queue Join</title>
-	<meta name="description" content="Join the queue for {data.location.name} via WhatsApp." />
 	<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+	{@html `<script type="application/ld+json">${JSON.stringify(localBusinessJsonLd).replace(/</g, '\\u003c')}</script>`}
+	{@html `<script type="application/ld+json">${JSON.stringify(howToJsonLd).replace(/</g, '\\u003c')}</script>`}
 </svelte:head>
 
 <div class="shop-container">
@@ -565,6 +611,21 @@
 			{/if}
 		</main>
 	{/if}
+
+	<!-- HOW-TO — visible content rendered from the same howToSteps array as the JSON-LD below. -->
+	<section class="how-to-join">
+		<h2 class="how-to-heading">How to join the queue at {data.location.name}</h2>
+		<ol class="how-to-steps">
+			{#each howToSteps as step}
+				<li>{step}</li>
+			{/each}
+		</ol>
+	</section>
+
+	<nav class="shop-links" aria-label="More from BarberBase">
+		<a href="/">&larr; Back to BarberBase</a>
+		<a href="/blog/whatsapp-queue-joins-cut-no-shows">How queueing works</a>
+	</nav>
 </div>
 
 <!-- WHATSAPP HANDOFF PREVIEW -->
@@ -645,6 +706,51 @@
 		align-items: center;
 		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 		/* ponytail: uses same micro-dot bg as body via inheritance, machined-edge via inset shadow above */
+	}
+
+	.how-to-join {
+		background: var(--color-matte);
+		border: 1px solid rgba(255, 255, 255, 0.05);
+		border-radius: 1rem;
+		padding: 1.5rem;
+		margin-top: 2rem;
+	}
+
+	.how-to-heading {
+		font-size: 1rem;
+		font-weight: 700;
+		font-family: var(--font-satoshi);
+		color: var(--color-primary);
+		margin: 0 0 1rem 0;
+	}
+
+	.how-to-steps {
+		margin: 0;
+		padding-left: 1.25rem;
+		color: var(--color-muted);
+		font-size: 0.875rem;
+		line-height: 1.6;
+	}
+
+	.how-to-steps li {
+		margin-bottom: 0.5rem;
+	}
+
+	.shop-links {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-top: 1.5rem;
+		font-size: 0.8rem;
+	}
+
+	.shop-links a {
+		color: var(--color-muted);
+		text-decoration: none;
+	}
+
+	.shop-links a:hover {
+		color: var(--color-gold-accent);
 	}
 
 	.shop-name {

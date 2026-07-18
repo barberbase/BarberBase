@@ -1,11 +1,18 @@
 <script lang="ts">
-	import { slide } from 'svelte/transition';
-	import { cubicOut } from 'svelte/easing';
 	import { onMount } from 'svelte';
 	import SiteHeader from '$lib/components/SiteHeader.svelte';
 	import SiteFooter from '$lib/components/SiteFooter.svelte';
+	import Seo from '$lib/components/Seo.svelte';
 	import { resolve } from '$app/paths';
-	import { BRAND, SALES_WHATSAPP, CONTACT_EMAIL } from '$lib/site-config';
+	import {
+		BRAND,
+		SALES_WHATSAPP,
+		CONTACT_EMAIL,
+		LEGAL_ENTITY_NAME,
+		UDYAM_NUMBER,
+		SITE_URL,
+		ORGANIZATION_JSON_LD
+	} from '$lib/site-config';
 	import Button from '$lib/components/Button.svelte';
 
 	// Animation: default visible, JS adds the animate-ready class then sequences
@@ -36,24 +43,53 @@
 		: `mailto:${CONTACT_EMAIL}?subject=Get%20BarberBase%20for%20my%20shop`;
 
 	const faqs = [
-		{ q: 'Do my customers need to download an app?', a: 'No. Customers join via a link or QR code — works in any browser. WhatsApp notifications arrive automatically.' },
+		{ q: 'Is BarberBase a real company? Who runs it?', a: `Yes. BarberBase is built and operated by ${LEGAL_ENTITY_NAME} (Udyam ${UDYAM_NUMBER}).`, link: { href: '/about', label: 'See our full registered-entity details and contact info' } },
+		{ q: 'How does WhatsApp queue joining work?', a: 'Scan a QR code or tap a link to join a shop\'s queue — no app or account needed. You see your live position and estimated wait as they update, and get a WhatsApp message when your turn is near.' },
+		{ q: 'Do I need to download an app?', a: 'No. Joining a queue or booking an appointment works entirely in your phone\'s browser and WhatsApp — no app install, no account, no password.' },
+		{ q: 'Is my number and data safe?', a: 'We use your WhatsApp number only to send queue and appointment updates. Access links expire, and we don\'t ask for passwords or accounts.' },
+		{ q: 'How do I book an appointment?', a: 'Pick a service and time slot on the shop\'s page — you get a WhatsApp confirmation. No account and no back-and-forth calls.' },
+		{ q: 'Is there a cost to join the queue?', a: 'No. Joining a queue or booking an appointment is free for customers.' },
+		{ q: 'What happens if I miss my turn?', a: 'If you don\'t confirm you\'re on your way in time, the shop can release your spot to the next customer in line.' },
+		{ q: 'How is this different from just calling the shop?', a: 'A phone call only tells you your position at that moment, and ties up the shop\'s line. BarberBase shows your live position and estimated wait continuously, and messages you on WhatsApp when it\'s time — no calling back to check.' },
 		{ q: 'How much does it cost?', a: 'We\'re in early access right now. Chat with us on WhatsApp and we\'ll set you up — pricing depends on shop size.' },
 		{ q: 'What if I have multiple branches?', a: 'Each location gets its own queue and dashboard. Staff only see their shop, you see everything.' },
-		{ q: 'How long does setup take?', a: 'Under 10 minutes. We add your services, generate your QR, and you\'re live. No hardware needed.' }
+		{ q: 'How long does setup take?', a: 'Under 10 minutes. We add your services, generate your QR, and you\'re live. No hardware needed.' },
+		{ q: 'Does the shop need special equipment or an app?', a: 'No. Staff run everything from the dashboard in a browser — no hardware, no app install for staff or customers.' }
 	];
+
+	const faqJsonLd = {
+		'@context': 'https://schema.org',
+		'@type': 'FAQPage',
+		mainEntity: faqs.map((f) => ({
+			'@type': 'Question',
+			name: f.q,
+			acceptedAnswer: { '@type': 'Answer', text: f.a }
+		}))
+	};
+
+	const speakableJsonLd = {
+		'@context': 'https://schema.org',
+		'@type': 'WebPage',
+		url: SITE_URL,
+		speakable: {
+			'@type': 'SpeakableSpecification',
+			cssSelector: ['#faq-heading', '.faq-item']
+		}
+	};
 
 	let openFaq = $state(-1);
-
-	const testimonials = [
-		{ name: 'Ravi Sharma', shop: 'Ravi\'s Cuts, Andheri West', text: 'My waiting area used to be chaos. Now customers walk in exactly when it\'s their turn. WhatsApp alerts changed everything.' },
-		{ name: 'Imran Qureshi', shop: 'Style Studio, Bandra', text: 'We went from losing 8-10 customers a day to almost zero walkouts. The queue link is the best thing we\'ve added to the shop.' },
-		{ name: 'Deepak Patil', shop: 'Blade & Buzz, Dadar', text: 'Staff loves the dashboard — no more shouting names. Customers love the WhatsApp updates. Simple and it just works.' }
-	];
 </script>
 
+<Seo
+	title="{BRAND} — Never Miss a Customer"
+	description="Real-time walk-in queue and appointment booking with automatic WhatsApp turn alerts for barbershops in Mumbai."
+	path="/"
+/>
+
 <svelte:head>
-	<title>{BRAND} — Never Miss a Customer</title>
-	<meta name="description" content="Real-time walk-in queue management with automatic WhatsApp turn alerts for barbershops in Mumbai." />
+	{@html `<script type="application/ld+json">${JSON.stringify(ORGANIZATION_JSON_LD).replace(/</g, '\\u003c')}</script>`}
+	{@html `<script type="application/ld+json">${JSON.stringify(faqJsonLd).replace(/</g, '\\u003c')}</script>`}
+	{@html `<script type="application/ld+json">${JSON.stringify(speakableJsonLd).replace(/</g, '\\u003c')}</script>`}
 </svelte:head>
 
 <div class="min-h-screen bg-canvas text-primary font-manrope flex flex-col">
@@ -81,7 +117,9 @@
 							<Button variant="secondary">See live demo</Button>
 						</a>
 					</div>
-					<p class="text-xs text-muted">25+ salons in Mumbai &middot; expanding soon</p>
+					<p class="text-sm text-muted">
+						<a href="/star-salon/bhayander" class="text-gold-accent hover:text-gold-accent/80 transition-colors">See a real shop's queue &rarr;</a>
+					</p>
 				</div>
 
 				<!-- WhatsApp mockup — sequenced after hero text -->
@@ -223,50 +261,30 @@
 					</div>
 					<div class="space-y-2">
 						<div class="flex items-center gap-2.5">
-							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-gold-accent shrink-0"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
-							<h3 class="font-satoshi font-semibold text-sm text-primary">Shop analytics</h3>
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-gold-accent shrink-0"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+							<h3 class="font-satoshi font-semibold text-sm text-primary">Appointment booking</h3>
 						</div>
-						<p class="text-sm text-muted leading-relaxed max-w-[50ch]">Track wait times, peak hours, and staff performance. Know your numbers without spreadsheets.</p>
+						<p class="text-sm text-muted leading-relaxed max-w-[50ch]">Pick a service and time slot, get a WhatsApp confirmation. No back-and-forth.</p>
 					</div>
 					<div class="space-y-2">
 						<div class="flex items-center gap-2.5">
-							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-gold-accent shrink-0"><rect x="2" y="7" width="8" height="14" rx="1"/><rect x="14" y="3" width="8" height="18" rx="1"/><path d="M6 11h0"/><path d="M18 7h0"/></svg>
-							<h3 class="font-satoshi font-semibold text-sm text-primary">Multi-shop ready</h3>
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-gold-accent shrink-0"><path d="M20 10c0 5.523-8 12-8 12s-8-6.477-8-12a8 8 0 0116 0z"/><path d="M9.5 12l1.8 1.8L14.5 10"/></svg>
+							<h3 class="font-satoshi font-semibold text-sm text-primary">Arrival check-in</h3>
 						</div>
-						<p class="text-sm text-muted leading-relaxed max-w-[50ch]">Tenant-isolated from day one. Add locations without touching config. Each shop runs independently.</p>
+						<p class="text-sm text-muted leading-relaxed max-w-[50ch]">Tap "on my way," then confirm arrival with the 4-digit PIN posted at the counter. Staff knows exactly when to expect you.</p>
 					</div>
 				</div>
 			</div>
 		</section>
 
-		<!-- Testimonials -->
-		<section class="w-full max-w-5xl mx-auto px-6 pb-20 md:pb-28">
-			<h2 class="font-satoshi font-bold text-2xl md:text-3xl tracking-[-0.02em] text-center mb-14" style="text-wrap: balance;">
-				Shop owners love it.
-			</h2>
-			<div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-				{#each testimonials as t}
-					<figure class="testimonial-card bg-matte border border-white/[0.03] rounded-xl p-6 machined-edge flex flex-col">
-						<blockquote class="text-sm text-primary/90 leading-relaxed flex-grow">
-							"{t.text}"
-						</blockquote>
-						<figcaption class="mt-5 pt-4 border-t border-white/[0.03]">
-							<p class="font-satoshi font-semibold text-sm">{t.name}</p>
-							<p class="text-xs text-muted">{t.shop}</p>
-						</figcaption>
-					</figure>
-				{/each}
-			</div>
-		</section>
-
 		<!-- FAQ -->
 		<section class="w-full max-w-3xl mx-auto px-6 pb-20 md:pb-28">
-			<h2 class="font-satoshi font-bold text-2xl md:text-3xl tracking-[-0.02em] text-center mb-10" style="text-wrap: balance;">
+			<h2 id="faq-heading" class="font-satoshi font-bold text-2xl md:text-3xl tracking-[-0.02em] text-center mb-10" style="text-wrap: balance;">
 				Common questions
 			</h2>
 			<div class="space-y-px rounded-xl overflow-hidden bg-white/[0.03]">
 				{#each faqs as faq, i}
-					<div class="bg-canvas">
+					<div class="faq-item bg-canvas">
 						<button
 							class="w-full flex items-center justify-between gap-4 px-6 py-5 text-left hover:bg-white/[0.01] transition-colors"
 							onclick={() => openFaq = openFaq === i ? -1 : i}
@@ -278,11 +296,15 @@
 								<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
 							</svg>
 						</button>
-						{#if openFaq === i}
-							<div id="faq-{i}" transition:slide={{ duration: 200, easing: cubicOut }} class="px-6 pb-5 -mt-1" role="region">
-								<p class="text-sm text-muted leading-relaxed max-w-[60ch]">{faq.a}</p>
-							</div>
-						{/if}
+						<!-- Always rendered in SSR HTML (never {#if}-gated) so the FAQPage JSON-LD
+						     text always has a matching visible DOM node — only the CSS display
+						     state is click-toggled. -->
+						<div id="faq-{i}" class="px-6 pb-5 -mt-1 {openFaq === i ? '' : 'hidden'}" role="region">
+							<p class="text-sm text-muted leading-relaxed max-w-[60ch]">{faq.a}</p>
+							{#if faq.link}
+								<a href={faq.link.href} class="inline-block mt-2 text-sm text-gold-accent hover:text-gold-accent/80 transition-colors">{faq.link.label} &rarr;</a>
+							{/if}
+						</div>
 					</div>
 				{/each}
 			</div>
@@ -402,15 +424,6 @@
 		transform: rotate(-1deg) translateY(-4px);
 	}
 
-	/* Testimonial hover */
-	.testimonial-card {
-		transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-	}
-	.testimonial-card:hover {
-		border-color: rgba(200, 169, 107, 0.12);
-		transform: translateY(-2px);
-	}
-
 	.step-cell {
 		transition: background-color 0.2s ease-out;
 	}
@@ -433,7 +446,6 @@
 		.hero-glow {
 			animation: none;
 		}
-		.testimonial-card:hover,
 		.wa-phone:hover {
 			transform: none;
 		}

@@ -10,8 +10,9 @@
 
 	let mobileMenuOpen = $state(false);
 
-	const links: { href: '/' | '/about' | '/terms' | '/contact'; label: string }[] = [
+	const links: { href: '/' | '/about' | '/blog' | '/terms' | '/contact'; label: string }[] = [
 		{ href: '/about', label: 'About' },
+		{ href: '/blog', label: 'Blog' },
 		{ href: '/terms', label: 'Terms' },
 		{ href: '/contact', label: 'Contact' }
 	];

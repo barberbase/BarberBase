@@ -1,6 +1,7 @@
 <script lang="ts">
 	import SiteHeader from '$lib/components/SiteHeader.svelte';
 	import SiteFooter from '$lib/components/SiteFooter.svelte';
+	import Seo from '$lib/components/Seo.svelte';
 	import {
 		LEGAL_ENTITY_NAME,
 		UDYAM_NUMBER,
@@ -11,9 +12,11 @@
 	} from '$lib/site-config';
 </script>
 
-<svelte:head>
-	<title>Contact Us — {BRAND}</title>
-</svelte:head>
+<Seo
+	title="Contact Us — {BRAND}"
+	description="Get in touch with {BRAND} — email, phone, or WhatsApp."
+	path="/contact"
+/>
 
 <div class="min-h-screen bg-canvas text-primary font-manrope flex flex-col">
 	<SiteHeader activePage="/contact" />

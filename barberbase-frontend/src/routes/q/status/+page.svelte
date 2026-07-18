@@ -366,6 +366,7 @@
 
 <svelte:head>
 	<title>Live Queue Status — BarberBase</title>
+	<meta name="robots" content="noindex" />
 </svelte:head>
 
 <div

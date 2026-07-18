@@ -5,6 +5,7 @@
 
 <svelte:head>
 	<title>Appointment Management — BarberBase</title>
+	<meta name="robots" content="noindex" />
 </svelte:head>
 
 <div
