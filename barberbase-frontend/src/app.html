@@ -8,7 +8,36 @@
 		<meta name="description" content="BarberBase - Smart Salon Queue & Scheduling Platform" />
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+		<!-- Non-blocking font stylesheet load: preload + swap onload, so this request
+		     doesn't sit in the critical render path (was costing ~800ms of LCP). -->
+		<link
+			rel="preload"
+			as="style"
+			href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&family=Space+Mono:wght@400;700&display=swap"
+		/>
+		<link
+			rel="stylesheet"
+			href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&family=Space+Mono:wght@400;700&display=swap"
+			media="print"
+			onload="this.media='all'"
+		/>
+		<noscript>
+			<link
+				rel="stylesheet"
+				href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&family=Space+Mono:wght@400;700&display=swap"
+			/>
+		</noscript>
+
+		<!-- TODO(search-console/bing): verification tags not yet added — no strings provided.
+		     Once you create the properties, paste the tokens Search Console / Bing Webmaster
+		     give you and uncomment:
+		<meta name="google-site-verification" content="PASTE_TOKEN_HERE" />
+		<meta name="msvalidate.01" content="PASTE_TOKEN_HERE" />
+		     sitemap.xml is already live at https://barberbase.in/sitemap.xml and ready to submit
+		     once each property is verified. -->
+
+		<script defer data-domain="barberbase.in" src="https://plausible.io/js/script.js"></script>
+
 		%sveltekit.head%
 	</head>
 	<body class="overflow-x-hidden" data-sveltekit-preload-data="hover">

@@ -10,6 +10,13 @@
 	let { data }: { data: any } = $props();
 
 	const shopPath = `/${$page.params.tenant_slug}/${$page.params.location_slug}`;
+
+	// ponytail: star-salon/bhayander is confirmed test data, not a real business — the
+	// backend has no is_demo flag to key off, so this is a narrow, explicit exclusion
+	// rather than generic infrastructure. Remove once the test shop is retired from prod
+	// or the API grows a real flag. Every other shop is unaffected.
+	const isKnownTestShop = shopPath === '/star-salon/bhayander';
+
 	const hours = data.location.business_hours_today;
 	const localBusinessJsonLd = {
 		'@context': 'https://schema.org',
@@ -381,11 +388,14 @@
 	description="Join the queue at {data.location.name} via WhatsApp — live position, wait time, and appointment booking."
 	path={shopPath}
 	type="business.business"
+	noindex={isKnownTestShop}
 />
 
 <svelte:head>
 	<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-	{@html `<script type="application/ld+json">${JSON.stringify(localBusinessJsonLd).replace(/</g, '\\u003c')}</script>`}
+	{#if !isKnownTestShop}
+		{@html `<script type="application/ld+json">${JSON.stringify(localBusinessJsonLd).replace(/</g, '\\u003c')}</script>`}
+	{/if}
 	{@html `<script type="application/ld+json">${JSON.stringify(howToJsonLd).replace(/</g, '\\u003c')}</script>`}
 </svelte:head>
 

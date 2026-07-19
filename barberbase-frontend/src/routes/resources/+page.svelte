@@ -46,7 +46,7 @@
 				<p>Appointments run through the same system. A customer picks a service and a time slot on the shop's page, and gets a WhatsApp confirmation — no separate booking tool, no phone call.</p>
 				<p>On the shop side, staff work from one dashboard: call the next customer, start the service, mark it complete, add a walk-in, or assign a specific barber. Whether a customer walked in or booked ahead, they move through the same board. The dashboard and the customer's phone show the same state — nobody is relaying information between a paper list and a screen, and nothing has to be typed twice.</p>
 				<p>The result is a queue that behaves the way waiting already works in a customer's head: they know where they stand, they're told when it matters, and they don't have to stand in the shop to find out.</p>
-				<p>See it on a live shop page: <a href="/star-salon/bhayander">a real BarberBase queue</a>.</p>
+				<p>See it in action: <a href="/demo">try the live demo</a>.</p>
 			</article>
 
 			<article id="reducing-wait-time-complaints">

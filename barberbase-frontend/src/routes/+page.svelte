@@ -117,9 +117,6 @@
 							<Button variant="secondary">See live demo</Button>
 						</a>
 					</div>
-					<p class="text-sm text-muted">
-						<a href="/star-salon/bhayander" class="text-gold-accent hover:text-gold-accent/80 transition-colors">See a real shop's queue &rarr;</a>
-					</p>
 				</div>
 
 				<!-- WhatsApp mockup — sequenced after hero text -->
