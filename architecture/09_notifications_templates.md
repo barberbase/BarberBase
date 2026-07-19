@@ -261,14 +261,14 @@ Button 2 — QUICK_REPLY: "Cancel Appointment"
 **Quota:** `whatsapp_transactional`
  
 ```
-Header: 📅 Appointment Tomorrow
+Header: Appointment tomorrow
  
 Body:
-Reminder: Your appointment at {{1}} is tomorrow!
-🕐 Time: {{2}}
-✂️ {{3}}
-📍 {{4}}
-See you then!
+Reminder: your appointment at {{1}} is tomorrow.
+Time: {{2}}
+Services: {{3}}
+Address: {{4}}
+See you then.
  
 Footer: BarberBase
  
@@ -277,6 +277,11 @@ Button 1 — URL: "View Details"
 Button 2 — QUICK_REPLY: "Cancel"
   Payload: CANCEL_APT:{{6}}
 ```
+
+**Amended 2026-07-20:** copy cleaned to classifier-safe form (no emoji, no
+exclamation marks) per the standards learned from the bb_queue_noshow /
+bb_spot_released saga, ahead of Meta submission. Body parameter count and
+order unchanged (matches `booking_resolver.go` step 9).
  
 | # | Field | Example |
 |---|---|---|
