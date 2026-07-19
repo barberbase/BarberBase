@@ -14,7 +14,7 @@
 <div class="min-h-screen bg-canvas text-primary font-manrope flex flex-col">
 	<SiteHeader />
 
-	<main class="flex-grow w-full max-w-3xl mx-auto px-6 py-12 md:py-20 space-y-10">
+	<main id="main-content" class="flex-grow w-full max-w-3xl mx-auto px-6 py-12 md:py-20 space-y-10">
 		<div class="space-y-3">
 			<h1 class="font-satoshi font-extrabold text-3xl md:text-4xl tracking-[-0.03em]" style="text-wrap: balance;">
 				Privacy Policy

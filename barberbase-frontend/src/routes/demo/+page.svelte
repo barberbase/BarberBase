@@ -18,7 +18,7 @@
 		<a href={resolve('/')} class="text-sm font-semibold text-muted hover:text-primary transition-colors">&larr; Back</a>
 	</header>
 
-	<main class="flex-grow relative z-10 w-full max-w-3xl mx-auto px-6 py-14 md:py-20 text-center space-y-8">
+	<main id="main-content" class="flex-grow relative z-10 w-full max-w-3xl mx-auto px-6 py-14 md:py-20 text-center space-y-8">
 		<h1 class="font-satoshi font-extrabold text-4xl md:text-5xl tracking-[-0.03em] leading-[1.08]" style="text-wrap: balance;">
 			Run the demo in under a minute.
 		</h1>
