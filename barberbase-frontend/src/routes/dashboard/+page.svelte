@@ -851,7 +851,15 @@
 				<div class="flex justify-between items-center gap-2">
 					<h2 class="text-lg font-bold text-primary tracking-wide">Add Walk-in Client</h2>
 					<div class="flex gap-2">
-						<!-- appointments dark for launch: re-enable with Phase 1.5 -->
+						<button
+							type="button"
+							class="px-3 py-1.5 text-xs font-bold rounded-xl border border-gold-accent/30 text-gold-accent hover:bg-gold-accent/10 transition-colors"
+							onclick={() => {
+								showBookAppointmentForm = !showBookAppointmentForm;
+							}}
+						>
+							Book Appointment
+						</button>
 						<button
 							type="button"
 							class="px-3 py-1.5 text-xs font-bold rounded-xl border border-white/[0.05] hover:bg-titanium transition-colors"

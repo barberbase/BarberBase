@@ -1229,6 +1229,8 @@ paths:
         On success: creates appointment record, fires WhatsApp confirmation via outbox.
         Appointment becomes a queue_entry only when customer checks in on the day.
       operationId: bookAppointment
+      security:
+        - StaffJWT: []
       requestBody:
         required: true
         content:
