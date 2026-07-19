@@ -11,9 +11,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"barberbase-core/internal/repository"
 )
+
+// dbExecer is the slice of pgx shared by *pgxpool.Pool and pgx.Tx that
+// sendTextReply needs, so a reply can ride a transaction or go direct.
+type dbExecer interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
 
 type Processor struct {
 	pool        *pgxpool.Pool
@@ -595,8 +602,150 @@ func (p *Processor) handleStop(ctx context.Context, msg ClassifiedMessage) error
 	return nil
 }
 
+// sendTextReply enqueues a plain-text WhatsApp reply through the outbox.
+// When exec is a transaction, the reply commits atomically with the state
+// change (Law 7). locationID (when known) lets the notification handler send
+// from the shop's own number.
+func (p *Processor) sendTextReply(ctx context.Context, exec dbExecer, tenantID, locationID *uuid.UUID, fromPhone, to, body string) error {
+	payloadMap := map[string]interface{}{
+		"type":                "text",
+		"to":                  to,
+		"from_business_phone": fromPhone,
+		"text":                map[string]interface{}{"body": body},
+	}
+	if locationID != nil {
+		payloadMap["location_id"] = locationID.String()
+	}
+	payloadBytes, err := json.Marshal(payloadMap)
+	if err != nil {
+		return fmt.Errorf("failed to marshal text reply payload: %w", err)
+	}
+	_, err = exec.Exec(ctx, `
+		INSERT INTO outbox_events (tenant_id, type, payload, process_after)
+		VALUES ($1, 'notification.send', $2, NOW())
+	`, tenantID, payloadBytes)
+	if err != nil {
+		return fmt.Errorf("failed to insert text reply outbox event: %w", err)
+	}
+	return nil
+}
+
 func (p *Processor) handleCancelApt(ctx context.Context, msg ClassifiedMessage) error {
-	log.Printf("[Info] ActionCancelApt received for appointment %s (Deferred to Phase 1.5)", msg.AptID)
+	if msg.SenderPhone == "" {
+		log.Printf("[Debug] ActionCancelApt: masked sender, cannot verify or reply")
+		return nil
+	}
+	platformPhone := os.Getenv("BHEJNA_FROM_PHONE")
+	notFound := "We couldn't find that appointment. It may have been removed. Please contact the shop directly if you need help."
+
+	aptID, err := uuid.Parse(msg.AptID)
+	if err != nil {
+		log.Printf("[Debug] ActionCancelApt: invalid appointment ID '%s'", msg.AptID)
+		return p.sendTextReply(ctx, p.pool, nil, nil, platformPhone, msg.SenderPhone, notFound)
+	}
+
+	var (
+		status        string
+		tenantID      uuid.UUID
+		locationID    uuid.UUID
+		startAt       time.Time
+		shopName      string
+		tzName        string
+		whatsappMode  string
+		businessPhone *string
+		custPhone     *string
+	)
+	err = p.pool.QueryRow(ctx, `
+		SELECT a.status, a.tenant_id, a.location_id, a.scheduled_start_at,
+		       l.name, l.timezone, l.whatsapp_mode, l.business_whatsapp_number,
+		       c.phone_number
+		FROM appointments a
+		JOIN locations l ON l.id = a.location_id
+		JOIN customers c ON c.id = a.customer_id
+		WHERE a.id = $1
+	`, aptID).Scan(&status, &tenantID, &locationID, &startAt,
+		&shopName, &tzName, &whatsappMode, &businessPhone, &custPhone)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			log.Printf("[Debug] ActionCancelApt: appointment %s not found", aptID)
+			return p.sendTextReply(ctx, p.pool, nil, nil, platformPhone, msg.SenderPhone, notFound)
+		}
+		return fmt.Errorf("failed to query appointment for cancel: %w", err)
+	}
+
+	// Trust boundary: the button payload carries only the appointment ID, so
+	// anyone who obtains an ID could forge a cancel. Only the booking customer's
+	// number may cancel; anyone else gets the same not-found reply (no existence leak).
+	if custPhone == nil || repository.NormalizeE164(*custPhone) != msg.SenderPhone {
+		log.Printf("[Warn] ActionCancelApt: sender is not the booking customer for appointment %s", aptID)
+		return p.sendTextReply(ctx, p.pool, nil, nil, platformPhone, msg.SenderPhone, notFound)
+	}
+
+	fromPhone := platformPhone
+	if whatsappMode == "own_number" && businessPhone != nil && *businessPhone != "" {
+		fromPhone = *businessPhone
+	}
+	reply := func(body string) error {
+		return p.sendTextReply(ctx, p.pool, &tenantID, &locationID, fromPhone, msg.SenderPhone, body)
+	}
+
+	switch status {
+	case "cancelled":
+		return reply(fmt.Sprintf("This appointment at %s is already cancelled.", shopName))
+	case "checked_in":
+		return reply(fmt.Sprintf("You're already checked in at %s, so this appointment can't be cancelled. Please speak to the staff at the counter if you need help.", shopName))
+	case "scheduled":
+		// proceed below
+	default: // no_show, rescheduled
+		return reply(fmt.Sprintf("This appointment at %s can no longer be cancelled. Please contact the shop directly if you need help.", shopName))
+	}
+
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin cancel-apt tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Guarded update: a concurrent check-in/cancel between read and write loses here.
+	ct, err := tx.Exec(ctx, `
+		UPDATE appointments
+		SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'customer', updated_at = NOW()
+		WHERE id = $1 AND status = 'scheduled'
+	`, aptID)
+	if err != nil {
+		return fmt.Errorf("failed to cancel appointment: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return reply(fmt.Sprintf("This appointment at %s could not be cancelled — it may have just been checked in or already cancelled. Please speak to the staff if you need help.", shopName))
+	}
+
+	// A cancelled appointment must not get its day-before reminder.
+	_, err = tx.Exec(ctx, `
+		DELETE FROM outbox_events
+		WHERE status = 'pending'
+		  AND type = 'notification.send'
+		  AND payload->>'template_code' = 'bb_appointment_reminder'
+		  AND payload->>'source_id' = $1
+	`, aptID.String())
+	if err != nil {
+		return fmt.Errorf("failed to remove pending reminder: %w", err)
+	}
+
+	tz, tzErr := time.LoadLocation(tzName)
+	if tzErr != nil {
+		tz, _ = time.LoadLocation("Asia/Kolkata")
+	}
+	confirmBody := fmt.Sprintf("Your appointment at %s on %s has been cancelled. We hope to see you another time.",
+		shopName, startAt.In(tz).Format("Mon, 2 Jan at 3:04 PM"))
+	// Law 7: confirmation rides the same transaction as the state change.
+	if err := p.sendTextReply(ctx, tx, &tenantID, &locationID, fromPhone, msg.SenderPhone, confirmBody); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit cancel-apt tx: %w", err)
+	}
+	log.Printf("[Info] ActionCancelApt: appointment %s cancelled by customer", aptID)
 	return nil
 }
 
