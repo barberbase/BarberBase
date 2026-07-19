@@ -490,6 +490,53 @@ components:
           type: string
           nullable: true
 
+    AppointmentPublic:
+      type: object
+      required: [id, status, shop_name, location_slug, scheduled_start_at, total_duration_minutes, services, cancellable]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDv7'
+        status:
+          type: string
+          description: scheduled | checked_in | cancelled | no_show | rescheduled (no enum — avoids generated-constant collisions with queue entry states)
+        shop_name:
+          type: string
+          description: Tenant brand name customers recognize
+          example: "Star Salon"
+        location_name:
+          type: string
+          example: "Bhayander"
+        location_slug:
+          type: string
+          example: "star-salon/bhayander"
+        location_address:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+          example: "Asia/Kolkata"
+        scheduled_start_at:
+          type: string
+          format: date-time
+        total_duration_minutes:
+          type: integer
+        party_size:
+          type: integer
+        services:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              duration_minutes:
+                type: integer
+              price_paise:
+                type: integer
+        cancellable:
+          type: boolean
+          description: True only while status is 'scheduled'
+
     AppointmentResponse:
       type: object
       required: [id, scheduled_start_at, status, services, magic_link]
@@ -1228,6 +1275,63 @@ paths:
                 $ref: '#/components/schemas/AppointmentResponse'
         '409':
           description: Slot no longer available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /appointments/my:
+    get:
+      tags: [Queue - Customer]
+      summary: Get appointment details via magic-link token
+      description: |
+        Backs the /q/appointment customer page. Token is the appointment magic
+        link token (base64url(apt_id:expires).hmac — NOT the queue session
+        token), passed in X-Session-Token. Verified server-side against
+        HMAC_SECRET; expires 2h after scheduled end.
+      operationId: getMyAppointment
+      security:
+        - CustomerSession: []
+      responses:
+        '200':
+          description: Appointment details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentPublic'
+        '401':
+          description: Invalid or expired token
+        '404':
+          description: Appointment not found
+
+  /appointments/my/cancel:
+    post:
+      tags: [Queue - Customer]
+      summary: Cancel own appointment via magic-link token
+      description: |
+        Same cancel semantics as the WhatsApp CANCEL_APT button — only a
+        'scheduled' appointment cancels; the pending reminder is swept in the
+        same transaction.
+      operationId: cancelMyAppointment
+      security:
+        - CustomerSession: []
+      responses:
+        '200':
+          description: Cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: cancelled
+        '401':
+          description: Invalid or expired token
+        '404':
+          description: Appointment not found
+        '409':
+          description: Not cancellable (already cancelled / checked in)
           content:
             application/json:
               schema:

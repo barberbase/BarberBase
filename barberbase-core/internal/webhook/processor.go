@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"barberbase-core/internal/domain/queue"
 	"barberbase-core/internal/repository"
 )
 
@@ -706,29 +707,14 @@ func (p *Processor) handleCancelApt(ctx context.Context, msg ClassifiedMessage) 
 	}
 	defer tx.Rollback(ctx)
 
-	// Guarded update: a concurrent check-in/cancel between read and write loses here.
-	ct, err := tx.Exec(ctx, `
-		UPDATE appointments
-		SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = 'customer', updated_at = NOW()
-		WHERE id = $1 AND status = 'scheduled'
-	`, aptID)
+	// Guarded update + reminder sweep, shared with the /q/appointment page path.
+	ok, err := queue.CancelScheduledAppointment(ctx, tx, aptID)
 	if err != nil {
 		return fmt.Errorf("failed to cancel appointment: %w", err)
 	}
-	if ct.RowsAffected() == 0 {
+	if !ok {
+		// Concurrent check-in/cancel between read and write loses here.
 		return reply(fmt.Sprintf("This appointment at %s could not be cancelled — it may have just been checked in or already cancelled. Please speak to the staff if you need help.", shopName))
-	}
-
-	// A cancelled appointment must not get its day-before reminder.
-	_, err = tx.Exec(ctx, `
-		DELETE FROM outbox_events
-		WHERE status = 'pending'
-		  AND type = 'notification.send'
-		  AND payload->>'template_code' = 'bb_appointment_reminder'
-		  AND payload->>'source_id' = $1
-	`, aptID.String())
-	if err != nil {
-		return fmt.Errorf("failed to remove pending reminder: %w", err)
 	}
 
 	tz, tzErr := time.LoadLocation(tzName)

@@ -1536,6 +1536,136 @@ func (s *Server) CheckInAppointment(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// resolveAppointmentToken pulls the appointment magic-link token from
+// X-Session-Token (same header the /q/status page uses) and verifies it.
+func resolveAppointmentToken(r *http.Request) (uuid.UUID, error) {
+	token := r.Header.Get("X-Session-Token")
+	if token == "" {
+		return uuid.Nil, queue.ErrAppointmentTokenInvalid
+	}
+	return queue.VerifyAppointmentToken(token)
+}
+
+// GetMyAppointment handles GET /v1/appointments/my — backs the /q/appointment page.
+func (s *Server) GetMyAppointment(w http.ResponseWriter, r *http.Request) {
+	aptID, err := resolveAppointmentToken(r)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid or expired link"})
+		return
+	}
+	ctx := r.Context()
+
+	var (
+		status       string
+		startAt      time.Time
+		duration     int
+		partySize    int
+		variantIDs   []uuid.UUID
+		tenantName   string
+		locationName string
+		locationSlug string
+		address      *string
+		tzName       string
+	)
+	err = s.Pool.QueryRow(ctx, `
+		SELECT a.status, a.scheduled_start_at, a.total_duration_minutes, a.party_size,
+		       ARRAY(SELECT jsonb_array_elements_text(a.variant_ids))::uuid[],
+		       t.name, l.name, l.slug, l.address, l.timezone
+		FROM appointments a
+		JOIN locations l ON l.id = a.location_id
+		JOIN tenants t ON t.id = a.tenant_id
+		WHERE a.id = $1
+	`, aptID).Scan(&status, &startAt, &duration, &partySize, &variantIDs,
+		&tenantName, &locationName, &locationSlug, &address, &tzName)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondJSON(w, http.StatusNotFound, map[string]string{"code": "NOT_FOUND", "message": "appointment not found"})
+			return
+		}
+		log.Printf("[Error] GetMyAppointment query failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+
+	services := []map[string]interface{}{}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT name, duration_minutes, price_paise FROM service_variants WHERE id = ANY($1)
+	`, variantIDs)
+	if err != nil {
+		log.Printf("[Error] GetMyAppointment variants query failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	for rows.Next() {
+		var name string
+		var dur, price int
+		if err := rows.Scan(&name, &dur, &price); err != nil {
+			rows.Close()
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+			return
+		}
+		services = append(services, map[string]interface{}{
+			"name": name, "duration_minutes": dur, "price_paise": price,
+		})
+	}
+	rows.Close()
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"id":                     aptID,
+		"status":                 status,
+		"shop_name":              tenantName,
+		"location_name":          locationName,
+		"location_slug":          locationSlug,
+		"location_address":       address,
+		"timezone":               tzName,
+		"scheduled_start_at":     startAt,
+		"total_duration_minutes": duration,
+		"party_size":             partySize,
+		"services":               services,
+		"cancellable":            status == "scheduled",
+	})
+}
+
+// CancelMyAppointment handles POST /v1/appointments/my/cancel — same semantics
+// as the WhatsApp CANCEL_APT button, via queue.CancelScheduledAppointment.
+func (s *Server) CancelMyAppointment(w http.ResponseWriter, r *http.Request) {
+	aptID, err := resolveAppointmentToken(r)
+	if err != nil {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "invalid or expired link"})
+		return
+	}
+	ctx := r.Context()
+
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	ok, err := queue.CancelScheduledAppointment(ctx, tx, aptID)
+	if err != nil {
+		log.Printf("[Error] CancelMyAppointment failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	if !ok {
+		var status string
+		errStatus := s.Pool.QueryRow(ctx, `SELECT status FROM appointments WHERE id = $1`, aptID).Scan(&status)
+		if errors.Is(errStatus, pgx.ErrNoRows) {
+			respondJSON(w, http.StatusNotFound, map[string]string{"code": "NOT_FOUND", "message": "appointment not found"})
+			return
+		}
+		respondJSON(w, http.StatusConflict, map[string]string{"code": "INVALID_STATE", "message": "appointment is not cancellable (status: " + status + ")"})
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"code": "INTERNAL_ERROR", "message": "internal server error"})
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
+}
+
 func (s *Server) SubmitFeedback(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	tenantID, locationID, visitID, err := s.resolveCustomerSession(ctx, r)
