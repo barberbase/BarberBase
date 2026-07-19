@@ -727,8 +727,16 @@ func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locat
 		tempClosureEndsAt = override.ExpiresAt
 	}
 
-	var routingMode string
-	if err := s.Pool.QueryRow(ctx, `SELECT queue_routing_mode FROM locations WHERE id = $1`, location.ID).Scan(&routingMode); err != nil {
+	// Tenant name is the customer-recognizable identity ("Star Salon"); the
+	// location row often holds just an area name ("bhayander"). The count lets
+	// the page hide the location name for single-location shops.
+	var routingMode, tenantName string
+	var tenantLocationCount int
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT l.queue_routing_mode, t.name,
+		       (SELECT COUNT(*) FROM locations WHERE tenant_id = t.id AND is_active = true)
+		FROM locations l JOIN tenants t ON t.id = l.tenant_id
+		WHERE l.id = $1`, location.ID).Scan(&routingMode, &tenantName, &tenantLocationCount); err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}
@@ -737,6 +745,8 @@ func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locat
 		"id":                     location.ID,
 		"name":                   location.Name,
 		"slug":                   location.Slug,
+		"tenant_name":            tenantName,
+		"tenant_location_count":  tenantLocationCount,
 		"shop_status":            shopStatus,
 		"queue_open":             queueOpen,
 		"queue_length":           stats.QueueLength,

@@ -139,10 +139,18 @@ components:
           $ref: '#/components/schemas/UUIDv7'
         name:
           type: string
-          example: "Star Salon"
+          description: Location name (often an area, e.g. "Koramangala")
+          example: "Koramangala"
         slug:
           type: string
           example: "star-salon/koramangala"
+        tenant_name:
+          type: string
+          description: Shop brand name customers recognize — use as the page heading
+          example: "Star Salon"
+        tenant_location_count:
+          type: integer
+          description: Active locations for this tenant; hide location name when 1
         shop_status:
           type: string
           enum: [open, closing_soon, temporarily_closed, closed]

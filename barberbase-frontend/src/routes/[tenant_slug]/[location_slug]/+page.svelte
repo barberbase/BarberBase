@@ -17,11 +17,17 @@
 	// or the API grows a real flag. Every other shop is unaffected.
 	const isKnownTestShop = shopPath === '/star-salon/bhayander';
 
+	// Customers recognize the shop brand ("Star Salon"), not the location row's
+	// name (often just an area, e.g. "bhayander"). Fallback covers older API
+	// responses and e2e mocks without tenant_name.
+	const shopName: string = data.location.tenant_name || data.location.name;
+	const showLocationName = (data.location.tenant_location_count ?? 1) > 1;
+
 	const hours = data.location.business_hours_today;
 	const localBusinessJsonLd = {
 		'@context': 'https://schema.org',
 		'@type': 'LocalBusiness',
-		name: data.location.name,
+		name: shopName,
 		url: `${SITE_URL}${shopPath}`,
 		...(hours?.is_open_today && hours.opens_at && hours.closes_at
 			? {
@@ -45,7 +51,7 @@
 	const howToJsonLd = {
 		'@context': 'https://schema.org',
 		'@type': 'HowTo',
-		name: `How to join the queue at ${data.location.name}`,
+		name: `How to join the queue at ${shopName}`,
 		step: howToSteps.map((text, i) => ({
 			'@type': 'HowToStep',
 			position: i + 1,
@@ -384,8 +390,8 @@
 </script>
 
 <Seo
-	title="{data.location.name} | Join the Queue"
-	description="Join the queue at {data.location.name} via WhatsApp — live position, wait time, and appointment booking."
+	title="{shopName} | Join the Queue"
+	description="Join the queue at {shopName} via WhatsApp — live position, wait time, and appointment booking."
 	path={shopPath}
 	type="business.business"
 	noindex={isKnownTestShop}
@@ -403,18 +409,25 @@
 	<!-- HEADER -->
 	<header class="shop-header">
 		<div class="shop-info">
-			<h1 class="shop-name">{data.location.name}</h1>
+			<h1 class="shop-name">{shopName}</h1>
+			{#if showLocationName}
+				<p class="shop-location">{data.location.name}</p>
+			{/if}
 			<div class="badges">
 				<span class="status-badge {data.location.shop_status}">
 					{getStatusLabel(data.location.shop_status)}
 				</span>
 				{#if data.location.shop_status !== 'closed' && data.location.shop_status !== 'temporarily_closed'}
-					<span class="queue-badge">
-						{data.location.queue_length} waiting
-					</span>
-					<span class="wait-badge">
-						~{data.location.estimated_wait_minutes} min wait
-					</span>
+					{#if data.location.queue_length === 0}
+						<span class="queue-badge">No wait right now — walk straight in</span>
+					{:else}
+						<span class="queue-badge">
+							{data.location.queue_length} waiting
+						</span>
+						<span class="wait-badge">
+							~{data.location.estimated_wait_minutes} min wait
+						</span>
+					{/if}
 				{/if}
 			</div>
 			{#if data.location.shop_status === 'open' || data.location.shop_status === 'closing_soon'}
@@ -622,20 +635,21 @@
 		</main>
 	{/if}
 
-	<!-- HOW-TO — visible content rendered from the same howToSteps array as the JSON-LD below. -->
-	<section class="how-to-join">
-		<h2 class="how-to-heading">How to join the queue at {data.location.name}</h2>
+	<!-- HOW-TO — visible content rendered from the same howToSteps array as the
+	     JSON-LD below. Collapsed by default: a first-time visitor needs one thing
+	     above the fold (pick a service, join); the walkthrough is a disclosure. -->
+	<details class="how-to-join">
+		<summary class="how-to-heading">How does this work?</summary>
 		<ol class="how-to-steps">
 			{#each howToSteps as step}
 				<li>{step}</li>
 			{/each}
 		</ol>
-	</section>
+	</details>
 
-	<nav class="shop-links" aria-label="More from BarberBase">
-		<a href="/">&larr; Back to BarberBase</a>
-		<a href="/blog/whatsapp-queue-joins-cut-no-shows">How queueing works</a>
-	</nav>
+	<footer class="shop-links">
+		<a href="/">Powered by BarberBase</a>
+	</footer>
 </div>
 
 <!-- WHATSAPP HANDOFF PREVIEW -->
@@ -662,7 +676,7 @@
 			<div class="message-preview">
 				<span class="preview-label">Your message</span>
 				<div class="message-bubble">{waMessage}</div>
-				<span class="preview-to">To {data.location.name} on WhatsApp</span>
+				<span class="preview-to">To {shopName} on WhatsApp</span>
 			</div>
 
 			<ul class="next-steps">
@@ -731,11 +745,34 @@
 		font-weight: 700;
 		font-family: var(--font-satoshi);
 		color: var(--color-primary);
-		margin: 0 0 1rem 0;
+		cursor: pointer;
+		list-style: none;
+		-webkit-tap-highlight-color: transparent;
+	}
+
+	.how-to-heading::-webkit-details-marker {
+		display: none;
+	}
+
+	.how-to-heading::after {
+		content: '+';
+		float: right;
+		color: var(--color-dim);
+		font-weight: 400;
+	}
+
+	details[open] > .how-to-heading::after {
+		content: '\2212';
+	}
+
+	.how-to-heading:focus-visible {
+		outline: 2px solid var(--color-gold-accent);
+		outline-offset: 2px;
+		border-radius: 0.5rem;
 	}
 
 	.how-to-steps {
-		margin: 0;
+		margin: 1rem 0 0 0;
 		padding-left: 1.25rem;
 		color: var(--color-muted);
 		font-size: 0.875rem;
@@ -748,8 +785,7 @@
 
 	.shop-links {
 		display: flex;
-		justify-content: space-between;
-		gap: 1rem;
+		justify-content: center;
 		margin-top: 1.5rem;
 		font-size: 0.8rem;
 	}
@@ -769,7 +805,15 @@
 		margin: 0 0 0.75rem 0;
 		color: var(--color-gold-accent);
 		font-family: var(--font-satoshi);
-		letter-spacing: -0.025em;
+		/* Owner asked for caps — display-layer only, stored name stays as-is */
+		text-transform: uppercase;
+		letter-spacing: 0.02em;
+	}
+
+	.shop-location {
+		font-size: 0.85rem;
+		color: var(--color-muted);
+		margin: -0.5rem 0 0.75rem 0;
 	}
 
 	.badges {
