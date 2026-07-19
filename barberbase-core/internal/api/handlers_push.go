@@ -181,10 +181,14 @@ func (s *Server) PushCallNext(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 5 — Call the shared call-next domain function
+	// Same params as the dashboard path — BhejnaFromPhone missing here left
+	// from_business_phone empty on push-path bb_you_are_next for shared-number shops.
 	output, err := queue.CallNext(ctx, s.Pool, queue.CallNextParams{
-		TenantID:      tenantID,
-		LocationID:    locationID,
-		StaffMemberID: staffMemberID,
+		TenantID:        tenantID,
+		LocationID:      locationID,
+		StaffMemberID:   staffMemberID,
+		BhejnaFromPhone: s.Config.BhejnaFromPhone,
+		HMACSecret:      []byte(s.Config.HMACSecret),
 	})
 
 	if err != nil {

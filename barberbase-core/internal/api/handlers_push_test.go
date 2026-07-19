@@ -222,3 +222,45 @@ func computeMAC(key []byte, message string) []byte {
 	h.Write([]byte(message))
 	return h.Sum(nil)
 }
+
+// CN.FIX: the push path must pass BhejnaFromPhone through to the domain fn —
+// it was omitted, leaving from_business_phone empty in the bb_you_are_next
+// outbox payload for shared-number shops.
+func TestPushCallNext_OutboxFromPhone(t *testing.T) {
+	s, pool, tenantID, locationID, barberAID, _ := setupCallNextTestServer(t)
+	require.NotEmpty(t, s.Config.BhejnaFromPhone, "test env must set BHEJNA_FROM_PHONE")
+
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+	entryID, visitID := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+
+	ctx := context.Background()
+	// WhatsApp-channel entry with a stored magic link → CallNextTx step 9 enqueues bb_you_are_next.
+	_, err := pool.Exec(ctx, `UPDATE queue_entries SET session_channel = 'whatsapp' WHERE id = $1`, entryID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE visits SET magic_link_token_hash = 'test-magic-token' WHERE id = $1`, visitID)
+	require.NoError(t, err)
+
+	token, err := push.GeneratePAT([]byte(s.Config.HMACSecret), barberAID.String(), locationID.String())
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/staff/push/call-next", nil)
+	req.Header.Set("X-Push-Action-Token", token)
+	rr := httptest.NewRecorder()
+	s.PushCallNext(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var payload []byte
+	err = pool.QueryRow(ctx, `
+		SELECT payload FROM outbox_events
+		WHERE type = 'notification.send'
+		ORDER BY created_at DESC LIMIT 1`).Scan(&payload)
+	require.NoError(t, err)
+
+	var body struct {
+		TemplateCode      string `json:"template_code"`
+		FromBusinessPhone string `json:"from_business_phone"`
+	}
+	require.NoError(t, json.Unmarshal(payload, &body))
+	assert.Equal(t, "bb_you_are_next", body.TemplateCode)
+	assert.Equal(t, s.Config.BhejnaFromPhone, body.FromBusinessPhone)
+}

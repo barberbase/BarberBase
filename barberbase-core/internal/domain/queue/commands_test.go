@@ -258,3 +258,23 @@ func TestCompleteVisitAndCheckout_WithPushEnabledStaff(t *testing.T) {
 	require.Equal(t, locationID.String(), payload.LocationID)
 	require.Equal(t, tenantID.String(), payload.TenantID)
 }
+
+// CN.FIX: business date must be the location-local calendar date, not the UTC date.
+// The old Truncate(24h) computation returned the UTC date, so between 00:00 and
+// 05:30 IST call-next looked up yesterday's session and 404'd.
+func TestBusinessDateIn(t *testing.T) {
+	ist, err := time.LoadLocation("Asia/Kolkata")
+	require.NoError(t, err)
+
+	// 2026-07-19 19:30 UTC == 2026-07-20 01:00 IST — inside the old failure window.
+	now := time.Date(2026, 7, 19, 19, 30, 0, 0, time.UTC)
+	require.Equal(t, "2026-07-20", businessDateIn(now, ist))
+
+	// Old computation for the same instant proves the divergence this fix closes.
+	old := now.In(ist).Truncate(24 * time.Hour).Format("2006-01-02")
+	require.NotEqual(t, "2026-07-20", old)
+
+	// Afternoon IST: both dates agree.
+	now = time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC) // 15:30 IST
+	require.Equal(t, "2026-07-20", businessDateIn(now, ist))
+}

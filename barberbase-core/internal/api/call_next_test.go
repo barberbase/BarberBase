@@ -102,7 +102,7 @@ func seedQueueSession(t *testing.T, pool *pgxpool.Pool, tenantID, locationID uui
 	sessionID := uuid.New()
 	_, err := pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status, queue_version, last_token_number)
-		VALUES ($1, $2, $3, CURRENT_DATE, 'active', 0, 0)`, sessionID, tenantID, locationID)
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active', 0, 0)`, sessionID, tenantID, locationID)
 	require.NoError(t, err)
 	return sessionID
 }
@@ -303,6 +303,33 @@ func TestCallNext_NoSession(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "no_active_session", resp.Error)
 	require.Equal(t, 0, resp.WaitingRemoteCount)
+}
+
+// CN.FIX: 404 bodies must satisfy the ErrorResponse contract (required code, message).
+func TestCallNext_404ContractFields(t *testing.T) {
+	s, pool, tenantID, locationID, barberAID, _ := setupCallNextTestServer(t)
+
+	assert404Contract := func(wantCode string) {
+		req := newStaffRequest(http.MethodPost, "/v1/staff/queue/call-next", tenantID, locationID, barberAID)
+		rec := httptest.NewRecorder()
+		s.CallNextCustomer(rec, req)
+		require.Equal(t, http.StatusNotFound, rec.Code)
+
+		var resp struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Equal(t, wantCode, resp.Code)
+		require.NotEmpty(t, resp.Message)
+	}
+
+	// No session yet
+	assert404Contract("NO_ACTIVE_SESSION")
+
+	// Session with no dispatchable entries
+	seedQueueSession(t, pool, tenantID, locationID)
+	assert404Contract("NO_DISPATCHABLE_CUSTOMERS")
 }
 
 func TestCallNext_TxRollbackInsertsZeroOutbox(t *testing.T) {

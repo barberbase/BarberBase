@@ -970,7 +970,10 @@ func (s *Server) CallNextCustomer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var noDispErr queue.ErrNoDispatchable
 		if errors.As(err, &noDispErr) {
+			// code/message required by the ErrorResponse contract in openapi.yaml
 			respondJSON(w, http.StatusNotFound, map[string]any{
+				"code":                 "NO_DISPATCHABLE_CUSTOMERS",
+				"message":              "No arrived dispatchable customers at this location",
 				"error":                "no_dispatchable_customers",
 				"waiting_remote_count": noDispErr.WaitingRemoteCount,
 			})
@@ -978,6 +981,8 @@ func (s *Server) CallNextCustomer(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, queue.ErrSessionNotFound) {
 			respondJSON(w, http.StatusNotFound, map[string]any{
+				"code":                 "NO_ACTIVE_SESSION",
+				"message":              "No active queue session for today",
 				"error":                "no_active_session",
 				"waiting_remote_count": 0,
 			})

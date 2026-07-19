@@ -756,11 +756,23 @@ func (e ErrNoDispatchable) Error() string { return "no dispatchable customers" }
 var ErrSessionNotFound = errors.New("no active queue session for today")
 var ErrLockTimeout = errors.New("lock timeout")
 
+// businessDateIn returns the location-local calendar date. Truncate(24h) was wrong
+// here: it truncates on UTC day boundaries, yielding the UTC date — which diverges
+// from JoinQueue's (NOW() AT TIME ZONE tz)::DATE between local midnight and the UTC
+// offset (00:00–05:30 IST), making call-next miss the session.
+func businessDateIn(now time.Time, tz *time.Location) string {
+	return now.In(tz).Format("2006-01-02")
+}
+
 func CallNext(ctx context.Context, pool *pgxpool.Pool, params CallNextParams) (CallNextOutput, error) {
 	// 1. Call repo.GetLocationRoutingMode
 	routingMode, timezone, err := repository.GetLocationRoutingMode(ctx, pool, params.LocationID)
 	if err != nil {
-		return CallNextOutput{}, ErrNoDispatchable{0}
+		// Unknown/inactive location → no session; any other DB error must surface, not masquerade as 404.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return CallNextOutput{}, ErrSessionNotFound
+		}
+		return CallNextOutput{}, fmt.Errorf("get location routing mode: %w", err)
 	}
 
 	// 2. Compute businessDate using the location timezone
@@ -768,7 +780,7 @@ func CallNext(ctx context.Context, pool *pgxpool.Pool, params CallNextParams) (C
 	if err != nil {
 		tz = time.UTC
 	}
-	businessDate := time.Now().In(tz).Truncate(24 * time.Hour).Format("2006-01-02")
+	businessDate := businessDateIn(time.Now(), tz)
 
 	// 3. Run repo.CallNextTx inside a transaction
 	var entryID uuid.UUID
