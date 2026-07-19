@@ -1390,8 +1390,9 @@ func (s *Server) GetAppointmentSlots(w http.ResponseWriter, r *http.Request, loc
 }
 
 // RegisterManualRoutes manually wires endpoints missing from or needing custom setup outside OpenAPI codegen
-func (s *Server) RegisterManualRoutes(r chi.Router) {
-	r.Post("/v1/staff/appointments/{appointment_id}/checkin", s.CheckInAppointment)
+func (s *Server) RegisterManualRoutes(r chi.Router, jwtSecret []byte) {
+	r.With(markStaffJWT, auth.RequireStaffJWT(jwtSecret, StaffJWTScopes)).
+		Post("/v1/staff/appointments/{appointment_id}/checkin", s.CheckInAppointment)
 }
 
 // BookAppointment handles POST /v1/appointments/book

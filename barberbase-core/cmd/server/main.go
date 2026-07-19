@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"barberbase-core/internal/api"
-	"barberbase-core/internal/auth"
 	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/config"
 	"barberbase-core/internal/domain/presence"
@@ -123,15 +122,7 @@ func main() {
 	}
 	apiServer.Arrival = presence.NewService(pool, broadcast)
 
-	apiHandler := api.HandlerWithOptions(apiServer, api.ChiServerOptions{
-		Middlewares: []api.MiddlewareFunc{
-			auth.RequireStaffJWT([]byte(cfg.JWTSecret), api.StaffJWTScopes),
-		},
-	})
-	r.Route("/v1", func(r chi.Router) {
-		r.With(apiServer.PlatformAdminKeyMiddleware).Post("/admin/setup", apiServer.ProvisionTenant)
-		r.Mount("/", apiHandler)
-	})
+	r.Mount("/", api.NewRouter(apiServer, []byte(cfg.JWTSecret)))
 
 	// 6. Start HTTP Server
 	serverAddr := fmt.Sprintf(":%s", cfg.Port)
