@@ -25,3 +25,5 @@ A shop with a small waiting area benefits the most from this. If every remote-jo
 It also means a shop doesn't have to explain two different processes to customers. Whether someone found the shop by walking past it or by clicking a shared link, the instructions are the same: scan or tap to join, track your position, get a WhatsApp message when it's time, then confirm you're on your way and confirm arrival with the counter PIN when you're there.
 
 One line, one dashboard, and a queue that doesn't care how a customer got into it — that's the difference between running one tool and running two workarounds that happen to share a waiting room.
+
+If your shop runs more than one chair, the same single-board idea extends to routing customers between barbers — see the guide on [queue management for multi-barber shops](/resources#multi-barber-queue-management).

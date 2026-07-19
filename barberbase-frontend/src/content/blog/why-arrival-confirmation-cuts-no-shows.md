@@ -21,3 +21,5 @@ This is different from just messaging a customer and hoping they respond. It's a
 A system that only shows position gives customers information but gives the shop nothing back. A system that requires confirmation turns the queue into a two-way signal: the shop knows roughly where a customer is in their journey, not just where they are in a list. That's the difference between "we think this customer might come back" and "this customer told us they're on their way, and then proved they arrived."
 
 None of this requires guessing at behavior or inferring intent from a lack of activity. It's built from two explicit actions a customer takes, at the two moments that actually matter — heading back, and arriving — and a shop that can trust those signals is a shop that can make faster, more confident decisions about who to call next.
+
+For a walkthrough of the confirmation flow itself — the "on my way" tap and the counter PIN — see the guide on [what an arrival PIN is and why it matters](/resources#what-is-an-arrival-pin).

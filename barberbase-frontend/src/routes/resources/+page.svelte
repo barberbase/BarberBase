@@ -81,6 +81,7 @@
 				<p>For customers, both steps are quick — tapping a button, then typing four digits off a card at the counter. It's the last piece of the same flow that started with joining the queue: join, track your position, get notified, say you're on your way, confirm you've arrived.</p>
 				<p>It also protects the customer's own spot. Without any arrival signal, a shop calling a customer who genuinely is on their way has no way to distinguish that from someone who's already given up and left. The PIN is what tells the shop "I'm actually here" — rather than leaving that judgment to guesswork on either side.</p>
 				<p>Because the PIN card lives at the counter rather than inside an app or a message, there's nothing for a customer to lose track of between joining the queue and showing up — it's simply there when they arrive, the same way it is for the customer ahead of them and the one behind.</p>
+				<p>For more on how this confirmation flow affects no-shows in practice, see <a href="/blog/why-arrival-confirmation-cuts-no-shows">why arrival confirmation cuts no-shows</a> and <a href="/blog/why-the-arrival-pin-is-at-the-counter">why the arrival PIN lives at the counter</a>.</p>
 			</article>
 
 			<article id="multi-barber-queue-management">
@@ -93,6 +94,7 @@
 				<p>This matters most at the moment a barber finishes a service and staff need to decide who's next for that specific chair. Rather than working from a single shared list and figuring out who's compatible with which barber, staff assign directly from the dashboard — the same board used for calling walk-ins and appointments, just with barber selection built into that action.</p>
 				<p>It also means a customer's preference for a specific barber doesn't have to be tracked separately from the queue itself, or relayed verbally between staff. It's part of the same call-next action, on the same board, alongside starting and completing the visit.</p>
 				<p>None of this changes what a customer experiences when joining — the queue-join flow, the live position, and the WhatsApp updates are identical whether a shop has one chair or five. The routing is entirely a staff-side concern, which is where it belongs: a customer shouldn't have to understand a shop's staffing to know where they stand in line.</p>
+				<p>Related reading: <a href="/blog/mixed-walk-in-and-remote-queues">running walk-ins and remote joins as one queue</a> — the same single-board approach, seen from the queue side rather than the barber side.</p>
 			</article>
 		</div>
 	</main>
