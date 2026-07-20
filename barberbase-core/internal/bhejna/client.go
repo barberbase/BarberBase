@@ -249,6 +249,14 @@ func (c *bhejnaClient) SendTextPlatform(ctx context.Context, req SendTextReq) (*
 	return c.SendText(ctx, uuid.Nil, uuid.Nil, req)
 }
 
+// normalizeLanguage maps bare/empty "en" to the Meta-registered locale code.
+func normalizeLanguage(lang string) string {
+	if lang == "" || lang == "en" {
+		return "en_US"
+	}
+	return lang
+}
+
 func (c *bhejnaClient) SendTemplate(ctx context.Context, tenantID, locationID uuid.UUID, req SendTemplateReq) (*SendResult, error) {
 	class := ClassFor(req.TemplateCode)
 	apiKey, fromPhone, err := c.resolveCredentials(ctx, tenantID, locationID, class)
@@ -292,7 +300,9 @@ func (c *bhejnaClient) SendTemplate(ctx context.Context, tenantID, locationID uu
 		"type":                "template",
 		"template": map[string]interface{}{
 			"template_code": req.TemplateCode,
-			"language":      req.Language,
+			// Templates are registered as en_US with Meta; bare "en" is rejected.
+			// Single choke point — every producer hardcodes "en" upstream.
+			"language":      normalizeLanguage(req.Language),
 			"components":    componentsPayload,
 		},
 	}
