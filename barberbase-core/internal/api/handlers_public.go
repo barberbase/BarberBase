@@ -1393,6 +1393,28 @@ func (s *Server) GetAppointmentSlots(w http.ResponseWriter, r *http.Request, loc
 func (s *Server) RegisterManualRoutes(r chi.Router, jwtSecret []byte) {
 	r.With(markStaffJWT, auth.RequireStaffJWT(jwtSecret, StaffJWTScopes)).
 		Post("/v1/staff/appointments/{appointment_id}/checkin", s.CheckInAppointment)
+
+	// Device call-next layer. Explicit routes shadow the generated /v1 mount:
+	// the generated wrapper enforces no apiKey schemes, so the PlatformAdminKey
+	// gate (like /admin/setup) and in-handler DeviceToken auth must be wired here.
+	r.Post("/v1/device/call-next", s.DeviceCallNext)
+	r.With(s.PlatformAdminKeyMiddleware).Post("/v1/admin/devices", s.CreateStationDevice)
+	r.With(s.PlatformAdminKeyMiddleware).Post("/v1/admin/devices/{device_id}/buttons", func(w http.ResponseWriter, req *http.Request) {
+		id, err := uuid.Parse(chi.URLParam(req, "device_id"))
+		if err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"code": "INVALID_REQUEST", "message": "invalid device_id"})
+			return
+		}
+		s.CreateStationButton(w, req, UUIDv7(id))
+	})
+	r.With(s.PlatformAdminKeyMiddleware).Patch("/v1/admin/devices/{device_id}", func(w http.ResponseWriter, req *http.Request) {
+		id, err := uuid.Parse(chi.URLParam(req, "device_id"))
+		if err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"code": "INVALID_REQUEST", "message": "invalid device_id"})
+			return
+		}
+		s.SetStationDeviceActive(w, req, UUIDv7(id))
+	})
 }
 
 // BookAppointment handles POST /v1/appointments/book

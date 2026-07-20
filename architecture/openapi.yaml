@@ -60,6 +60,16 @@ components:
         Command-scoped: a call_next PAT cannot authorize any other endpoint (Law 20).
         See: 03_auth_identity.md, 16_web_push_service_worker.md
 
+    DeviceToken:
+      type: apiKey
+      in: header
+      name: X-Device-Token
+      description: |
+        Opaque station-device bearer secret ("bbd_" + 256-bit base64url), issued
+        once at device registration (POST /admin/devices, PlatformAdminKey).
+        Server stores only SHA-256(token) in station_devices.token_hash; auth is
+        hash-equality lookup with is_active=true. Token material is never logged.
+
     PlatformAdminKey:
       type: apiKey
       in: header
@@ -2924,6 +2934,170 @@ paths:
           description: PAT command mismatch (Law 20)
         '429':
           description: Rate limited (1 per 3s per staff member) — barber double-tapped, ignore
+
+  # ── Device call-next layer (hardware buttons; transport-agnostic) ─────────
+
+  /device/call-next:
+    post:
+      tags: [Device]
+      summary: Hardware button call-next
+      description: |
+        Physical station button (WiFi button, 433MHz→PC dongle bridge, or
+        433MHz→4G gateway) advances the queue. Same call-next domain function
+        as the StaffJWT and PAT paths. tenant_id/location_id come from the
+        authenticated station_devices row only (Law 11 extension); staff binding
+        from the station_buttons row (NULL = pooled dispatch, no barber
+        assignment). Removing this layer changes nothing else (Law 21 extension).
+        LED map: green=advanced, double-amber=no_waiting, amber=stale_discarded,
+        red=4xx/5xx/network only.
+      operationId: deviceCallNext
+      security:
+        - DeviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [button_code]
+              properties:
+                button_code:
+                  type: string
+                  description: Button identity on this device (e.g. "B1"); fixed in firmware for standalone one-button devices
+                pressed_at:
+                  type: integer
+                  format: int64
+                  description: Unix seconds of the physical press. Presses older than 60s are discarded — defense against gateway press-buffering during 4G blips.
+      responses:
+        '200':
+          description: Press processed — result variants map to LED patterns, only 4xx/5xx/network read as red
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result]
+                properties:
+                  result:
+                    type: string
+                    enum: [advanced, no_waiting, stale_discarded]
+                  called_token_number:
+                    type: integer
+                    description: Present only when result=advanced
+        '401':
+          description: Invalid or revoked device token
+        '404':
+          description: Unknown button_code for this device
+        '429':
+          description: Rate limited (1 per 3s per device)
+
+  /admin/devices:
+    post:
+      tags: [Platform Provisioning]
+      summary: Register a station device (operator-driven; returns plaintext secret ONCE)
+      description: |
+        Creates a station_devices row for the network-terminating unit (WiFi
+        button, PC dongle bridge, or 4G gateway). Returns the plaintext device
+        secret exactly once; only SHA-256 is stored. No self-registration.
+      operationId: createStationDevice
+      security:
+        - PlatformAdminKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, location_id, label]
+              properties:
+                tenant_id:
+                  $ref: '#/components/schemas/UUIDv7'
+                location_id:
+                  $ref: '#/components/schemas/UUIDv7'
+                label:
+                  type: string
+      responses:
+        '201':
+          description: Device created — secret shown once, not retrievable later
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, secret]
+                properties:
+                  id:
+                    $ref: '#/components/schemas/UUIDv7'
+                  label:
+                    type: string
+                  secret:
+                    type: string
+                    description: Device bearer secret ("bbd_" + 256-bit base64url)
+        '422':
+          description: Location does not belong to tenant
+
+  /admin/devices/{device_id}:
+    patch:
+      tags: [Platform Provisioning]
+      summary: Activate or deactivate a station device
+      operationId: setStationDeviceActive
+      security:
+        - PlatformAdminKey: []
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_active]
+              properties:
+                is_active:
+                  type: boolean
+      responses:
+        '204':
+          description: Updated
+        '404':
+          description: Device not found
+
+  /admin/devices/{device_id}/buttons:
+    post:
+      tags: [Platform Provisioning]
+      summary: Add a button to a station device
+      operationId: createStationButton
+      security:
+        - PlatformAdminKey: []
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [button_code, label]
+              properties:
+                button_code:
+                  type: string
+                staff_member_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: null = pooled/shop-wide dispatch
+                label:
+                  type: string
+      responses:
+        '201':
+          description: Button created
+        '422':
+          description: Unknown device, duplicate button_code, or staff not active at device location
 
   # ── Mode B (own-number WhatsApp) — Phase 1 Premium ────────────────────────
 

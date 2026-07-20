@@ -298,6 +298,14 @@ func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMo
 	}
 
 	// Step 7: Update entry (state → called)
+	// uuid.Nil staff = device pooled button: no barber identity — entry is called
+	// with assigned_barber_id NULL and no staff status update. (hybrid/barber_specific
+	// with uuid.Nil match nothing above → no_waiting, which is the correct outcome
+	// for a pooled button misconfigured into a barber-routed shop.)
+	var assignBarberID *uuid.UUID
+	if params.StaffMemberID != uuid.Nil {
+		assignBarberID = &params.StaffMemberID
+	}
 	const updateEntry = `
 		UPDATE queue_entries
 		SET state = 'called',
@@ -305,19 +313,21 @@ func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMo
 		    assigned_barber_id = $1,
 		    stale_warning = NULL
 		WHERE id = $2`
-	_, err = tx.Exec(ctx, updateEntry, params.StaffMemberID, entryID)
+	_, err = tx.Exec(ctx, updateEntry, assignBarberID, entryID)
 	if err != nil {
 		return uuid.Nil, uuid.Nil, uuid.Nil, 0, fmt.Errorf("update queue entry state: %w", err)
 	}
 
 	// Step 8: Update staff status
-	const updateStaff = `
-		UPDATE staff_members
-		SET status = 'cutting'
-		WHERE id = $1`
-	_, err = tx.Exec(ctx, updateStaff, params.StaffMemberID)
-	if err != nil {
-		return uuid.Nil, uuid.Nil, uuid.Nil, 0, fmt.Errorf("update staff status: %w", err)
+	if assignBarberID != nil {
+		const updateStaff = `
+			UPDATE staff_members
+			SET status = 'cutting'
+			WHERE id = $1`
+		_, err = tx.Exec(ctx, updateStaff, *assignBarberID)
+		if err != nil {
+			return uuid.Nil, uuid.Nil, uuid.Nil, 0, fmt.Errorf("update staff status: %w", err)
+		}
 	}
 
 	// Step 9: [Law 7] Insert outbox event — fully-formed payload for WhatsApp customers only
