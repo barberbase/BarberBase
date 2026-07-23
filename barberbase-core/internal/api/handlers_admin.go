@@ -630,9 +630,10 @@ func (s *Server) ProvisionTenant(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ConnectWhatsAppModeB(w http.ResponseWriter, r *http.Request, locationId UUIDv7) {
 	ctx := r.Context()
 
-	// 1. Auth & Role Gate
+	// 1. Auth & Role Gate — owner only (D2): WABA credentials are a
+	// shop-identity operation, not delegable to managers.
 	role := auth.RoleFromCtx(ctx)
-	if role != "owner" && role != "manager" {
+	if role != "owner" {
 		respondAdminJSON(w, http.StatusForbidden, ErrorResponse{Code: "FORBIDDEN", Message: "insufficient role"})
 		return
 	}
@@ -775,9 +776,9 @@ func (s *Server) ConnectWhatsAppModeB(w http.ResponseWriter, r *http.Request, lo
 func (s *Server) DisconnectWhatsAppModeB(w http.ResponseWriter, r *http.Request, locationId UUIDv7) {
 	ctx := r.Context()
 
-	// Role Gate
+	// Role Gate — owner only (D2), same boundary as ConnectWhatsAppModeB.
 	role := auth.RoleFromCtx(ctx)
-	if role != "owner" && role != "manager" {
+	if role != "owner" {
 		respondAdminJSON(w, http.StatusForbidden, ErrorResponse{Code: "FORBIDDEN", Message: "insufficient role"})
 		return
 	}
@@ -807,8 +808,9 @@ func (s *Server) DisconnectWhatsAppModeB(w http.ResponseWriter, r *http.Request,
 func (s *Server) RegenerateArrivalPin(w http.ResponseWriter, r *http.Request, locationId UUIDv7) {
 	ctx := r.Context()
 
-	// Law 20: 403 for scope rejection. Same boundary as every other /admin endpoint.
-	if role := auth.RoleFromCtx(ctx); role != "owner" && role != "manager" {
+	// Law 20: 403 for scope rejection. Owner only (D2) — the arrival PIN is a
+	// credential; regeneration is not delegable to managers.
+	if role := auth.RoleFromCtx(ctx); role != "owner" {
 		respondAdminJSON(w, http.StatusForbidden, map[string]string{"code": "FORBIDDEN", "message": "insufficient role"})
 		return
 	}

@@ -1112,4 +1112,50 @@ func TestDisconnectWhatsAppModeB_AllCases(t *testing.T) {
 	}
 }
 
+// H7 (D2): WhatsApp connect/disconnect and arrival-PIN regenerate are
+// owner-only — managers now 403 like barbers. Connect's full owner 200-path
+// (mock Bhejna) lives in TestConnectWhatsAppModeB_AllCases; here the owner
+// leg for connect proves gate passage (422 = past the role gate).
+func TestCredentialOps_OwnerOnly(t *testing.T) {
+	s, pool, tenantID, locationID, staffID, _ := setupAdminTestServer(t)
+	defer pool.Close()
+	ctx := context.Background()
 
+	_, err := pool.Exec(ctx, `
+		UPDATE locations SET
+			whatsapp_mode = 'own_number',
+			business_whatsapp_number = '+919876543222',
+			bhejna_api_key_encrypted = 'enc-key',
+			bhejna_webhook_secret_encrypted = 'enc-secret'
+		WHERE id = $1 AND tenant_id = $2
+	`, locationID, tenantID)
+	require.NoError(t, err)
+
+	call := func(role string, invoke func(w http.ResponseWriter, r *http.Request)) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/admin/credential-op", bytes.NewReader([]byte(`{}`)))
+		ctxReq := req.Context()
+		ctxReq = context.WithValue(ctxReq, auth.CtxTenantID, tenantID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxLocationID, locationID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxStaffMemberID, staffID.String())
+		ctxReq = context.WithValue(ctxReq, auth.CtxRole, role)
+		rec := httptest.NewRecorder()
+		invoke(rec, req.WithContext(ctxReq))
+		return rec
+	}
+
+	connect := func(w http.ResponseWriter, r *http.Request) { s.ConnectWhatsAppModeB(w, r, locationID) }
+	disconnect := func(w http.ResponseWriter, r *http.Request) { s.DisconnectWhatsAppModeB(w, r, locationID) }
+	regenerate := func(w http.ResponseWriter, r *http.Request) { s.RegenerateArrivalPin(w, r, locationID) }
+
+	// Managers and barbers → 403 on all three.
+	for _, role := range []string{"manager", "barber"} {
+		require.Equal(t, http.StatusForbidden, call(role, connect).Code, "connect as %s", role)
+		require.Equal(t, http.StatusForbidden, call(role, disconnect).Code, "disconnect as %s", role)
+		require.Equal(t, http.StatusForbidden, call(role, regenerate).Code, "regenerate as %s", role)
+	}
+
+	// Owner passes every gate.
+	require.Equal(t, http.StatusUnprocessableEntity, call("owner", connect).Code, "owner connect must clear the role gate (422 = body validation)")
+	require.Equal(t, http.StatusOK, call("owner", regenerate).Code, "owner regenerate")
+	require.Equal(t, http.StatusNoContent, call("owner", disconnect).Code, "owner disconnect")
+}
