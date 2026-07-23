@@ -350,3 +350,57 @@ func TestCallNext_TxRollbackInsertsZeroOutbox(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, outboxCount)
 }
+
+// H4: an auto-snoozed web-channel entry (snoozed + is_dispatchable=false, as
+// the watchdog leaves it — see TestWatchdog_WebChannelMarkAndSnooze) must be
+// skipped by call-next, and ReactivateEntry must restore it to dispatchable.
+func TestCallNext_SkipsSnoozedWebEntry_ReactivateRestores(t *testing.T) {
+	s, pool, tenantID, locationID, barberAID, _ := setupCallNextTestServer(t)
+	ctx := context.Background()
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+
+	// Entry 1 (front): web-channel, auto-snoozed by the watchdog.
+	snoozedID, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "remote", nil)
+	_, err := pool.Exec(ctx, `
+		UPDATE queue_entries
+		SET session_channel = 'web', presence_state = 'snoozed', is_dispatchable = false,
+		    near_turn_notified_at = NOW() - INTERVAL '10 minutes', snoozed_at = NOW(),
+		    sort_key = 1
+		WHERE id = $1`, snoozedID)
+	require.NoError(t, err)
+
+	// Entry 2 (behind): arrived and dispatchable.
+	arrivedID, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+	_, err = pool.Exec(ctx, "UPDATE queue_entries SET sort_key = 2 WHERE id = $1", arrivedID)
+	require.NoError(t, err)
+
+	// Call-next must skip the snoozed web entry and pick the arrived one.
+	rec := httptest.NewRecorder()
+	s.CallNextCustomer(rec, newStaffRequest(http.MethodPost, "/v1/staff/queue/call-next", tenantID, locationID, barberAID))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var state string
+	require.NoError(t, pool.QueryRow(ctx, "SELECT state FROM queue_entries WHERE id = $1", arrivedID).Scan(&state))
+	require.Equal(t, "called", state)
+	require.NoError(t, pool.QueryRow(ctx, "SELECT state FROM queue_entries WHERE id = $1", snoozedID).Scan(&state))
+	require.Equal(t, "waiting", state, "snoozed web entry must not be called")
+
+	// Reactivate restores the snoozed entry to waiting+arrived+dispatchable.
+	rec = httptest.NewRecorder()
+	s.ReactivateEntry(rec, newStaffRequest(http.MethodPost, "/v1/staff/queue/entries/reactivate", tenantID, locationID, barberAID), UUIDv7(snoozedID))
+	require.Equal(t, http.StatusOK, rec.Code, "reactivate: %s", rec.Body.String())
+
+	var presence string
+	var dispatchable bool
+	require.NoError(t, pool.QueryRow(ctx, "SELECT state, presence_state, is_dispatchable FROM queue_entries WHERE id = $1", snoozedID).Scan(&state, &presence, &dispatchable))
+	require.Equal(t, "waiting", state)
+	require.Equal(t, "arrived", presence)
+	require.True(t, dispatchable)
+
+	// And call-next now picks it up.
+	rec = httptest.NewRecorder()
+	s.CallNextCustomer(rec, newStaffRequest(http.MethodPost, "/v1/staff/queue/call-next", tenantID, locationID, barberAID))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoError(t, pool.QueryRow(ctx, "SELECT state FROM queue_entries WHERE id = $1", snoozedID).Scan(&state))
+	require.Equal(t, "called", state)
+}

@@ -134,7 +134,8 @@ func (w *Watchdog) runJob(ctx context.Context) {
 type candidate struct {
 	EntryID              uuid.UUID
 	VisitID              uuid.UUID
-	CustomerID           uuid.UUID
+	CustomerID           *uuid.UUID // nil for anonymous web entries
+	SessionChannel       string
 	TokenNumber          int
 	MagicLinkExpiresAt   time.Time
 	CustomerPhone        string
@@ -148,9 +149,10 @@ func (w *Watchdog) checkNearTurn(ctx context.Context, s session) {
 		    qe.id                   AS entry_id,
 		    qe.visit_id,
 		    qe.customer_id,
+		    qe.session_channel,
 		    qe.token_number,
 		    v.magic_link_expires_at,
-		    c.phone_number          AS customer_phone,
+		    COALESCE(c.phone_number, '') AS customer_phone,
 		    -- Count how many dispatchable waiting entries are ordered ahead of this one
 		    (SELECT COUNT(*) FROM queue_entries x
 		     WHERE x.queue_session_id = qe.queue_session_id
@@ -171,14 +173,12 @@ func (w *Watchdog) checkNearTurn(ctx context.Context, s session) {
 		    ) AS estimated_wait_minutes
 		FROM queue_entries qe
 		JOIN visits v ON v.id = qe.visit_id
-		JOIN customers c ON c.id = qe.customer_id
+		LEFT JOIN customers c ON c.id = qe.customer_id
 		WHERE qe.queue_session_id = $1
 		  AND qe.state = 'waiting'
 		  AND qe.is_dispatchable = true
 		  AND qe.presence_state = 'remote'
-		  AND qe.session_channel = 'whatsapp'
 		  AND qe.near_turn_notified_at IS NULL
-		  AND qe.customer_id IS NOT NULL
 	`, s.ID)
 	if err != nil {
 		log.Printf("Watchdog near-turn query failed: %v", err)
@@ -190,7 +190,7 @@ func (w *Watchdog) checkNearTurn(ctx context.Context, s session) {
 	for rows.Next() {
 		var cand candidate
 		err := rows.Scan(
-			&cand.EntryID, &cand.VisitID, &cand.CustomerID, &cand.TokenNumber,
+			&cand.EntryID, &cand.VisitID, &cand.CustomerID, &cand.SessionChannel, &cand.TokenNumber,
 			&cand.MagicLinkExpiresAt, &cand.CustomerPhone,
 			&cand.PeopleAhead, &cand.EstimatedWaitMinutes,
 		)
@@ -243,6 +243,15 @@ func (w *Watchdog) triggerNearTurn(ctx context.Context, s session, cand candidat
 		`, s.ID).Scan(&newQueueVersion)
 		if err != nil {
 			return err
+		}
+
+		// H4: the marking above is channel-agnostic — web entries need
+		// near_turn_notified_at for snooze eligibility, and their near-turn
+		// signal is the SSE/status page. The WhatsApp template only goes to
+		// whatsapp-channel entries with a resolvable customer (Law 7: the
+		// insert stays inside this transaction).
+		if cand.SessionChannel != "whatsapp" || cand.CustomerID == nil {
+			return nil
 		}
 
 		magicLinkToken := queue.GenerateMagicLinkToken(cand.CustomerID.String(), s.LocationID.String(), cand.VisitID.String(), cand.MagicLinkExpiresAt, []byte(w.cfg.HMACSecret))

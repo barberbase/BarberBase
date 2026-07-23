@@ -387,8 +387,11 @@ func TestWatchdog_AutoSnoozeGracePeriod(t *testing.T) {
 		t.Errorf("Expected snoozed and not dispatchable after grace period, got presence=%s, dispatchable=%t", presence, dispatchable)
 	}
 
-	// Never-notified entry is never snoozed, no matter how long it waited.
-	// Web channel never receives near-turn, so near_turn_notified_at stays NULL.
+	// H4: web channel now gets MARKED on the same tick (channel-agnostic
+	// marking), but is never snoozed in that tick (grace) and gets no
+	// WhatsApp template. Never-notified entries remain never-snoozed — the
+	// marking is what starts the clock.
+	_, _ = pool.Exec(ctx, "TRUNCATE outbox_events")
 	_, _ = pool.Exec(ctx, `
 		UPDATE queue_entries
 		SET presence_state = 'remote', is_dispatchable = true, session_channel = 'web',
@@ -398,8 +401,13 @@ func TestWatchdog_AutoSnoozeGracePeriod(t *testing.T) {
 	`, entryID)
 	watchdog.runJob(ctx)
 	_ = pool.QueryRow(ctx, "SELECT presence_state FROM queue_entries WHERE id = $1", entryID).Scan(&presence)
-	if presence != "remote" {
-		t.Errorf("Expected never-notified entry to stay 'remote', got '%s'", presence)
+	if presence != "notified" {
+		t.Errorf("Expected web entry marked 'notified' (not snoozed) on first tick, got '%s'", presence)
+	}
+	var webOutbox int
+	_ = pool.QueryRow(ctx, "SELECT COUNT(*) FROM outbox_events").Scan(&webOutbox)
+	if webOutbox != 0 {
+		t.Errorf("Web-channel marking must insert zero outbox rows, got %d", webOutbox)
 	}
 }
 
@@ -418,7 +426,7 @@ func TestEndOfDay(t *testing.T) {
 	tenantID := uuid.New()
 	locationID := uuid.New()
 	_, _ = pool.Exec(ctx, "INSERT INTO tenants (id, name, slug, owner_phone_number) VALUES ($1, 'Tenant', 'slug', '+919876543210')", tenantID)
-	
+
 	// Seed location with closing hours. closes_at set to 2.5 hours ago
 	locTZ, _ := time.LoadLocation("Asia/Kolkata")
 	closingTime := time.Now().In(locTZ).Add(-150 * time.Minute) // 2.5 hours ago
@@ -677,3 +685,79 @@ func TestWatchdog_StaleWarnings(t *testing.T) {
 	}
 }
 
+// H4: near-turn marking is channel-agnostic; the WhatsApp template is not.
+// A web-channel (even anonymous) entry must get near_turn_notified_at — so it
+// can become snooze-eligible — while inserting ZERO outbox rows, and the
+// 5-minute grace then applies to it exactly as it does for whatsapp entries.
+func TestWatchdog_WebChannelMarkAndSnooze(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+
+	ctx := context.Background()
+	cfg := &config.Config{
+		HMACSecret:      "test-hmac-secret-123456789012345",
+		BhejnaFromPhone: "+912200000001",
+	}
+	manager := realtime.NewManager()
+	watchdog := NewWatchdog(pool, manager, cfg)
+
+	tenantID := uuid.New()
+	locationID := uuid.New()
+	_, _ = pool.Exec(ctx, "INSERT INTO tenants (id, name, slug, owner_phone_number) VALUES ($1, 'Tenant', 'slug', '+919876543210')", tenantID)
+	_, _ = pool.Exec(ctx, `
+		INSERT INTO locations (id, tenant_id, name, slug, timezone, is_active, notify_when_people_ahead, notify_when_wait_minutes)
+		VALUES ($1, $2, 'Loc', 'slug/loc', 'Asia/Kolkata', true, 2, 20)
+	`, locationID, tenantID)
+
+	sessionID := uuid.New()
+	_, _ = pool.Exec(ctx, `
+		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
+	`, sessionID, tenantID, locationID)
+
+	// Anonymous web entry: customer_id NULL pins the LEFT JOIN in checkNearTurn.
+	visitID := uuid.New()
+	_, _ = pool.Exec(ctx, `
+		INSERT INTO visits (id, tenant_id, location_id, entry_type, status, party_size, total_duration_minutes, magic_link_expires_at)
+		VALUES ($1, $2, $3, 'walk_in', 'active', 1, 15, NOW() + INTERVAL '23 hours')
+	`, visitID, tenantID, locationID)
+	entryID := uuid.New()
+	_, _ = pool.Exec(ctx, `
+		INSERT INTO queue_entries (id, visit_id, queue_session_id, token_number, state, presence_state, is_dispatchable, session_channel, priority_group, sort_key)
+		VALUES ($1, $2, $3, 1, 'waiting', 'remote', true, 'web', 100, 1000)
+	`, entryID, visitID, sessionID)
+
+	// Tick 1: marked, not snoozed (grace), zero WhatsApp outbox rows.
+	watchdog.runJob(ctx)
+
+	var presence string
+	var notifiedAt *time.Time
+	if err := pool.QueryRow(ctx, "SELECT presence_state, near_turn_notified_at FROM queue_entries WHERE id = $1", entryID).Scan(&presence, &notifiedAt); err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if presence != "notified" {
+		t.Errorf("Expected web entry marked 'notified', got '%s'", presence)
+	}
+	if notifiedAt == nil {
+		t.Fatal("Expected near_turn_notified_at set for web entry")
+	}
+	var outboxCount int
+	_ = pool.QueryRow(ctx, "SELECT COUNT(*) FROM outbox_events WHERE tenant_id = $1", tenantID).Scan(&outboxCount)
+	if outboxCount != 0 {
+		t.Errorf("Web-channel near-turn marking must insert ZERO outbox rows, got %d", outboxCount)
+	}
+
+	// Backdate past grace: tick 2 must auto-snooze — still zero outbox rows.
+	_, _ = pool.Exec(ctx, "UPDATE queue_entries SET near_turn_notified_at = NOW() - INTERVAL '6 minutes' WHERE id = $1", entryID)
+	watchdog.runJob(ctx)
+
+	var dispatchable bool
+	_ = pool.QueryRow(ctx, "SELECT presence_state, is_dispatchable FROM queue_entries WHERE id = $1", entryID).Scan(&presence, &dispatchable)
+	if presence != "snoozed" || dispatchable {
+		t.Errorf("Expected web entry snoozed/undispatchable, got presence=%s, dispatchable=%t", presence, dispatchable)
+	}
+	_ = pool.QueryRow(ctx, "SELECT COUNT(*) FROM outbox_events WHERE tenant_id = $1", tenantID).Scan(&outboxCount)
+	if outboxCount != 0 {
+		t.Errorf("Web-channel auto-snooze must insert ZERO outbox rows, got %d", outboxCount)
+	}
+}
