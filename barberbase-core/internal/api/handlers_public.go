@@ -1398,6 +1398,7 @@ func (s *Server) RegisterManualRoutes(r chi.Router, jwtSecret []byte) {
 	// the generated wrapper enforces no apiKey schemes, so the PlatformAdminKey
 	// gate (like /admin/setup) and in-handler DeviceToken auth must be wired here.
 	r.Post("/v1/device/call-next", s.DeviceCallNext)
+	r.With(s.PlatformAdminKeyMiddleware).Get("/v1/admin/devices", s.ListStationDevices)
 	r.With(s.PlatformAdminKeyMiddleware).Post("/v1/admin/devices", s.CreateStationDevice)
 	r.With(s.PlatformAdminKeyMiddleware).Post("/v1/admin/devices/{device_id}/buttons", func(w http.ResponseWriter, req *http.Request) {
 		id, err := uuid.Parse(chi.URLParam(req, "device_id"))

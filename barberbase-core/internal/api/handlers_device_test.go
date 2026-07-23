@@ -338,3 +338,48 @@ func TestCreateStationDevice_NegativeAuthPins(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, "SELECT COUNT(*) FROM station_devices WHERE tenant_id = $1", tenantID).Scan(&count))
 	require.Equal(t, 0, count, "rejected auth must create zero devices")
 }
+
+// H1: GET /v1/admin/devices — platform console list. Key-gated, returns
+// devices with buttons plus location staff for barber binding.
+func TestListStationDevices(t *testing.T) {
+	s, pool, tenantID, locationID, barberAID, _ := setupCallNextTestServer(t)
+	router := NewRouter(s, []byte(s.Config.JWTSecret))
+	deviceID, _ := seedStationDevice(t, pool, tenantID, locationID, true)
+	seedStationButton(t, pool, deviceID, "B1", &barberAID)
+
+	// No key → 401.
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/admin/devices?location_id="+locationID.String(), nil))
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	// With key → devices + buttons + staff.
+	req := httptest.NewRequest(http.MethodGet, "/v1/admin/devices?location_id="+locationID.String(), nil)
+	req.Header.Set("X-Platform-Admin-Key", s.Config.PlatformAdminKey)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Devices []struct {
+			ID       uuid.UUID `json:"id"`
+			Label    string    `json:"label"`
+			IsActive bool      `json:"is_active"`
+			Buttons  []struct {
+				ButtonCode    string     `json:"button_code"`
+				StaffMemberID *uuid.UUID `json:"staff_member_id"`
+			} `json:"buttons"`
+		} `json:"devices"`
+		Staff []struct {
+			ID   uuid.UUID `json:"id"`
+			Name string    `json:"name"`
+		} `json:"staff"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp.Devices, 1)
+	require.Equal(t, deviceID, resp.Devices[0].ID)
+	require.True(t, resp.Devices[0].IsActive)
+	require.Len(t, resp.Devices[0].Buttons, 1)
+	require.Equal(t, "B1", resp.Devices[0].Buttons[0].ButtonCode)
+	require.Equal(t, barberAID, *resp.Devices[0].Buttons[0].StaffMemberID)
+	require.NotEmpty(t, resp.Staff)
+}

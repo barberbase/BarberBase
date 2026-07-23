@@ -113,10 +113,15 @@
 			<span class="text-dim">|</span>
 			<span class="text-sm font-semibold text-primary">Operator Console</span>
 		</div>
-		<div
-			class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-white/[0.05] bg-titanium text-primary"
-		>
-			Authorized Session
+		<div class="flex items-center space-x-4">
+			<a href="/platform/devices" class="text-xs font-semibold text-muted hover:text-primary">
+				Device Management
+			</a>
+			<div
+				class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-white/[0.05] bg-titanium text-primary"
+			>
+				Authorized Session
+			</div>
 		</div>
 	</header>
 

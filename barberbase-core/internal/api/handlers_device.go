@@ -322,3 +322,106 @@ func (s *Server) SetStationDeviceActive(w http.ResponseWriter, r *http.Request, 
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ListStationDevices serves GET /v1/admin/devices?location_id=… for the
+// platform console. Manual route (PLATFORM_ADMIN_KEY) — not yet in
+// openapi.yaml; the one-line spec addition is queued for the next
+// frozen-file session. Returns devices with their buttons plus the
+// location's active staff so the console can offer barber binding.
+func (s *Server) ListStationDevices(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	locationID, err := uuid.Parse(r.URL.Query().Get("location_id"))
+	if err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"code": "INVALID_REQUEST", "message": "location_id query param required",
+		})
+		return
+	}
+
+	type buttonOut struct {
+		ID            uuid.UUID  `json:"id"`
+		ButtonCode    string     `json:"button_code"`
+		Label         *string    `json:"label"`
+		StaffMemberID *uuid.UUID `json:"staff_member_id"`
+	}
+	type deviceOut struct {
+		ID         uuid.UUID   `json:"id"`
+		Label      string      `json:"label"`
+		IsActive   bool        `json:"is_active"`
+		LastSeenAt *time.Time  `json:"last_seen_at"`
+		Buttons    []buttonOut `json:"buttons"`
+	}
+
+	rows, err := s.Pool.Query(ctx, `
+		SELECT d.id, d.label, d.is_active, d.last_seen_at,
+		       b.id, b.button_code, b.label, b.staff_member_id
+		FROM station_devices d
+		LEFT JOIN station_buttons b ON b.device_id = d.id
+		WHERE d.location_id = $1
+		ORDER BY d.created_at, b.button_code`, locationID)
+	if err != nil {
+		log.Printf("[Error] ListStationDevices query failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code": "INTERNAL_ERROR", "message": "internal server error",
+		})
+		return
+	}
+	defer rows.Close()
+
+	devices := []deviceOut{}
+	index := map[uuid.UUID]int{}
+	for rows.Next() {
+		var d deviceOut
+		var b buttonOut
+		var bID *uuid.UUID
+		var bCode *string
+		if err := rows.Scan(&d.ID, &d.Label, &d.IsActive, &d.LastSeenAt,
+			&bID, &bCode, &b.Label, &b.StaffMemberID); err != nil {
+			log.Printf("[Error] ListStationDevices scan failed: %v", err)
+			respondJSON(w, http.StatusInternalServerError, map[string]string{
+				"code": "INTERNAL_ERROR", "message": "internal server error",
+			})
+			return
+		}
+		i, seen := index[d.ID]
+		if !seen {
+			d.Buttons = []buttonOut{}
+			devices = append(devices, d)
+			i = len(devices) - 1
+			index[d.ID] = i
+		}
+		if bID != nil {
+			b.ID = *bID
+			b.ButtonCode = *bCode
+			devices[i].Buttons = append(devices[i].Buttons, b)
+		}
+	}
+
+	type staffOut struct {
+		ID   uuid.UUID `json:"id"`
+		Name string    `json:"name"`
+		Role string    `json:"role"`
+	}
+	staff := []staffOut{}
+	srows, err := s.Pool.Query(ctx, `
+		SELECT id, name, role FROM staff_members
+		WHERE location_id = $1 AND is_active = true
+		ORDER BY name`, locationID)
+	if err != nil {
+		log.Printf("[Error] ListStationDevices staff query failed: %v", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"code": "INTERNAL_ERROR", "message": "internal server error",
+		})
+		return
+	}
+	defer srows.Close()
+	for srows.Next() {
+		var m staffOut
+		if err := srows.Scan(&m.ID, &m.Name, &m.Role); err != nil {
+			continue
+		}
+		staff = append(staff, m)
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{"devices": devices, "staff": staff})
+}
