@@ -109,3 +109,47 @@ func TestCheckInAppointment_OverHTTP(t *testing.T) {
 	}
 	res.Body.Close()
 }
+
+// The spec now declares staffCheckInAppointment, so the generated /v1 mount
+// carries an Unimplemented 501 stub for this path. The manual StaffJWT route
+// in RegisterManualRoutes must shadow it — analogous to
+// TestDeviceRoutes_FullRouterAuth. If a future regen ever wins the route,
+// these turn into 501s and fail loudly.
+func TestCheckInRoute_ShadowsGeneratedStub(t *testing.T) {
+	cleanDatabase(t, os.Getenv("DATABASE_URL"))
+	t.Cleanup(func() { cleanDatabase(t, os.Getenv("DATABASE_URL")) })
+	s, pool, tenantID, locationID, staffID, _ := setupTestServer(t)
+	defer pool.Close()
+	s.Manager = realtime.NewManager()
+
+	srv := httptest.NewServer(NewRouter(s, []byte(s.Config.JWTSecret)))
+	defer srv.Close()
+	url := fmt.Sprintf("%s/v1/staff/appointments/%s/checkin", srv.URL, uuid.New())
+
+	// Unauthenticated → 401 from the manual route's JWT guard, never the stub's 501.
+	res, err := http.Post(url, "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated: got %d, want 401 (501 means the generated stub took the route)", res.StatusCode)
+	}
+
+	// Authenticated, unknown appointment → 404 from the real handler (stub would 501).
+	jwt, _, err := auth.GenerateAccessAndRefreshTokens(
+		[]byte(s.Config.JWTSecret), tenantID.String(), locationID.String(), staffID.String(), "barber")
+	if err != nil {
+		t.Fatalf("mint JWT: %v", err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, url, nil)
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown appointment: got %d, want 404 (501 means the generated stub took the route)", res.StatusCode)
+	}
+}

@@ -37,16 +37,16 @@ components:
       name: X-Session-Token
       description: Signed magic-link token scoped to a queue entry (23h expiry)
 
-    BhejnaKey:
+    BhejnaSignature:
       type: apiKey
       in: header
-      name: X-Bhejna-Key
-      description: Pre-shared key authenticating Bhejna webhook calls
-
-    AIAgentToken:
-      type: http
-      scheme: bearer
-      description: Owner-issued token for AI agent tool calls
+      name: X-Bhejna-Signature
+      description: |
+        HMAC-SHA256 of the raw request body, hex-encoded, prefixed "sha256=".
+        Platform ingress verifies against BHEJNA_WEBHOOK_SECRET; Mode B ingress
+        verifies against the location's decrypted webhook secret. Verification
+        is over the body (handlers_webhook.go ValidateSignature), not a
+        pre-shared key lookup.
 
     PushActionToken:
       type: apiKey
@@ -1664,6 +1664,66 @@ paths:
                           items:
                             type: string
 
+  /staff/appointments/{appointment_id}/checkin:
+    post:
+      tags: [Staff - Queue]
+      summary: Check in a scheduled appointment (creates visit + queue entry)
+      description: |
+        Converts today's scheduled appointment into a live visit + queue entry
+        with appointment priority (50 on-time, 100 after grace lapse).
+        Location comes from the JWT claims (Law 11). Served by the manual
+        StaffJWT route in RegisterManualRoutes, which shadows the generated
+        mount; the generated stub is intentionally unimplemented.
+      operationId: staffCheckInAppointment
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: appointment_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      responses:
+        '200':
+          description: Checked in — visit and queue entry created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [visit_id, queue_entry_id, token_number, priority_group, priority_lapsed, magic_link]
+                properties:
+                  visit_id:
+                    $ref: '#/components/schemas/UUIDv7'
+                  queue_entry_id:
+                    $ref: '#/components/schemas/UUIDv7'
+                  token_number:
+                    type: integer
+                  priority_group:
+                    type: integer
+                    description: 50 on-time, 100 when the grace window lapsed
+                  priority_lapsed:
+                    type: boolean
+                  magic_link:
+                    type: string
+        '400':
+          description: Invalid appointment_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Appointment not found for this tenant/location
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Appointment is not scheduled, or not scheduled for today
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /staff/queue/call-next:
     post:
       tags: [Staff - Queue]
@@ -1958,6 +2018,7 @@ paths:
     get:
       tags: [Staff - Shop]
       summary: Get current shop operational status
+      operationId: getStaffShopStatus
       security:
         - StaffJWT: []
       responses:
@@ -2044,6 +2105,7 @@ paths:
     get:
       tags: [Staff - Management]
       summary: List staff members for this location
+      operationId: getStaffMembers
       security:
         - StaffJWT: []
       responses:
@@ -2567,7 +2629,7 @@ paths:
           description: Staff member created
 
   # ════════════════════════════════════════════════════════════════════════════
-  # BHEJNA WEBHOOK INGRESS — BhejnaKey auth only
+  # BHEJNA WEBHOOK INGRESS — BhejnaSignature auth only
   # ════════════════════════════════════════════════════════════════════════════
 
   /webhooks/bhejna:
@@ -2588,7 +2650,7 @@ paths:
         - message.status: Delivery receipts (for notification tracking)
       operationId: receiveBhejnaWebhook
       security:
-        - BhejnaKey: []
+        - BhejnaSignature: []
       requestBody:
         required: true
         content:
@@ -2647,203 +2709,6 @@ paths:
       responses:
         '200':
           description: Acknowledged. Always 200. Processing is async.
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # AI AGENT TOOLS — Clean tool-call-friendly endpoints
-  # ════════════════════════════════════════════════════════════════════════════
-
-  /agent/locations/{location_id}/info:
-    get:
-      tags: [AI Agent]
-      summary: "[TOOL] Get shop info and live queue status"
-      description: |
-        Combined tool for AI agent. Returns everything needed to answer
-        "Is Star Salon open?", "How long is the wait?", "What services do they have?"
-        in a single call.
-      operationId: agentGetShopInfo
-      security:
-        - AIAgentToken: []
-      parameters:
-        - name: location_id
-          in: path
-          required: true
-          schema:
-            $ref: '#/components/schemas/UUIDv7'
-      responses:
-        '200':
-          description: Shop info for agent
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    $ref: '#/components/schemas/LocationStatus'
-                  popular_services:
-                    type: array
-                    description: Top 5 is_popular variants for quick suggestions
-                    items:
-                      allOf:
-                        - $ref: '#/components/schemas/ServiceVariant'
-                        - type: object
-                          properties:
-                            group_name:
-                              type: string
-                            category_name:
-                              type: string
-
-  /agent/queue/join:
-    post:
-      tags: [AI Agent]
-      summary: "[TOOL] Join queue on behalf of customer"
-      description: |
-        AI agent calls this after resolving customer intent to variant_ids.
-        Identical logic to /queue/join but with initiated_via = ai_agent.
-        phone_number is required (agent has it from conversation context).
-      operationId: agentJoinQueue
-      security:
-        - AIAgentToken: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [location_id, variant_ids, phone_number, idempotency_key]
-              properties:
-                location_id:
-                  $ref: '#/components/schemas/UUIDv7'
-                variant_ids:
-                  type: array
-                  minItems: 1
-                  items:
-                    $ref: '#/components/schemas/UUIDv7'
-                phone_number:
-                  $ref: '#/components/schemas/PhoneNumber'
-                party_size:
-                  type: integer
-                  default: 1
-                customer_name:
-                  type: string
-                  nullable: true
-                idempotency_key:
-                  type: string
-                  format: uuid
-      responses:
-        '200':
-          description: Joined
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/QueueEntryPublic'
-        '409':
-          description: Already in queue
-        '422':
-          description: Booking blocked
-
-  /agent/appointments/book:
-    post:
-      tags: [AI Agent]
-      summary: "[TOOL] Book appointment on behalf of customer"
-      description: Agent version of /appointments/book. Same logic, same response.
-      operationId: agentBookAppointment
-      security:
-        - AIAgentToken: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [location_id, variant_ids, scheduled_start_at, phone_number, idempotency_key]
-              properties:
-                location_id:
-                  $ref: '#/components/schemas/UUIDv7'
-                variant_ids:
-                  type: array
-                  minItems: 1
-                  items:
-                    $ref: '#/components/schemas/UUIDv7'
-                scheduled_start_at:
-                  type: string
-                  format: date-time
-                phone_number:
-                  $ref: '#/components/schemas/PhoneNumber'
-                party_size:
-                  type: integer
-                  default: 1
-                customer_name:
-                  type: string
-                  nullable: true
-                idempotency_key:
-                  type: string
-                  format: uuid
-      responses:
-        '201':
-          description: Appointment booked
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AppointmentResponse'
-
-  /agent/customer/status:
-    get:
-      tags: [AI Agent]
-      summary: "[TOOL] Get customer's current queue or appointment status"
-      description: |
-        Agent calls this when customer asks "What's my token number?" or 
-        "How long until my turn?" in WhatsApp conversation.
-      operationId: agentGetCustomerStatus
-      security:
-        - AIAgentToken: []
-      parameters:
-        - name: phone_number
-          in: query
-          required: true
-          schema:
-            $ref: '#/components/schemas/PhoneNumber'
-        - name: location_id
-          in: query
-          required: true
-          schema:
-            $ref: '#/components/schemas/UUIDv7'
-      responses:
-        '200':
-          description: Customer status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/QueueEntryPublic'
-        '404':
-          description: No active entry found
-
-  /agent/customer/cancel:
-    post:
-      tags: [AI Agent]
-      summary: "[TOOL] Cancel customer's queue entry"
-      description: Agent calls this when customer says "Cancel my booking"
-      operationId: agentCancelEntry
-      security:
-        - AIAgentToken: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [phone_number, location_id]
-              properties:
-                phone_number:
-                  $ref: '#/components/schemas/PhoneNumber'
-                location_id:
-                  $ref: '#/components/schemas/UUIDv7'
-      responses:
-        '200':
-          description: Cancelled
-        '422':
-          description: Cannot cancel (in_progress)
-        '404':
-          description: No active entry
 
   # ── Staff Push (PWA — Service Worker background context) ───────────────────
 
@@ -3217,7 +3082,7 @@ paths:
         See: 06_bhejna_whatsapp.md — "Two Webhook Handlers"
       operationId: receiveBhejnaWebhookModeB
       security:
-        - BhejnaKey: []
+        - BhejnaSignature: []
       parameters:
         - name: location_id
           in: path
