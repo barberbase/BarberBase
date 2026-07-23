@@ -271,3 +271,70 @@ func TestDeviceRoutes_FullRouterAuth(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, "no_waiting", resp.Result)
 }
+
+// D1.2: negative-path pins over the FULL router (NewRouter). These exist to
+// fail loudly if a future make gen-api regen ever re-exposes the dead
+// unauthenticated generated-mount wrappers that the manual routes in
+// RegisterManualRoutes shadow. Each bad-auth case must produce 401 with ZERO
+// queue mutation and ZERO last_seen_at update.
+func TestDeviceCallNext_NegativeAuthPins(t *testing.T) {
+	s, pool, tenantID, locationID, _, _ := setupCallNextTestServer(t)
+	router := NewRouter(s, []byte(s.Config.JWTSecret))
+	ctx := context.Background()
+
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+	entryID, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+
+	revokedID, revokedSecret := seedStationDevice(t, pool, tenantID, locationID, false)
+	seedStationButton(t, pool, revokedID, "B1", nil)
+
+	send := func(token string) int {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, deviceCallNextReq(token, "B1", 0))
+		return rec.Code
+	}
+
+	require.Equal(t, http.StatusUnauthorized, send(""), "no token")
+	require.Equal(t, http.StatusUnauthorized, send("bbd_garbage"), "garbage token")
+	require.Equal(t, http.StatusUnauthorized, send(revokedSecret), "revoked device token")
+
+	// Zero queue mutation.
+	var state string
+	var queueVersion int
+	require.NoError(t, pool.QueryRow(ctx, "SELECT state FROM queue_entries WHERE id = $1", entryID).Scan(&state))
+	require.Equal(t, "waiting", state)
+	require.NoError(t, pool.QueryRow(ctx, "SELECT queue_version FROM queue_sessions WHERE id = $1", sessionID).Scan(&queueVersion))
+	require.Equal(t, 0, queueVersion)
+
+	// Zero liveness update for the revoked device.
+	var lastSeen *time.Time
+	require.NoError(t, pool.QueryRow(ctx, "SELECT last_seen_at FROM station_devices WHERE id = $1", revokedID).Scan(&lastSeen))
+	require.Nil(t, lastSeen, "revoked device must not get last_seen_at on rejected auth")
+}
+
+// D1.2: PLATFORM_ADMIN_KEY-gated device CRUD — bad key trio over the full
+// router, asserting zero rows created (TestDeviceRoutes_FullRouterAuth pins
+// the status codes; this pins the no-mutation contract).
+func TestCreateStationDevice_NegativeAuthPins(t *testing.T) {
+	s, pool, tenantID, locationID, _, _ := setupCallNextTestServer(t)
+	router := NewRouter(s, []byte(s.Config.JWTSecret))
+	ctx := context.Background()
+
+	body, _ := json.Marshal(map[string]any{"tenant_id": tenantID, "location_id": locationID, "label": "pin"})
+	send := func(key string) int {
+		req := httptest.NewRequest(http.MethodPost, "/v1/admin/devices", bytes.NewReader(body))
+		if key != "" {
+			req.Header.Set("X-Platform-Admin-Key", key)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	require.Equal(t, http.StatusUnauthorized, send(""), "no key")
+	require.Equal(t, http.StatusUnauthorized, send("wrong-key"), "garbage key")
+
+	var count int
+	require.NoError(t, pool.QueryRow(ctx, "SELECT COUNT(*) FROM station_devices WHERE tenant_id = $1", tenantID).Scan(&count))
+	require.Equal(t, 0, count, "rejected auth must create zero devices")
+}
