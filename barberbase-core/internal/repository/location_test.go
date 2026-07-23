@@ -41,7 +41,10 @@ func TestGetEffectiveShopStatus_ExpiredOverride(t *testing.T) {
 	res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID)
 	require.NoError(t, err)
 
-	assert.Equal(t, "open", res.Status)
+	// Contract since b411644: expired override is ignored, and with no active
+	// override (and no location_hours in Phase 1) the default is "closed" —
+	// not "open" as this test asserted pre-b411644.
+	assert.Equal(t, "closed", res.Status)
 	assert.False(t, res.ManualOverrideActive)
 	assert.Nil(t, res.OverrideExpiresAt)
 }
@@ -106,7 +109,7 @@ func TestSetShopStatus_422Gate(t *testing.T) {
 	var sessionID uuid.UUID
 	err := pool.QueryRow(ctx, `
 		INSERT INTO queue_sessions (tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, NOW()::date, 'active')
+		VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 		RETURNING id`, tenantID, locationID).Scan(&sessionID)
 	require.NoError(t, err)
 
@@ -144,7 +147,7 @@ func TestSetShopStatus_ExpireRemaining(t *testing.T) {
 	var sessionID uuid.UUID
 	err := pool.QueryRow(ctx, `
 		INSERT INTO queue_sessions (tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, NOW()::date, 'active')
+		VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 		RETURNING id`, tenantID, locationID).Scan(&sessionID)
 	require.NoError(t, err)
 
@@ -213,8 +216,19 @@ func TestSetShopStatus_OpenClearsOverrides(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "open", res.Status)
 
+	// Since b411644, SetShopStatus("open") clears prior overrides and writes an
+	// explicit 'open' override (with a midnight expiry ceiling) so the public
+	// endpoint has a row to read without location_hours. The stale expectation
+	// was 0 active rows; the contract is exactly one, status='open'.
 	var count int
 	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM location_status_overrides WHERE location_id = $1 AND cleared_at IS NULL", locationID).Scan(&count)
 	require.NoError(t, err)
-	assert.Equal(t, 0, count)
+	assert.Equal(t, 1, count)
+
+	var status string
+	var expiresAt *time.Time
+	err = pool.QueryRow(ctx, "SELECT status, expires_at FROM location_status_overrides WHERE location_id = $1 AND cleared_at IS NULL", locationID).Scan(&status, &expiresAt)
+	require.NoError(t, err)
+	assert.Equal(t, "open", status)
+	require.NotNil(t, expiresAt, "open override must carry the midnight ceiling")
 }

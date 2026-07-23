@@ -900,7 +900,7 @@ func TestGetStaffMembers(t *testing.T) {
 
 	// Seed a queue session for location
 	var sessionID uuid.UUID
-	err = pool.QueryRow(ctx, "INSERT INTO queue_sessions (tenant_id, location_id, business_date, status) VALUES ($1, $2, NOW()::date, 'active') RETURNING id", tenantID, locationID).Scan(&sessionID)
+	err = pool.QueryRow(ctx, "INSERT INTO queue_sessions (tenant_id, location_id, business_date, status) VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active') RETURNING id", tenantID, locationID).Scan(&sessionID)
 	if err != nil {
 		t.Fatalf("Failed to seed queue session: %v", err)
 	}

@@ -370,7 +370,7 @@ func TestJoinQueue_ClosedSession(t *testing.T) {
 
 	_, err := pool.Exec(context.Background(), `
 		INSERT INTO queue_sessions (tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, CURRENT_DATE, 'closed')
+		VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'closed')
 		ON CONFLICT (location_id, business_date) DO UPDATE SET status = 'closed'`, tenantID, locationID)
 	if err != nil {
 		t.Fatalf("failed to insert closed session: %v", err)

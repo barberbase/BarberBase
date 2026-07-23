@@ -64,7 +64,7 @@ func seedTestQueueSession(t *testing.T, pool *pgxpool.Pool, tenantID, locationID
 	sessionID := uuid.New()
 	_, err := pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status, queue_version, last_token_number)
-		VALUES ($1, $2, $3, CURRENT_DATE, 'active', 0, 0)`, sessionID, tenantID, locationID)
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active', 0, 0)`, sessionID, tenantID, locationID)
 	require.NoError(t, err)
 	return sessionID
 }

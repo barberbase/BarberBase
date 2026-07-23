@@ -63,7 +63,7 @@ func TestAdvisoryLocks(t *testing.T) {
 	`, locationID, tenantID)
 	_, _ = pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 	`, uuid.New(), tenantID, locationID)
 
 	// Acquire lock manually in the test session to simulate another instance running
@@ -123,7 +123,7 @@ func TestWatchdog_NearTurn(t *testing.T) {
 	sessionID := uuid.New()
 	_, _ = pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 	`, sessionID, tenantID, locationID)
 
 	customerID := uuid.New()
@@ -234,7 +234,7 @@ func TestWatchdog_AutoSnooze(t *testing.T) {
 	sessionID := uuid.New()
 	_, _ = pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 	`, sessionID, tenantID, locationID)
 
 	customerID := uuid.New()
@@ -337,7 +337,7 @@ func TestWatchdog_AutoSnoozeGracePeriod(t *testing.T) {
 	sessionID := uuid.New()
 	_, _ = pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 	`, sessionID, tenantID, locationID)
 
 	customerID := uuid.New()
@@ -430,7 +430,10 @@ func TestEndOfDay(t *testing.T) {
 		VALUES ($1, $2, 'Loc', 'slug/loc', 'Asia/Kolkata', true)
 	`, locationID, tenantID)
 
-	dayOfWeek := int(time.Now().In(locTZ).Weekday())
+	// Everything derives from closingTime so the test holds across midnight:
+	// at 00:30 IST, "closed 2.5h ago" belongs to YESTERDAY's business date and
+	// day-of-week, and EOD must still archive that session (dead-zone fix).
+	dayOfWeek := int(closingTime.Weekday())
 	_, _ = pool.Exec(ctx, `
 		INSERT INTO location_hours (id, tenant_id, location_id, day_of_week, is_open, opens_at, closes_at)
 		VALUES ($1, $2, $3, $4, true, $5::TIME, $6::TIME)
@@ -439,8 +442,8 @@ func TestEndOfDay(t *testing.T) {
 	sessionID := uuid.New()
 	_, _ = pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
-	`, sessionID, tenantID, locationID)
+		VALUES ($1, $2, $3, $4::DATE, 'active')
+	`, sessionID, tenantID, locationID, closingTime.Format("2006-01-02"))
 
 	customerID := uuid.New()
 	_, _ = pool.Exec(ctx, "INSERT INTO customers (id, tenant_id, phone_number, name) VALUES ($1, $2, '+919999999999', 'Customer')", customerID, tenantID)
@@ -614,7 +617,7 @@ func TestWatchdog_StaleWarnings(t *testing.T) {
 	sessionID := uuid.New()
 	_, _ = pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 	`, sessionID, tenantID, locationID)
 
 	// Seed 3 customers

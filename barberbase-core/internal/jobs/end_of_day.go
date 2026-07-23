@@ -57,28 +57,35 @@ func (e *EndOfDay) tick(ctx context.Context) {
 }
 
 type locationEODInfo struct {
-	LocationID uuid.UUID
-	TenantID   uuid.UUID
-	Timezone   string
-	ClosesAt   *time.Time // nil for manual-override-only locations (no location_hours row)
-	SessionID  uuid.UUID
+	LocationID   uuid.UUID
+	TenantID     uuid.UUID
+	Timezone     string
+	ClosesAt     *time.Time // nil for manual-override-only locations (no location_hours row)
+	SessionID    uuid.UUID
+	BusinessDate time.Time
 }
 
 func (e *EndOfDay) runJob(ctx context.Context) {
+	// Sessions stay eligible through the day AFTER their business_date: the
+	// trigger is closes_at + 2h, which lands past midnight for shops closing
+	// 22:00+ and for all no-hours tenants (midnight ceiling). A today-only
+	// join left those sessions active forever. Hours are matched on the
+	// session's business_date DOW, and closing time is computed on that date.
 	rows, err := e.db.Query(ctx, `
 		SELECT DISTINCT ON (l.id)
 		  l.id AS location_id, l.tenant_id, l.timezone,
 		  lh.closes_at,
-		  qs.id AS session_id
+		  qs.id AS session_id, qs.business_date
 		FROM locations l
+		JOIN queue_sessions qs ON qs.location_id = l.id
+		  AND qs.business_date >= (NOW() AT TIME ZONE l.timezone)::DATE - 1
+		  AND qs.status NOT IN ('archived', 'closed')
 		LEFT JOIN location_hours lh ON lh.location_id = l.id
-		  AND lh.day_of_week = EXTRACT(DOW FROM (NOW() AT TIME ZONE l.timezone))::SMALLINT
+		  AND lh.day_of_week = EXTRACT(DOW FROM qs.business_date)::SMALLINT
 		  AND lh.is_open = true
 		  AND lh.closes_at IS NOT NULL
-		JOIN queue_sessions qs ON qs.location_id = l.id
-		  AND qs.business_date = (NOW() AT TIME ZONE l.timezone)::DATE
-		  AND qs.status NOT IN ('archived', 'closed')
 		WHERE l.is_active = true
+		ORDER BY l.id, qs.business_date ASC
 	`)
 	if err != nil {
 		log.Printf("EOD: failed to query locations for EOD: %v", err)
@@ -89,7 +96,7 @@ func (e *EndOfDay) runJob(ctx context.Context) {
 	var locations []locationEODInfo
 	for rows.Next() {
 		var info locationEODInfo
-		err := rows.Scan(&info.LocationID, &info.TenantID, &info.Timezone, &info.ClosesAt, &info.SessionID)
+		err := rows.Scan(&info.LocationID, &info.TenantID, &info.Timezone, &info.ClosesAt, &info.SessionID, &info.BusinessDate)
 		if err != nil {
 			log.Printf("EOD: failed to scan location EOD info: %v", err)
 			continue
@@ -103,13 +110,14 @@ func (e *EndOfDay) runJob(ctx context.Context) {
 		if err != nil {
 			loc = time.Local
 		}
-		now := time.Now().In(loc)
+		// business_date scans as UTC midnight; only its Y/M/D matter.
+		y, m, d := row.BusinessDate.Date()
 		var closingTime time.Time
 		if row.ClosesAt != nil {
-			closingTime = time.Date(now.Year(), now.Month(), now.Day(), row.ClosesAt.Hour(), row.ClosesAt.Minute(), 0, 0, loc)
+			closingTime = time.Date(y, m, d, row.ClosesAt.Hour(), row.ClosesAt.Minute(), 0, 0, loc)
 		} else {
 			// ponytail: midnight ceiling for manual-override-only locations; upgrade when location_hours are seeded
-			closingTime = time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, loc)
+			closingTime = time.Date(y, m, d+1, 0, 0, 0, 0, loc)
 		}
 		eodTrigger := closingTime.Add(2 * time.Hour)
 		if time.Now().Before(eodTrigger) {

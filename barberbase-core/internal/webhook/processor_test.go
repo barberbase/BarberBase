@@ -384,7 +384,7 @@ func TestIntegration_RatingButtonIdempotency(t *testing.T) {
 	// Seed Queue Session
 	_, err = pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 	`, sessionID, tenantID, locationID)
 	if err != nil {
 		t.Fatalf("Failed to seed queue session: %v", err)
@@ -538,7 +538,7 @@ func TestIntegration_RatingPlainText(t *testing.T) {
 	// Seed Queue Session
 	_, err = pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 	`, sessionID, tenantID, locationID)
 	if err != nil {
 		t.Fatalf("Failed to seed queue session: %v", err)

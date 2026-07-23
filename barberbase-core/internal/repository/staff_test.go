@@ -29,7 +29,7 @@ func seedQueueSessionAndEntry(t *testing.T, pool *pgxpool.Pool, tenantID, locati
 	var sessionID uuid.UUID
 	err := pool.QueryRow(ctx, `
 		INSERT INTO queue_sessions (tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, NOW()::date, 'active')
+		VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 		ON CONFLICT (location_id, business_date) DO UPDATE SET status = 'active'
 		RETURNING id`, tenantID, locationID).Scan(&sessionID)
 	require.NoError(t, err)

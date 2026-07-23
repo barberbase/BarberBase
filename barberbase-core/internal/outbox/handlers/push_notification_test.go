@@ -165,7 +165,7 @@ func TestHandleWebPushSend_410Gone(t *testing.T) {
 
 	_, err := pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 	`, sessionID, tenantID, locationID)
 	if err != nil {
 		t.Fatalf("Failed to seed queue session: %v", err)
@@ -312,7 +312,7 @@ func TestHandleWebPushSend_2xxResponse(t *testing.T) {
 
 	_, err := pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 	`, sessionID, tenantID, locationID)
 	if err != nil {
 		t.Fatalf("Failed to seed queue session: %v", err)
@@ -444,7 +444,7 @@ func TestHandleWebPushSend_QuotaBypass(t *testing.T) {
 
 	_, err := pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 	`, sessionID, tenantID, locationID)
 	if err != nil {
 		t.Fatalf("Failed to seed queue session: %v", err)
@@ -558,7 +558,7 @@ func TestHandleWebPushSend_Non410PerStaffFailureDoesNotAbort(t *testing.T) {
 
 	_, err := pool.Exec(ctx, `
 		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
-		VALUES ($1, $2, $3, CURRENT_DATE, 'active')
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')
 	`, sessionID, tenantID, locationID)
 	if err != nil {
 		t.Fatalf("Failed to seed queue session: %v", err)
