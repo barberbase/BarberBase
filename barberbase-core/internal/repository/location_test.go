@@ -24,12 +24,26 @@ func seedStaff(t *testing.T, pool *pgxpool.Pool, tenantID, locationID uuid.UUID)
 	return staffID
 }
 
+// seedHours inserts a location_hours row for today's DOW in the location's
+// timezone (seedLocation leaves the default 'Asia/Kolkata').
+func seedHours(t *testing.T, pool *pgxpool.Pool, tenantID, locationID uuid.UUID, opensAt, closesAt string) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO location_hours (tenant_id, location_id, day_of_week, is_open, opens_at, closes_at)
+		VALUES ($1, $2, EXTRACT(DOW FROM (NOW() AT TIME ZONE 'Asia/Kolkata'))::SMALLINT, true, $3, $4)
+		ON CONFLICT (location_id, day_of_week)
+		DO UPDATE SET is_open = true, opens_at = $3, closes_at = $4
+	`, tenantID, locationID, opensAt, closesAt)
+	require.NoError(t, err)
+}
+
 func TestGetEffectiveShopStatus_ExpiredOverride(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	tenantID, locationID := seedLocation(t, pool)
 
 	staffID := seedStaff(t, pool, tenantID, locationID)
+	seedHours(t, pool, tenantID, locationID, "00:00:00", "23:59:59")
 
 	expiresAt := time.Now().Add(-1 * time.Hour)
 	_, err := pool.Exec(ctx, `
@@ -41,12 +55,50 @@ func TestGetEffectiveShopStatus_ExpiredOverride(t *testing.T) {
 	res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID)
 	require.NoError(t, err)
 
-	// Contract since b411644: expired override is ignored, and with no active
-	// override (and no location_hours in Phase 1) the default is "closed" —
-	// not "open" as this test asserted pre-b411644.
-	assert.Equal(t, "closed", res.Status)
+	assert.Equal(t, "open", res.Status)
 	assert.False(t, res.ManualOverrideActive)
 	assert.Nil(t, res.OverrideExpiresAt)
+}
+
+// Override expires → effective status falls back to scheduled hours:
+// open inside today's window, closed outside it, closed with no hours row.
+func TestGetEffectiveShopStatus_HoursFallback(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	tenantID, locationID := seedLocation(t, pool)
+	staffID := seedStaff(t, pool, tenantID, locationID)
+
+	// Expired override must be ignored in every case below.
+	_, err := pool.Exec(ctx, `
+		INSERT INTO location_status_overrides (tenant_id, location_id, status, set_by, starts_at, expires_at)
+		VALUES ($1, $2, 'closed', $3, NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour')
+	`, tenantID, locationID, staffID)
+	require.NoError(t, err)
+
+	// No hours row at all → closed.
+	res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID)
+	require.NoError(t, err)
+	assert.Equal(t, "closed", res.Status)
+	assert.False(t, res.ManualOverrideActive)
+
+	// Inside today's window → open.
+	seedHours(t, pool, tenantID, locationID, "00:00:00", "23:59:59")
+	res, err = repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", res.Status)
+
+	// Outside today's window → closed. Pick a 1-minute window on the far side
+	// of the clock from the current IST time so the test is time-independent.
+	ist, err := time.LoadLocation("Asia/Kolkata")
+	require.NoError(t, err)
+	opens, closes := "01:00:00", "01:59:00"
+	if time.Now().In(ist).Hour() < 12 {
+		opens, closes = "23:58:00", "23:59:00"
+	}
+	seedHours(t, pool, tenantID, locationID, opens, closes)
+	res, err = repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID)
+	require.NoError(t, err)
+	assert.Equal(t, "closed", res.Status)
 }
 
 func TestSetShopStatus_TemporarilyClosed(t *testing.T) {
@@ -195,6 +247,7 @@ func TestSetShopStatus_OpenClearsOverrides(t *testing.T) {
 	ctx := context.Background()
 	tenantID, locationID := seedLocation(t, pool)
 	staffID := seedStaff(t, pool, tenantID, locationID)
+	seedHours(t, pool, tenantID, locationID, "00:00:00", "23:59:59")
 
 	_, err := pool.Exec(ctx, `
 		INSERT INTO location_status_overrides (tenant_id, location_id, status, set_by, starts_at)
@@ -216,19 +269,10 @@ func TestSetShopStatus_OpenClearsOverrides(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "open", res.Status)
 
-	// Since b411644, SetShopStatus("open") clears prior overrides and writes an
-	// explicit 'open' override (with a midnight expiry ceiling) so the public
-	// endpoint has a row to read without location_hours. The stale expectation
-	// was 0 active rows; the contract is exactly one, status='open'.
+	// "open" clears overrides and writes nothing: effective status comes from
+	// scheduled hours (seeded open above), not from an 'open' override row.
 	var count int
 	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM location_status_overrides WHERE location_id = $1 AND cleared_at IS NULL", locationID).Scan(&count)
 	require.NoError(t, err)
-	assert.Equal(t, 1, count)
-
-	var status string
-	var expiresAt *time.Time
-	err = pool.QueryRow(ctx, "SELECT status, expires_at FROM location_status_overrides WHERE location_id = $1 AND cleared_at IS NULL", locationID).Scan(&status, &expiresAt)
-	require.NoError(t, err)
-	assert.Equal(t, "open", status)
-	require.NotNil(t, expiresAt, "open override must carry the midnight ceiling")
+	assert.Equal(t, 0, count)
 }

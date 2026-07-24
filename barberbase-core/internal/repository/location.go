@@ -255,7 +255,32 @@ func GetEffectiveShopStatus(ctx context.Context, db *pgxpool.Pool, tenantID, loc
 	err := row.Scan(&o.Status, &o.ExpiresAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return ShopStatusResult{Status: "closed", ManualOverrideActive: false}, nil
+			// No active override: fall back to scheduled hours for today's DOW,
+			// all clock math in the location's timezone (schema:175 contract —
+			// manual_override > scheduled_hours; no hours row = closed).
+			var open bool
+			err = db.QueryRow(ctx, `
+				SELECT COALESCE(
+					lh.is_open
+					AND (lh.opens_at  IS NULL OR (NOW() AT TIME ZONE l.timezone)::time >= lh.opens_at)
+					AND (lh.closes_at IS NULL OR (NOW() AT TIME ZONE l.timezone)::time <= lh.closes_at)
+				, false)
+				FROM locations l
+				LEFT JOIN location_hours lh ON lh.location_id = l.id
+				  AND lh.day_of_week = EXTRACT(DOW FROM (NOW() AT TIME ZONE l.timezone))::SMALLINT
+				WHERE l.id = $2 AND l.tenant_id = $1
+			`, tenantID, locationID).Scan(&open)
+			if err != nil {
+				if err == pgx.ErrNoRows {
+					return ShopStatusResult{Status: "closed", ManualOverrideActive: false}, nil
+				}
+				return ShopStatusResult{}, err
+			}
+			status := "closed"
+			if open {
+				status = "open"
+			}
+			return ShopStatusResult{Status: status, ManualOverrideActive: false}, nil
 		}
 		return ShopStatusResult{}, err
 	}
@@ -372,26 +397,9 @@ func SetShopStatus(ctx context.Context, db *pgxpool.Pool, params SetShopStatusPa
 			}
 		}
 
-		// Open with no explicit expiry gets a midnight ceiling so a forgotten tap
-		// doesn't show "open" all night. EOD doesn't touch overrides and doesn't
-		// run for no-hours tenants, so this is the only backstop in Phase 1.
-		if params.Status == "open" && params.ExpiresAt == nil {
-			var tz string
-			if err = tx.QueryRow(ctx, "SELECT timezone FROM locations WHERE id = $1", params.LocationID).Scan(&tz); err != nil {
-				return err
-			}
-			loc, _ := time.LoadLocation(tz)
-			if loc == nil {
-				loc = time.UTC
-			}
-			now := time.Now().In(loc)
-			midnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, loc)
-			params.ExpiresAt = &midnight
-		}
-
-		// Always clear stale overrides first, then write the new state.
-		// "open" is also written as an explicit override so the public endpoint
-		// (override > hours) has something to read without requiring location_hours.
+		// Clear stale overrides first. "open" is not written as an override:
+		// effective status falls back to scheduled hours (override > hours),
+		// so opening just removes whatever override was blocking the schedule.
 		clearQuery := `
 			UPDATE location_status_overrides
 			SET cleared_at = NOW()
@@ -401,14 +409,16 @@ func SetShopStatus(ctx context.Context, db *pgxpool.Pool, params SetShopStatusPa
 		if err != nil {
 			return err
 		}
-		insertQuery := `
-			INSERT INTO location_status_overrides
-				(tenant_id, location_id, status, reason, set_by, starts_at, expires_at)
-			VALUES ($1, $2, $3, $4, $5, NOW(), $6)
-		`
-		_, err = tx.Exec(ctx, insertQuery, params.TenantID, params.LocationID, params.Status, params.Reason, params.SetBy, params.ExpiresAt)
-		if err != nil {
-			return err
+		if params.Status != "open" {
+			insertQuery := `
+				INSERT INTO location_status_overrides
+					(tenant_id, location_id, status, reason, set_by, starts_at, expires_at)
+				VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+			`
+			_, err = tx.Exec(ctx, insertQuery, params.TenantID, params.LocationID, params.Status, params.Reason, params.SetBy, params.ExpiresAt)
+			if err != nil {
+				return err
+			}
 		}
 
 		if sessionExists {
