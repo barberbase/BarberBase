@@ -5,7 +5,7 @@ export const REGISTERED_ADDRESS = '307/B Waman Smruti, Navghar Road, Bhayandar E
 export const CONTACT_EMAIL = 'hello@barberbase.in';
 export const CONTACT_PHONE = '+91 73040 71499';
 export const SITE_URL = 'https://barberbase.in';
-export const SALES_WHATSAPP = ''; // optional: a personal WhatsApp number you answer, digits only e.g. "9173..."; if empty, CTA uses mailto
+export const SALES_WHATSAPP = '917304071499'; // WhatsApp number the sales CTA opens, digits only; if empty, CTA falls back to mailto
 
 // Single source of truth for Organization JSON-LD — used on both the homepage and /about
 // so the two pages never drift into slightly-different schema blocks.
