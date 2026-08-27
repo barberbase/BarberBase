@@ -79,6 +79,7 @@ type CheckoutEntry struct {
 	CustomerID       *uuid.UUID
 	AssignedBarberID *uuid.UUID
 	State            string
+	SessionChannel   string
 }
 
 type CheckoutServiceRow struct {
@@ -107,11 +108,11 @@ func LockSessionForCheckout(ctx context.Context, tx pgx.Tx, locationID uuid.UUID
 func LockEntryForCheckout(ctx context.Context, tx pgx.Tx, entryID, tenantID uuid.UUID) (*CheckoutEntry, error) {
 	var e CheckoutEntry
 	err := tx.QueryRow(ctx, `
-		SELECT q.id, q.visit_id, q.customer_id, q.assigned_barber_id, q.state
+		SELECT q.id, q.visit_id, q.customer_id, q.assigned_barber_id, q.state, q.session_channel
 		FROM queue_entries q
 		JOIN visits v ON q.visit_id = v.id
 		WHERE q.id = $1 AND v.tenant_id = $2
-		FOR UPDATE OF q`, entryID, tenantID).Scan(&e.EntryID, &e.VisitID, &e.CustomerID, &e.AssignedBarberID, &e.State)
+		FOR UPDATE OF q`, entryID, tenantID).Scan(&e.EntryID, &e.VisitID, &e.CustomerID, &e.AssignedBarberID, &e.State, &e.SessionChannel)
 	if err != nil {
 		return nil, err
 	}

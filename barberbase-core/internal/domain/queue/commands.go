@@ -56,6 +56,7 @@ type CheckoutParams struct {
 	DiscountReason      *string
 	Products            []CheckoutProductItem
 	Payments            []CheckoutPaymentLine
+	BhejnaFromPhone     string
 }
 
 // CheckoutResult is returned on success.
