@@ -2660,6 +2660,27 @@ func (s *Server) SubscribeToQueueStream(
 		return
 	}
 
+	// Subscribe before writing any bytes: over the per-location cap this must
+	// still be a clean 503, not a half-open stream the client cannot interpret.
+	ch, ok := s.Manager.TrySubscribe(locationId.String())
+	if !ok {
+		w.Header().Set("Retry-After", "5")
+		respondJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"code":    "SSE_CAPACITY",
+			"message": "too many open streams for this location",
+		})
+		return
+	}
+	defer s.Manager.Unsubscribe(locationId.String(), ch)
+
+	// ResponseController rather than a w.(http.Flusher) assertion: it also lets
+	// this route clear its own write deadline. http.Server.WriteTimeout applies
+	// to the whole response, so a global one silently kills every stream — it did
+	// once already (10s, until bf7d70f). Clearing it here makes the route immune
+	// without weakening the deadline other endpoints rely on.
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{}) // ErrNotSupported is fine: nothing to clear
+
 	// Set SSE response headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -2667,18 +2688,24 @@ func (s *Server) SubscribeToQueueStream(
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	// Flush immediately
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	// Connect-time signal. An SSE comment, not an event: openapi.yaml is frozen
+	// and the payload shape must not change. Without it the first byte can be a
+	// whole heartbeat interval late and a client cannot tell connected from stalled.
+	if _, err := fmt.Fprint(w, ":ok\n\n"); err != nil {
 		return
 	}
-	flusher.Flush()
+	if err := rc.Flush(); err != nil {
+		return
+	}
 
-	// Subscribe
-	ch := s.Manager.Subscribe(locationId.String())
-	defer s.Manager.Unsubscribe(locationId.String(), ch)
+	// Bounded lifetime: the client reconnects and refetches canonical state, so a
+	// server-initiated close is free by the correctness model, and it caps what a
+	// forgotten tab can hold on a 1GB droplet.
+	lifetime := time.NewTimer(s.Manager.MaxLifetime())
+	defer lifetime.Stop()
 
-	// Event loop
+	// Event loop. Exit paths: client gone (ctx), lifetime bound, or write failure.
+	// The channel is never closed by the hub, so <-ch is not an exit condition.
 	for {
 		select {
 		case event, ok := <-ch:
@@ -2689,8 +2716,14 @@ func (s *Server) SubscribeToQueueStream(
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
-			flusher.Flush()
+			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data); err != nil {
+				return
+			}
+			if err := rc.Flush(); err != nil {
+				return
+			}
+		case <-lifetime.C:
+			return
 		case <-r.Context().Done():
 			return
 		}

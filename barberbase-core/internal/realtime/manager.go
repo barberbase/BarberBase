@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -19,7 +21,8 @@ type SSEEvent struct {
 }
 
 // MarshalSSE serialises an SSEEvent into the SSE wire format:
-//   event: <Type>\ndata: <JSON>\n\n
+//
+//	event: <Type>\ndata: <JSON>\n\n
 func (e SSEEvent) MarshalSSE() ([]byte, error) {
 	data, err := json.Marshal(e)
 	if err != nil {
@@ -38,6 +41,12 @@ type Manager struct {
 	// latestVersions: locationID (string) → int
 	// Updated on every Broadcast call. Used by heartbeat to send last-known version.
 	latestVersions sync.Map
+
+	// Tunables, read from the environment once in NewManager. Read-only after
+	// construction, so no lock. Defaults preserve the previous hardcoded behaviour.
+	heartbeat      time.Duration // SSE_HEARTBEAT_SECONDS, default 30s
+	maxLifetime    time.Duration // SSE_MAX_CONNECTION_SECONDS, default 15m
+	maxPerLocation int           // SSE_MAX_CONNS_PER_LOCATION, default 50
 }
 
 type locationSubs struct {
@@ -51,13 +60,64 @@ type sub struct {
 
 // NewManager constructs a Manager. Call StartHeartbeats(ctx) separately.
 func NewManager() *Manager {
-	return &Manager{}
+	return &Manager{
+		heartbeat:      envSeconds("SSE_HEARTBEAT_SECONDS", 30*time.Second),
+		maxLifetime:    envSeconds("SSE_MAX_CONNECTION_SECONDS", 15*time.Minute),
+		maxPerLocation: envInt("SSE_MAX_CONNS_PER_LOCATION", 50),
+	}
 }
 
-// Subscribe registers a new client for locationID.
+// envSeconds reads an integer number of seconds from the environment.
+// A missing, unparseable, or non-positive value falls back to def.
+func envSeconds(key string, def time.Duration) time.Duration {
+	if n := envInt(key, 0); n > 0 {
+		return time.Duration(n) * time.Second
+	}
+	return def
+}
+
+func envInt(key string, def int) int {
+	n, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || n <= 0 {
+		return def
+	}
+	return n
+}
+
+// MaxLifetime is the bound after which the SSE handler closes the connection and
+// the client reconnects. Unbounded connections on a 1GB droplet are a slow leak.
+func (m *Manager) MaxLifetime() time.Duration { return m.maxLifetime }
+
+// LocationCount reports how many locations currently have at least one
+// subscriber. Used to prove subscriber map entries do not leak.
+func (m *Manager) LocationCount() int {
+	n := 0
+	m.subs.Range(func(_, _ any) bool { n++; return true })
+	return n
+}
+
+// Subscribe registers a new client for locationID, ignoring the per-location cap.
+// Retained for callers that cannot fail (background jobs, tests); real client
+// connections go through TrySubscribe.
+func (m *Manager) Subscribe(locationID string) chan SSEEvent {
+	ch, _ := m.subscribe(locationID, false)
+	return ch
+}
+
+// TrySubscribe registers a new client for locationID, refusing once the location
+// is at SSE_MAX_CONNS_PER_LOCATION. Returns (nil, false) when refused.
+//
 // Returns a buffered channel (capacity 16). Non-blocking broadcast drops on overflow;
 // client refetches on reconnect — this is intentional (SSE is notification-only).
-func (m *Manager) Subscribe(locationID string) chan SSEEvent {
+//
+// The channel is never closed. Unsubscribe only unregisters it; closing it would
+// race with an in-flight Broadcast that copied the subscriber list before the
+// unsubscribe and would panic in the sender's goroutine.
+func (m *Manager) TrySubscribe(locationID string) (chan SSEEvent, bool) {
+	return m.subscribe(locationID, true)
+}
+
+func (m *Manager) subscribe(locationID string, enforceCap bool) (chan SSEEvent, bool) {
 	ch := make(chan SSEEvent, 16)
 	s := &sub{ch: ch}
 
@@ -69,19 +129,28 @@ func (m *Manager) Subscribe(locationID string) chan SSEEvent {
 		loc.mu.Lock()
 		// Double check if this loc is still registered in the map (to avoid race with deletion in Unsubscribe)
 		if val2, ok := m.subs.Load(locationID); ok && val2 == loc {
+			if enforceCap && m.maxPerLocation > 0 && len(loc.list) >= m.maxPerLocation {
+				// The entry is non-empty, so refusing here leaves no orphan key.
+				loc.mu.Unlock()
+				return nil, false
+			}
 			loc.list = append(loc.list, s)
 			loc.mu.Unlock()
-			break
+			return ch, true
 		}
 		loc.mu.Unlock()
 	}
-
-	return ch
 }
 
 // Unsubscribe removes ch from the subscriber list for locationID.
 // MUST be called via defer in the SSE handler goroutine.
-// After removal the channel is closed to unblock any pending receiver.
+//
+// The channel is deliberately NOT closed. Broadcast copies the subscriber list
+// under the mutex and then sends outside it; closing here would let a send land
+// on a closed channel and panic in the sender — fatal in the StartHeartbeats
+// goroutine, which has no recover. The handler is the only reader and always
+// exits via r.Context().Done() or the lifetime bound, so the close signal was
+// never needed. The channel is garbage once the last reference drops.
 func (m *Manager) Unsubscribe(locationID string, ch chan SSEEvent) {
 	val, ok := m.subs.Load(locationID)
 	if !ok {
@@ -100,11 +169,10 @@ func (m *Manager) Unsubscribe(locationID string, ch chan SSEEvent) {
 		}
 	}
 	if found != -1 {
-		// Remove ch from the slice. Shrink the slice. Close ch.
+		// Remove ch from the slice and shrink it. Never close ch — see above.
 		loc.list[found] = loc.list[len(loc.list)-1]
 		loc.list[len(loc.list)-1] = nil
 		loc.list = loc.list[:len(loc.list)-1]
-		close(ch)
 	}
 
 	// If the slice becomes empty, delete the key from subs.
@@ -144,13 +212,14 @@ func (m *Manager) Broadcast(locationID string, event SSEEvent) {
 	}
 }
 
-// StartHeartbeats launches a goroutine that emits heartbeat events every 30 seconds
-// for every location that currently has at least one subscriber.
+// StartHeartbeats launches a goroutine that emits heartbeat events every
+// SSE_HEARTBEAT_SECONDS (default 30s) for every location that currently has at
+// least one subscriber.
 // The heartbeat carries the last-known queue_version so clients detect missed events.
 // ctx is the server root context; the goroutine exits when ctx is cancelled.
 func (m *Manager) StartHeartbeats(ctx context.Context) {
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(m.heartbeat)
 		defer ticker.Stop()
 		for {
 			select {
