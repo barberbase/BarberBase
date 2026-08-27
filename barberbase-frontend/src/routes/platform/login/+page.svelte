@@ -65,14 +65,14 @@
 					required
 					disabled={loading}
 					bind:value={password}
-					class="w-full bg-canvas border border-white/[0.03] rounded-2xl px-4 py-4 text-primary placeholder:text-dim focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-amber-500 transition-all duration-200 text-base"
+					class="w-full bg-canvas border border-white/[0.08] rounded-2xl px-4 py-4 text-primary placeholder:text-placeholder focus:outline-none focus:border-gold-accent focus:ring-1 focus:ring-gold-accent/40 transition-all duration-200 text-base"
 				/>
 			</div>
 
 			<!-- Inline Error Display -->
 			{#if form?.error}
 				<div
-					class="bg-red-950/30 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error/80 flex items-start space-x-3 animate-fade-in"
+					class="bg-system-error/10 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error flex items-start space-x-3 animate-fade-in"
 				>
 					<svg
 						xmlns="http://www.w3.org/2000/svg"
@@ -95,11 +95,11 @@
 			<button
 				type="submit"
 				disabled={loading || !password}
-				class="w-full py-4 bg-gold-accent hover:bg-amber-400 active:bg-amber-600 disabled:opacity-40 disabled:hover:bg-gold-accent text-canvas font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
+				class="w-full py-4 bg-gold-accent hover:brightness-105 active:scale-[0.98] disabled:opacity-40 text-canvas font-bold text-base rounded-2xl transition-all duration-150 shadow-lg cursor-pointer flex items-center justify-center space-x-2"
 			>
 				{#if loading}
 					<svg
-						class="animate-spin h-5 w-5 text-slate-950"
+						class="animate-spin h-5 w-5 text-canvas"
 						xmlns="http://www.w3.org/2000/svg"
 						fill="none"
 						viewBox="0 0 24 24"

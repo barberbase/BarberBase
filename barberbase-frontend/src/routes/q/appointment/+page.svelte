@@ -33,10 +33,10 @@
 	);
 
 	const statusMeta: Record<string, { label: string; cls: string }> = {
-		scheduled: { label: 'Confirmed', cls: 'text-emerald-400 border-emerald-400/25 bg-emerald-400/10' },
-		checked_in: { label: 'Checked In', cls: 'text-gold-accent border-gold-accent/25 bg-gold-accent/10' },
-		cancelled: { label: 'Cancelled', cls: 'text-red-400 border-red-400/25 bg-red-400/10' },
-		no_show: { label: 'Missed', cls: 'text-red-400 border-red-400/25 bg-red-400/10' },
+		scheduled: { label: 'Confirmed', cls: 'text-system-success border-system-success/30 bg-system-success/10' },
+		checked_in: { label: 'Checked In', cls: 'text-gold-accent border-gold-accent/30 bg-gold-accent/10' },
+		cancelled: { label: 'Cancelled', cls: 'text-system-error border-system-error/30 bg-system-error/10' },
+		no_show: { label: 'Missed', cls: 'text-system-error border-system-error/30 bg-system-error/10' },
 		rescheduled: { label: 'Rescheduled', cls: 'text-muted border-white/10 bg-titanium' }
 	};
 	const badge = $derived(statusMeta[status] ?? { label: status, cls: 'text-muted border-white/10 bg-titanium' });
@@ -148,20 +148,20 @@
 			{#if status === 'scheduled'}
 				<div class="space-y-3">
 					{#if cancelError}
-						<p class="text-xs text-red-400 text-center font-semibold">{cancelError}</p>
+						<p class="text-xs text-system-error text-center font-semibold">{cancelError}</p>
 					{/if}
 					{#if confirming}
 						<p class="text-xs text-muted text-center">Cancel this appointment? This can't be undone.</p>
 						<div class="flex gap-2">
 							<button
-								class="flex-1 py-3 rounded-full text-sm font-bold border border-white/[0.08] text-primary hover:bg-titanium transition-colors"
+								class="flex-1 py-3 rounded-full text-sm font-bold border border-white/[0.08] text-primary hover:bg-titanium active:scale-[0.98] transition-all"
 								onclick={() => (confirming = false)}
 								disabled={cancelling}
 							>
 								Keep it
 							</button>
 							<button
-								class="flex-1 py-3 rounded-full text-sm font-bold bg-red-400/10 border border-red-400/30 text-red-400 hover:bg-red-400/20 transition-colors"
+								class="flex-1 py-3 rounded-full text-sm font-bold bg-system-error/15 border border-system-error/30 text-system-error hover:bg-system-error/25 active:scale-[0.98] transition-all"
 								onclick={cancelAppointment}
 								disabled={cancelling}
 							>
@@ -170,7 +170,7 @@
 						</div>
 					{:else}
 						<button
-							class="w-full py-3 rounded-full text-sm font-bold border border-white/[0.08] text-muted hover:text-red-400 hover:border-red-400/30 transition-colors"
+							class="w-full py-3 rounded-full text-sm font-bold border border-white/[0.08] text-muted hover:text-system-error hover:border-system-error/30 active:scale-[0.98] transition-all"
 							onclick={() => (confirming = true)}
 						>
 							Cancel Appointment

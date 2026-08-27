@@ -10,7 +10,7 @@
 				secondary:
 					"bg-surface text-primary [a&]:hover:bg-surface/90 border-transparent",
 				destructive:
-					"bg-system-error [a&]:hover:bg-system-error/90 focus-visible:ring-system-error/20 border-transparent text-white",
+					"bg-system-error/15 text-system-error border-system-error/30 [a&]:hover:bg-system-error/25 focus-visible:ring-system-error/20",
 				outline: "text-primary [a&]:hover:bg-titanium [a&]:hover:text-primary",
 			},
 		},

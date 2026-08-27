@@ -3,7 +3,7 @@
   
   interface Props {
     type?: 'button' | 'submit';
-    variant?: 'primary' | 'secondary' | 'ghost';
+    variant?: 'primary' | 'secondary' | 'ghost' | 'accent' | 'destructive';
     onclick?: (e: MouseEvent) => void;
     disabled?: boolean;
     class?: string;
@@ -21,8 +21,10 @@
 
   const variantClasses = {
     primary: 'bg-primary text-canvas hover:bg-[#D5D2C9] border-transparent font-bold',
-    secondary: 'bg-transparent text-primary hover:bg-white/[0.02] border-white/10 font-semibold',
-    ghost: 'bg-transparent text-muted hover:text-primary hover:bg-white/[0.02] border-transparent font-medium'
+    accent: 'bg-gold-accent text-canvas hover:brightness-105 border-transparent font-bold',
+    secondary: 'bg-transparent text-primary hover:bg-white/[0.03] border-white/10 font-semibold',
+    destructive: 'bg-system-error/15 text-system-error hover:bg-system-error/25 border-system-error/30 font-bold',
+    ghost: 'bg-transparent text-muted hover:text-primary hover:bg-white/[0.03] border-transparent font-medium'
   };
 </script>
 

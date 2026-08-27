@@ -221,7 +221,7 @@
 			{#if !showSplitPayment}
 				<!-- Quick Cash Mode -->
 				{#if errorMessage}
-					<div class="bg-red-950/40 border border-red-900/50 rounded-xl p-3 text-xs text-red-400">
+					<div class="bg-system-error/10 border border-system-error/30 rounded-xl p-3 text-xs text-system-error">
 						{errorMessage}
 					</div>
 				{/if}
@@ -285,7 +285,7 @@
 							{#each paymentLines as line, idx}
 								<div class="bg-canvas border border-white/[0.05] rounded-xl p-3 space-y-2 relative">
 									{#if paymentLines.length > 1}
-										<button type="button" class="absolute top-2 right-2 text-dim hover:text-red-400 transition-colors" onclick={() => removePaymentLine(idx)} aria-label="Remove payment line">
+										<button type="button" class="absolute top-2 right-2 text-dim hover:text-system-error transition-colors" onclick={() => removePaymentLine(idx)} aria-label="Remove payment line">
 											<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
 										</button>
 									{/if}
@@ -329,7 +329,7 @@
 					</div>
 
 					{#if errorMessage || (mounted && isMismatch)}
-						<div class="bg-red-950/40 border border-red-900/50 rounded-xl p-3 text-xs text-red-400">
+						<div class="bg-system-error/10 border border-system-error/30 rounded-xl p-3 text-xs text-system-error">
 							{errorMessage || 'Payment lines must sum exactly to the total.'}
 						</div>
 					{/if}

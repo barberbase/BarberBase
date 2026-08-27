@@ -10,13 +10,14 @@
 
   --color-primary: #E5E2D9;
   --color-muted: #9F9B93;
+  --color-placeholder: #7C7872;
   --color-dim: #5A5854;
 
   --color-gold-accent: #C8A96B;
 
-  --color-system-success: #10B981;
-  --color-system-warning: #F59E0B;
-  --color-system-error: #EF4444;
+  --color-system-success: #2A7F62;
+  --color-system-warning: #D48D2A;
+  --color-system-error: #C94A4A;
 
   --font-satoshi: "Plus Jakarta Sans", "PJS Fallback", sans-serif; /* ponytail: legacy alias, rename when all refs updated */
   --font-manrope: "Inter", "Inter Fallback", sans-serif; /* ponytail: legacy alias, rename when all refs updated */
@@ -60,13 +61,25 @@
 
 @layer base {
   body {
-    @apply bg-canvas text-primary font-manrope antialiased min-h-screen flex flex-col;
+    @apply bg-canvas text-primary font-manrope antialiased flex flex-col;
+    min-height: 100dvh;
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
     /* notched devices: viewport-fit=cover in app.html exposes the insets */
     padding: env(safe-area-inset-top) env(safe-area-inset-right)
       env(safe-area-inset-bottom) env(safe-area-inset-left);
     /* Subliminal Micro-Dot Grid Pattern (Visual Texture Reference) */
     background-image: radial-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px);
     background-size: 16px 16px;
+  }
+
+  input, textarea, select {
+    color-scheme: dark;
+  }
+
+  input::placeholder, textarea::placeholder {
+    color: #7C7872;
+    opacity: 1;
   }
 }
 

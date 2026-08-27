@@ -97,13 +97,13 @@
 		</Card>
 
 		{#if data.loadError}
-			<div class="bg-red-950/30 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error/80">
+			<div class="bg-system-error/10 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error">
 				{data.loadError}
 			</div>
 		{/if}
 
 		{#if form?.error}
-			<div class="bg-red-950/30 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error/80">
+			<div class="bg-system-error/10 border border-system-error/30 rounded-2xl p-4 text-sm text-system-error">
 				{form.error}
 			</div>
 		{/if}

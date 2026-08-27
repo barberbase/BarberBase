@@ -8,11 +8,12 @@ colors:
   titanium: "#1C1C1C"
   primary: "#E5E2D9"
   muted: "#9F9B93"
+  placeholder: "#7C7872"
   dim: "#5A5854"
   gold-accent: "#C8A96B"
-  system-success: "#10B981"
-  system-warning: "#F59E0B"
-  system-error: "#EF4444"
+  system-success: "#2A7F62"
+  system-warning: "#D48D2A"
+  system-error: "#C94A4A"
 typography:
   display:
     fontFamily: "Plus Jakarta Sans, sans-serif"
@@ -65,41 +66,43 @@ The BarberBase design system models the visual feel of precision grooming tools�
 It explicitly rejects generic, cluttered SaaS templates with irrelevant widgets and bright, overstimulating neon colors that cause astigmatism halation on mobile screens.
 
 **Key Characteristics:**
-- **Tactile Hardware Simulation:** Simulated machined edges, tight transitions, and physical active scale-shrink responses.
+- **Tactile Hardware Simulation:** Simulated machined edges, tight transitions, and physical active scale-shrink responses (`active:scale-[0.98]`).
 - **Anti-Halation Surfaces:** Zero pure black and zero pure white to protect against OLED smearing and visual fatigue.
 - **Ergonomic Density:** Focuses on queue states, wait-times, and status checkmarks clearly on a structured grid.
+- **Mobile-First Touch Architecture:** Dynamic viewport units (`100dvh`), `overscroll-behavior-y: none`, and 48px touch targets.
 
-## 2. Colors
+## 2. Colors & Design Tokens
 
 The color palette enforces a desaturated, highly legible layout using a warm gray scale and one micro Champagne Gold accent for queue alerts.
 
-### Primary
-- **Alabaster Primary** (#E5E2D9): Primary text color, optimized for high contrast and readability on dark canvas surfaces.
+### Primary & Text Foreground
+- **Alabaster Primary** (`#E5E2D9`): Primary text color, optimized for high contrast and readability on dark canvas surfaces.
+- **Pebble Grey / Muted** (`#9F9B93`): Muted subtext, secondary metadata labels, and inactive state indicators.
+- **Placeholder / Dim Text** (`#7C7872`): Input placeholders, secondary micro-copy, and small helper hints. Guaranteed WCAG contrast against dark surfaces under mobile shop glare.
 
-### Neutral
-- **Canvas** (#080808): The deepest structural background layer. Prevents OLED black-smear.
-- **Matte** (#0E0E0E): Mid-level scaffolding, standard section backgrounds.
-- **Surface** (#141414): Elevated card panels and list containers.
-- **Titanium** (#1C1C1C): Active input fields, popovers, and dropdown menus.
-- **Pebble Grey** (#9F9B93): Muted subtext, metadata labels, and inactive state indicators.
-- **Dim** (#5A5854): Inactive placeholders and dividers.
+### Neutral Stack (Elevation via Solid Surface Shifts)
+- **Canvas** (`#080808`): The deepest structural background layer. Prevents OLED black-smear.
+- **Matte** (`#0E0E0E`): Mid-level scaffolding, standard section backgrounds.
+- **Surface** (`#141414`): Elevated card panels and list containers.
+- **Titanium** (`#1C1C1C`): Active input fields, popovers, and dropdown menus.
+- **Dim / Hairline** (`#5A5854`): Reserved strictly for subtle hairline borders, dividers, and inactive icons.
 
-### Accents & System States
-- **Champagne Gold** (#C8A96B): Reserved exclusively for active queue turn highlights and verified statuses.
-- **System Success** (#10B981): Desaturated emerald for active check-ins.
-- **System Warning** (#F59E0B): Low-luminance amber for delayed/snoozed entries.
-- **System Error** (#EF4444): Soft red for cancellations.
+### Accents & System States (Anti-Halation Grounded Tones)
+- **Champagne Gold** (`#C8A96B`): Reserved exclusively for active queue turn highlights ("Your Turn"), verified statuses, and primary focal highlights.
+- **System Success (Olive/Sage)** (`#2A7F62`): Desaturated, grounded green for active check-ins, completed visits, and live status.
+- **System Warning (Warm Amber/Brass)** (`#D48D2A`): Warm industrial amber for delayed/snoozed entries and pending actions.
+- **System Error (Muted Terracotta)** (`#C94A4A`): Earthy brick red for cancellations, missed slots, and critical alerts.
 
 ### Named Rules
-**The Gold Accent Rule.** Champagne Gold is used strictly for queue verification highlights and the active "Your Turn" state. Its use must not exceed 5% of any screen surface to maintain its visual weight.
+1. **The Gold Accent Rule.** Champagne Gold is used strictly for queue verification highlights and the active "Your Turn" state. Its use must not exceed 5% of any screen surface to maintain its focal visual weight. Never use gold for small body text under 14px.
+2. **The Placeholder Contrast Rule.** Text placeholders must use `#7C7872` (or lighter) to guarantee legibility under bright barbershop overhead lighting.
+3. **The Anti-Halation Rule.** Avoid pure saturated primary reds/greens against OLED dark backgrounds to eliminate visual bleeding and halo artifacts.
 
 ## 3. Typography
 
 **Display Font:** "Plus Jakarta Sans", sans-serif
 **Body Font:** "Inter", sans-serif
 **Label/Mono Font:** "Space Mono", monospace
-
-**Character:** Geometric bold sans-serif headers paired with clean, compact body copy and high-density numeric layouts.
 
 ### Hierarchy
 - **Display** (Bold (800), 1.75rem, 1.2, tracking-tightest (-0.045em)): Used for main titles and hero headers.
@@ -110,40 +113,47 @@ The color palette enforces a desaturated, highly legible layout using a warm gra
 ### Named Rules
 **The Tabular Alignment Rule.** All numbers, queue positions, and time stamps must use the monospace font stack (`Space Mono`) to ensure strict alignment across cards and tables.
 
-## 4. Elevation
+## 4. Calendar, Scheduling & Queue State Color Matrix
 
-The system is flat-by-default, utilizing flat color surfaces of increasing lightness to create depth rather than soft blur shadows. Shadows are strictly functional.
+How appointments, queue states, and calendar slots are color-coded without breaking the 5% gold rule:
 
-### Shadow Vocabulary
-- **Tactile Glow** (`box-shadow: 0 0 12px rgba(200, 169, 107, 0.15)`): Used exclusively on the active queue indicator element.
+| State / Role | Background & Border | Text Color | Visual Meaning |
+|---|---|---|---|
+| **Now Serving / Active Turn** | `bg-gold-accent text-canvas border-gold-accent` | `#080808` | "Your Turn" / In Chair (Only 1 active entry at a time) |
+| **Checked In / Arrived** | `bg-system-success/15 border-system-success/30` | `#2A7F62` | Customer is physically in the shop |
+| **Scheduled / Available Slot** | `bg-surface border-white/[0.08] hover:border-white/20` | `#E5E2D9` | Pre-booked appointment or open time slot |
+| **On the Way / Delayed** | `bg-system-warning/15 border-system-warning/30` | `#D48D2A` | Customer travelling or queue paused |
+| **No-Show / Cancelled** | `bg-system-error/15 border-system-error/30` | `#C94A4A` | Missed appointment or cancelled ticket |
+| **Completed / Past** | `bg-matte border-white/[0.03]` | `#9F9B93` | Finished service, historical record |
 
-### Named Rules
-**The Tonal Scaffolding Rule.** Depth is created using solid surface shifts: Canvas (#080808) -> Matte (#0E0E0E) -> Surface (#141414) -> Titanium (#1C1C1C).
+## 5. Buttons & Interactive Controls Matrix
 
-## 5. Components
+Every interactive component implements standard hardware states:
 
-### Buttons
-- **Shape:** Rounded Pill (999px)
-- **Primary:** Warm Alabaster (`bg-primary text-canvas`) with px-6 py-3.5 padding.
-- **Tactile Interaction:** Active scale shrink transitions (`active:scale-[0.98]`) executing in 150ms.
+| Component / Variant | Default State | Hover State | Active State | Disabled State |
+|---|---|---|---|---|
+| **Button: Primary** | `bg-primary text-canvas rounded-full font-bold` | `bg-[#D5D2C9]` | `active:scale-[0.98]` | `opacity-40 pointer-events-none` |
+| **Button: Accent (Focal)** | `bg-gold-accent text-canvas rounded-full font-bold` | `brightness-105` | `active:scale-[0.98]` | `opacity-40 pointer-events-none` |
+| **Button: Secondary / Outline** | `bg-transparent text-primary border border-white/10` | `bg-white/[0.03] border-white/20` | `active:scale-[0.98]` | `opacity-40 pointer-events-none` |
+| **Button: Destructive** | `bg-system-error/15 text-system-error border border-system-error/30` | `bg-system-error/25` | `active:scale-[0.98]` | `opacity-40 pointer-events-none` |
+| **Input / Form Field** | `bg-canvas border-white/[0.08] text-primary placeholder-[#7C7872]` | `border-white/20` | `border-gold-accent ring-1 ring-gold-accent/40 bg-surface` | `opacity-40 pointer-events-none` |
 
-### Cards / Containers
-- **Corner Style:** Rounded-XL (12px)
-- **Border:** 1px border with variable opacity (`border-white/[0.03]` to `border-white/[0.05]`).
-- **Machined Edge:** Simulation highlight (`box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03)`).
+## 6. Mobile & Performance Rules
 
-### Status Indicators
-- **Style:** Compact 10px tag, Space Mono font with border.
-- **Active State:** Champagne Gold background (`bg-gold-accent text-canvas border-gold-accent`).
+1. **Dynamic Viewport:** Use `min-height: 100dvh` to prevent jumping when mobile browser URL bars expand/collapse.
+2. **Overscroll Behavior:** Set `overscroll-behavior-y: none` to prevent rubber-band bounce breaking fixed dark headers.
+3. **No Heavy Box Shadows on Mobile:** Use solid surface shifts (`#080808` → `#0E0E0E` → `#141414`) for depth. Reserve tactile glow exclusively for the single active queue item.
+4. **Touch Targets:** All primary buttons, action pills, and inputs must maintain a minimum 44px (preferably 48px) touch target.
 
-## 6. Do's and Don'ts
+## 7. Do's and Don'ts
 
 ### Do:
 - **Do** use `bg-canvas` for layout wrappers and let components stack above it using `bg-matte` or `bg-surface`.
-- **Do** align all active timer badges with the Champagne Gold accent to denote real-time responsiveness.
-- **Do** set custom scrollbars in long lists to keep a minimal 4px profile.
+- **Do** use Champagne Gold as a fill background with dark `#080808` text for active queue badges.
+- **Do** format all time stamps and queue token numbers with `Space Mono`.
 
 ### Don't:
-- **Don't** use pure black (#000000) or pure white (#ffffff) anywhere in the application.
-- **Don't** use gradient text or `background-clip: text` combined with gradients.
-- **Don't** add side-stripe accent borders greater than 1px on cards or alert components.
+- **Don't** use pure black (`#000000`) or pure white (`#FFFFFF`) anywhere.
+- **Don't** use neon, ungrounded red/green alert colors.
+- **Don't** use gradient text or decorative glassmorphism blurs.
+- **Don't** use Champagne Gold on small body text or secondary icons.

@@ -4,16 +4,17 @@
 	import { type VariantProps, tv } from "tailwind-variants";
 
 	export const buttonVariants = tv({
-		base: "focus-visible:border-gold-accent focus-visible:ring-gold-accent/50 aria-invalid:ring-system-error/20 aria-invalid:border-system-error inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+		base: "focus-visible:border-gold-accent focus-visible:ring-gold-accent/50 aria-invalid:ring-system-error/20 aria-invalid:border-system-error inline-flex shrink-0 items-center justify-center gap-2 rounded-full text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:ring-[3px] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 aria-disabled:pointer-events-none aria-disabled:opacity-40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 select-none",
 		variants: {
 			variant: {
-				default: "bg-gold-accent text-canvas hover:bg-gold-accent/90 shadow-xs",
+				default: "bg-primary text-canvas hover:bg-[#D5D2C9] font-bold border border-transparent shadow-xs",
+				accent: "bg-gold-accent text-canvas hover:brightness-105 font-bold border border-transparent shadow-xs",
 				destructive:
-					"bg-system-error hover:bg-system-error/90 focus-visible:ring-system-error/20 text-primary shadow-xs",
+					"bg-system-error/15 text-system-error border border-system-error/30 hover:bg-system-error/25 focus-visible:ring-system-error/20 font-bold shadow-xs",
 				outline:
-					"bg-canvas hover:bg-titanium hover:text-primary border shadow-xs",
-				secondary: "bg-surface text-primary hover:bg-surface/80 shadow-xs",
-				ghost: "hover:bg-titanium hover:text-primary ",
+					"bg-transparent hover:bg-white/[0.03] text-primary border border-white/10 shadow-xs",
+				secondary: "bg-surface text-primary hover:bg-surface/80 border border-white/[0.05] shadow-xs",
+				ghost: "hover:bg-titanium hover:text-primary text-muted",
 				link: "text-primary underline-offset-4 hover:underline",
 			},
 			size: {
