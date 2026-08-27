@@ -171,6 +171,7 @@ func TestMigrate_FreshDatabase(t *testing.T) {
 	require.Contains(t, first, "001")
 	require.Contains(t, first, "002")
 	require.Contains(t, first, "003")
+	require.Contains(t, first, "004")
 	require.True(t, first["001"].appliedAt.Before(first["002"].appliedAt) ||
 		first["001"].appliedAt.Equal(first["002"].appliedAt), "A1: 001 must be applied before 002")
 	require.True(t, exists(t, pool, "tenants"), "A1: 001 objects must exist")
@@ -178,6 +179,8 @@ func TestMigrate_FreshDatabase(t *testing.T) {
 	require.True(t, exists(t, pool, "station_devices"), "A1: 002 objects must exist")
 	require.True(t, exists(t, pool, "media_assets"), "A1: 003 objects must exist")
 	require.True(t, exists(t, pool, "catalog_style_templates"), "A1: 003 objects must exist")
+	require.True(t, exists(t, pool, "staff_tiers"), "A1: 004 objects must exist")
+	require.True(t, exists(t, pool, "service_variant_tier_prices"), "A1: 004 objects must exist")
 
 	// A9: recorded checksum is lowercase hex sha256 of the raw file bytes.
 	want001 := fileSHA(t, "../../migrations/001_complete_schema.sql")
@@ -261,7 +264,9 @@ func TestMigrate_AdoptBaseline(t *testing.T) {
 			require.True(t, exists(t, pool, "station_devices"), "002 must have been applied")
 			// A9: 003 applies on top of an adopted baseline without error.
 			require.True(t, exists(t, pool, "media_assets"), "A9: 003 must apply over an adopted baseline")
+			require.True(t, exists(t, pool, "staff_tiers"), "A9: 004 must apply over an adopted baseline")
 			require.Contains(t, l, "003")
+			require.Contains(t, l, "004")
 
 			if tc.seedDevice {
 				// A11: 002 was re-executed (idempotent, IF NOT EXISTS) over live data.
@@ -740,4 +745,310 @@ func TestMigration003_CatalogUniqueness(t *testing.T) {
 			(category_name, group_name, variant_name, gender, default_duration_minutes)
 		VALUES ('Hair', 'Fade', 'Zero Duration', 'men', 0)`)
 	require.Equal(t, sqlstateCheckViolation, pgErrCode(err), "default_duration_minutes must be positive")
+}
+
+// --- T1: 004_staff_tiers -------------------------------------------------------
+
+const migration004 = "../../migrations/004_staff_tiers.sql"
+
+const sqlstateFKViolation = "23503"
+
+// tierFixture extends mediaFixture with a queue session, so the dispatch and
+// visit_services cases have somewhere to hang rows.
+type tierFixture struct {
+	mediaFixture
+	sessionID uuid.UUID
+}
+
+func seedTierFixture(t *testing.T, pool *pgxpool.Pool) tierFixture {
+	t.Helper()
+	f := tierFixture{mediaFixture: seedMediaFixture(t, pool)}
+	require.NoError(t, pool.QueryRow(context.Background(), `
+		INSERT INTO queue_sessions (tenant_id, location_id, business_date)
+		VALUES ($1, $2, DATE '2099-01-01') RETURNING id`,
+		f.tenantID, f.locID).Scan(&f.sessionID))
+	return f
+}
+
+func insertTier(pool *pgxpool.Pool, f tierFixture, name string, rank int, isDefault, isActive bool) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := pool.QueryRow(context.Background(), `
+		INSERT INTO staff_tiers (tenant_id, location_id, name, rank, is_default, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		f.tenantID, f.locID, name, rank, isDefault, isActive).Scan(&id)
+	return id, err
+}
+
+// TestMigration004_NoTransactionControl is A2.
+func TestMigration004_NoTransactionControl(t *testing.T) {
+	raw, err := os.ReadFile(migration004)
+	require.NoError(t, err)
+
+	_, stripped, err := stripTxWrapper(string(raw))
+	require.NoError(t, err)
+	require.False(t, stripped, "A2: 004 must have no transaction wrapper to strip")
+
+	for i, line := range strings.Split(string(raw), "\n") {
+		trimmed := strings.ToUpper(strings.TrimSpace(line))
+		require.NotEqual(t, "BEGIN;", trimmed, "A2: bare BEGIN; at line %d", i+1)
+		require.NotEqual(t, "COMMIT;", trimmed, "A2: bare COMMIT; at line %d", i+1)
+	}
+}
+
+// TestMigration004_TierConstraints is A3 and A4.
+func TestMigration004_TierConstraints(t *testing.T) {
+	pool := migratedPool(t)
+	f := seedTierFixture(t, pool)
+
+	t.Run("A3_one_live_default_per_location", func(t *testing.T) {
+		_, err := insertTier(pool, f, "Junior", 10, true, true)
+		require.NoError(t, err)
+		_, err = insertTier(pool, f, "Senior", 20, true, true)
+		require.Equal(t, sqlstateUniqueViolation, pgErrCode(err), "A3: second live default rejected")
+
+		// A retired tier may still carry is_default — the index is partial on is_active.
+		_, err = insertTier(pool, f, "Retired", 5, true, false)
+		require.NoError(t, err, "A3: an inactive default may coexist with the live one")
+	})
+
+	t.Run("A4_name_and_rank_unique_per_location", func(t *testing.T) {
+		_, err := insertTier(pool, f, "Junior", 99, false, true)
+		require.Equal(t, sqlstateUniqueViolation, pgErrCode(err), "A4: duplicate name rejected")
+		_, err = insertTier(pool, f, "Expert", 10, false, true)
+		require.Equal(t, sqlstateUniqueViolation, pgErrCode(err), "A4: duplicate rank rejected")
+	})
+
+	t.Run("A4_same_name_and_rank_under_another_location", func(t *testing.T) {
+		other := seedTierFixture(t, pool)
+		_, err := insertTier(pool, other, "Junior", 10, true, true)
+		require.NoError(t, err, "A4: uniqueness is scoped to the location")
+	})
+}
+
+// TestMigration004_TierPrices is A5: sparse overrides, with NULL duration
+// meaning inherit.
+func TestMigration004_TierPrices(t *testing.T) {
+	pool := migratedPool(t)
+	ctx := context.Background()
+	f := seedTierFixture(t, pool)
+	tierID, err := insertTier(pool, f, "Senior", 20, true, true)
+	require.NoError(t, err)
+
+	insertPrice := func(price int, duration *int) error {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO service_variant_tier_prices
+				(tenant_id, location_id, service_variant_id, tier_id, price_paise, duration_minutes)
+			VALUES ($1, $2, $3, $4, $5, $6)`,
+			f.tenantID, f.locID, f.variantID, tierID, price, duration)
+		return err
+	}
+
+	require.NoError(t, insertPrice(45000, nil), "A5: NULL duration means inherit the variant's")
+	require.Equal(t, sqlstateUniqueViolation, pgErrCode(insertPrice(50000, nil)),
+		"A5: one override row per (variant, tier)")
+
+	// A second tier so the negative cases are not masked by the UNIQUE above.
+	tier2, err := insertTier(pool, f, "Expert", 30, false, true)
+	require.NoError(t, err)
+	negative := func(price int, duration *int) error {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO service_variant_tier_prices
+				(tenant_id, location_id, service_variant_id, tier_id, price_paise, duration_minutes)
+			VALUES ($1, $2, $3, $4, $5, $6)`,
+			f.tenantID, f.locID, f.variantID, tier2, price, duration)
+		return err
+	}
+	zero := 0
+	require.Equal(t, sqlstateCheckViolation, pgErrCode(negative(-1, nil)), "A5: negative price rejected")
+	require.Equal(t, sqlstateCheckViolation, pgErrCode(negative(1000, &zero)), "A5: zero duration rejected")
+
+	// is_offered=false is how a tier is excluded, not a NULL price.
+	_, err = pool.Exec(ctx, `
+		INSERT INTO service_variant_tier_prices
+			(tenant_id, location_id, service_variant_id, tier_id, price_paise, is_offered)
+		VALUES ($1, $2, $3, $4, 0, false)`, f.tenantID, f.locID, f.variantID, tier2)
+	require.NoError(t, err, "A5: a not-offered row is a real row with a price")
+}
+
+// TestMigration004_TierDeleteBehaviour is A6. Only tier_prices cascade; the
+// other three FKs have no ON DELETE clause and therefore block. Asserted as
+// observed behaviour, reported as a finding — the DDL is not changed.
+func TestMigration004_TierDeleteBehaviour(t *testing.T) {
+	pool := migratedPool(t)
+	ctx := context.Background()
+	f := seedTierFixture(t, pool)
+
+	tierID, err := insertTier(pool, f, "Senior", 20, true, true)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO service_variant_tier_prices
+			(tenant_id, location_id, service_variant_id, tier_id, price_paise)
+		VALUES ($1, $2, $3, $4, 45000)`, f.tenantID, f.locID, f.variantID, tierID)
+	require.NoError(t, err)
+
+	// Referenced by a barber: NO ACTION, so the delete must be refused.
+	_, err = pool.Exec(ctx, `UPDATE staff_members SET tier_id = $1 WHERE id = $2`, tierID, f.staffID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `DELETE FROM staff_tiers WHERE id = $1`, tierID)
+	require.Equal(t, sqlstateFKViolation, pgErrCode(err),
+		"A6: staff_members.tier_id has no ON DELETE, so the tier delete is refused")
+
+	// Detach the barber; now only the cascading reference remains.
+	_, err = pool.Exec(ctx, `UPDATE staff_members SET tier_id = NULL WHERE id = $1`, f.staffID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `DELETE FROM staff_tiers WHERE id = $1`, tierID)
+	require.NoError(t, err)
+
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM service_variant_tier_prices WHERE tier_id = $1`, tierID).Scan(&n))
+	require.Zero(t, n, "A6: tier_prices cascade with the tier")
+}
+
+// expectedDispatchIndexDef is 001:837-839 as pg_indexes normalises it. T1
+// deliberately leaves this index alone; asserting the exact string is how we
+// notice if a later unit changes it by accident.
+const expectedDispatchIndexDef = "CREATE INDEX idx_queue_dispatch ON public.queue_entries " +
+	"USING btree (queue_session_id, priority_group, sort_key) " +
+	"WHERE ((is_dispatchable = true) AND ((state)::text = 'waiting'::text))"
+
+// TestMigration004_DispatchIndexUnchanged is A7. T1 does not touch
+// idx_queue_dispatch: measured at 50k rows, the definition from 001 already
+// serves T3's tier predicate with an ordered Index Scan and no Sort, while
+// moving required_tier_id into the key turns it into a Seq Scan + Sort. The
+// plan below is the evidence that T3 needs no index work — quote it, don't
+// assume it.
+func TestMigration004_DispatchIndexUnchanged(t *testing.T) {
+	pool := migratedPool(t)
+	ctx := context.Background()
+	f := seedTierFixture(t, pool)
+
+	var indexDef string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_queue_dispatch'`).Scan(&indexDef))
+	require.Equal(t, expectedDispatchIndexDef, indexDef, "A7: idx_queue_dispatch must be untouched by 004")
+	require.NotContains(t, indexDef, "required_tier_id", "A7: the tier column must not be in the dispatch key")
+	t.Logf("A7 index definition: %s", indexDef)
+
+	tierID, err := insertTier(pool, f, "Senior", 20, true, true)
+	require.NoError(t, err)
+
+	// A dedicated connection: seeding 50k rows exceeds the pool's 5s
+	// statement_timeout, which is correct for request traffic and wrong here.
+	conn, err := pool.Acquire(ctx)
+	require.NoError(t, err)
+	defer conn.Release()
+	_, err = conn.Exec(ctx, `SET statement_timeout = '120s'`)
+	require.NoError(t, err)
+
+	// 50k dispatchable entries. Below roughly this volume the planner seq-scans
+	// whatever indexes exist, so a smaller table proves nothing either way.
+	_, err = conn.Exec(ctx, `
+		WITH v AS (
+			INSERT INTO visits (tenant_id, location_id, entry_type, total_duration_minutes)
+			SELECT $1, $2, 'walk_in', 30 FROM generate_series(1, 50000)
+			RETURNING id
+		), numbered AS (
+			SELECT id, row_number() OVER () AS n FROM v
+		)
+		INSERT INTO queue_entries
+			(visit_id, queue_session_id, token_number, state, is_dispatchable,
+			 priority_group, sort_key, required_tier_id)
+		SELECT id, $3, n, 'waiting', true, 100, n,
+		       CASE WHEN n % 2 = 0 THEN $4::uuid ELSE NULL END
+		FROM numbered`, f.tenantID, f.locID, f.sessionID, tierID)
+	require.NoError(t, err)
+	_, err = conn.Exec(ctx, `ANALYZE queue_entries`)
+	require.NoError(t, err)
+
+	// Exactly the shape T3 will emit.
+	rows, err := conn.Query(ctx, `
+		EXPLAIN SELECT id FROM queue_entries
+		WHERE queue_session_id = $1
+		  AND is_dispatchable = true AND state = 'waiting'
+		  AND (required_tier_id IS NULL OR required_tier_id = $2)
+		ORDER BY priority_group, sort_key
+		LIMIT 1`, f.sessionID, tierID)
+	require.NoError(t, err)
+
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		require.NoError(t, rows.Scan(&line))
+		plan.WriteString(line + "\n")
+	}
+	rows.Close()
+	require.NoError(t, rows.Err())
+
+	t.Logf("A7 Call-Next plan over 50k rows:\n%s", plan.String())
+	require.Contains(t, plan.String(), "Index Scan using idx_queue_dispatch",
+		"A7: the dispatch query must walk the index in order")
+	require.NotContains(t, plan.String(), "Sort", "A7: an ordered index walk must need no sort")
+	require.NotContains(t, plan.String(), "Seq Scan", "A7: a sequential scan here would sink Call Next under load")
+	require.Contains(t, plan.String(), "required_tier_id",
+		"A7: the tier predicate must be applied as a per-row filter")
+}
+
+// TestMigration004_VisitServicesSupersede is A8 and the A10 back-compat check.
+func TestMigration004_VisitServicesSupersede(t *testing.T) {
+	pool := migratedPool(t)
+	ctx := context.Background()
+	f := seedTierFixture(t, pool)
+
+	var visitID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO visits (tenant_id, location_id, entry_type, total_duration_minutes)
+		VALUES ($1, $2, 'walk_in', 30) RETURNING id`, f.tenantID, f.locID).Scan(&visitID))
+
+	// A10: an insert naming no tier columns must still work — every new column
+	// is nullable or defaulted.
+	var originalID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO visit_services
+			(visit_id, service_variant_id, variant_name_snapshot, group_name_snapshot,
+			 category_name_snapshot, duration_minutes_snapshot, price_paise_snapshot)
+		VALUES ($1, $2, 'Mid Fade', 'Fade', 'Hair', 30, 25000) RETURNING id`,
+		visitID, f.variantID).Scan(&originalID))
+
+	// A10: same for queue_entries.
+	var entryVisit uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO visits (tenant_id, location_id, entry_type, total_duration_minutes)
+		VALUES ($1, $2, 'walk_in', 30) RETURNING id`, f.tenantID, f.locID).Scan(&entryVisit))
+	_, err := pool.Exec(ctx, `
+		INSERT INTO queue_entries (visit_id, queue_session_id, token_number)
+		VALUES ($1, $2, 1)`, entryVisit, f.sessionID)
+	require.NoError(t, err, "A10: pre-tier inserts must still succeed")
+
+	// A8: upgrade is append-plus-tombstone, never a mutation (Law 10).
+	tierID, err := insertTier(pool, f, "Expert", 30, true, true)
+	require.NoError(t, err)
+	var replacementID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO visit_services
+			(visit_id, service_variant_id, variant_name_snapshot, group_name_snapshot,
+			 category_name_snapshot, duration_minutes_snapshot, price_paise_snapshot,
+			 tier_id, tier_name_snapshot, supersedes_id)
+		VALUES ($1, $2, 'Mid Fade', 'Fade', 'Hair', 30, 45000, $3, 'Expert', $4) RETURNING id`,
+		visitID, f.variantID, tierID, originalID).Scan(&replacementID))
+	_, err = pool.Exec(ctx, `UPDATE visit_services SET superseded_at = NOW() WHERE id = $1`, originalID)
+	require.NoError(t, err)
+
+	var total int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM visit_services WHERE visit_id = $1`, visitID).Scan(&total))
+	require.Equal(t, 2, total, "A8: the tombstone and its replacement both persist")
+
+	var liveID uuid.UUID
+	var livePrice int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT id, price_paise_snapshot FROM visit_services
+		WHERE visit_id = $1 AND superseded_at IS NULL`, visitID).Scan(&liveID, &livePrice))
+	require.Equal(t, replacementID, liveID, "A8: only the replacement is live")
+	require.Equal(t, 45000, livePrice)
+
+	var supersedes uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT supersedes_id FROM visit_services WHERE id = $1`, replacementID).Scan(&supersedes))
+	require.Equal(t, originalID, supersedes, "A8: the replacement points back at what it replaced")
 }
