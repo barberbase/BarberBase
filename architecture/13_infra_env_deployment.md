@@ -138,7 +138,16 @@ api.barberbase.in {
 }
 ```
  
-Cloudflare proxies `barberbase.in` to Cloudflare Pages. `api.barberbase.in` bypasses Cloudflare proxy and points directly to the droplet (or via Cloudflare with orange-cloud to protect the IP).
+Cloudflare proxies `barberbase.in` to Cloudflare Pages. `api.barberbase.in` is also
+**proxied through Cloudflare (orange-cloud)** — verified 2026-08-28: it resolves to
+Cloudflare anycast (`172.67.176.82`, `104.21.80.79`) and responses carry `server: cloudflare`
+and `cf-ray`. The droplet's port 443 is **not reachable directly** (TCP connect times out
+from off-origin), so the origin is Cloudflare-only; there is no DNS-only bypass path.
+
+SSE works through this path unchanged: Caddy auto-streams `text/event-stream`, so the bare
+`reverse_proxy` above needs no `flush_interval`. Measured 2026-08-28: an SSE connection held
+500s through Cloudflare with heartbeats at a clean 30s cadence and no server- or
+intermediary-initiated close.
  
 ---
  
