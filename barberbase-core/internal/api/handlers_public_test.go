@@ -13,9 +13,11 @@ import (
 	"time"
 
 	"barberbase-core/internal/domain/queue"
+	"barberbase-core/internal/repository"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 
 	"barberbase-core/internal/domain/presence"
@@ -1194,3 +1196,335 @@ func setupTestServerWrapped(t *testing.T) (*Server, *pgxpool.Pool, uuid.UUID, uu
 	return setupTestServer(t)
 }
 
+
+// --- B3: shared effective-status parity table ---------------------------------
+//
+// ONE case set, executed against BOTH resolvers: computeShopStatus (in memory)
+// and repository.GetEffectiveShopStatus (real Postgres). Any case where the two
+// disagree is a failure, not a note (A9) — that parity is the whole reason both
+// are fixed in one unit, and it is the acceptance criterion for the future
+// unification unit: when someone collapses them, this table must still pass.
+
+var istZone = mustLoadIST()
+
+func mustLoadIST() *time.Location {
+	tz, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		panic(err)
+	}
+	return tz
+}
+
+type hoursSpec struct {
+	dow    int
+	isOpen bool
+	opens  string // "HH:MM:SS"; ignored when !isOpen
+	closes string
+}
+
+type overrideSpec struct {
+	status    string
+	startsIn  time.Duration  // relative to the case's now; negative = already started
+	expiresIn *time.Duration // nil = expires_at NULL (manual reopen required)
+}
+
+func (o *overrideSpec) activeAt() bool {
+	return o.startsIn <= 0 && (o.expiresIn == nil || *o.expiresIn > 0)
+}
+
+type shopStatusCase struct {
+	name       string
+	hours      []hoursSpec
+	override   *overrideSpec
+	now        time.Time
+	wantStatus string
+	wantNext   string // RFC3339 in IST; "" means nil
+	wantReason string
+}
+
+// standardWeek is Mon–Sat 10:00–21:00, Sunday closed — the shape the unit exists for.
+func standardWeek() []hoursSpec {
+	h := []hoursSpec{{dow: 0, isOpen: false}}
+	for d := 1; d <= 6; d++ {
+		h = append(h, hoursSpec{dow: d, isOpen: true, opens: "10:00:00", closes: "21:00:00"})
+	}
+	return h
+}
+
+func allDayEveryDay() []hoursSpec { // the star-salon demo shape — A6
+	var h []hoursSpec
+	for d := 0; d <= 6; d++ {
+		h = append(h, hoursSpec{dow: d, isOpen: true, opens: "00:00:00", closes: "23:59:59"})
+	}
+	return h
+}
+
+func ist(s string) time.Time {
+	t, err := time.ParseInLocation("2006-01-02 15:04:05.999", s, istZone)
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
+func dur(d time.Duration) *time.Duration { return &d }
+
+// buildWeek turns the spec into the in-memory shape. pgx scans a `time` column
+// onto the 2000-01-01 zero date, so only the clock part is ever real.
+func buildWeek(specs []hoursSpec) [7]*repository.LocationHoursRow {
+	var week [7]*repository.LocationHoursRow
+	for _, sp := range specs {
+		row := &repository.LocationHoursRow{IsOpen: sp.isOpen}
+		if sp.isOpen {
+			var hh, mm, ss int
+			fmt.Sscanf(sp.opens, "%d:%d:%d", &hh, &mm, &ss)
+			o := time.Date(2000, 1, 1, hh, mm, ss, 0, time.UTC)
+			fmt.Sscanf(sp.closes, "%d:%d:%d", &hh, &mm, &ss)
+			c := time.Date(2000, 1, 1, hh, mm, ss, 0, time.UTC)
+			row.OpensAt, row.ClosesAt = &o, &c
+		}
+		week[sp.dow] = row
+	}
+	return week
+}
+
+func shopStatusCases() []shopStatusCase {
+	return []shopStatusCase{
+		{
+			name: "A1_after_close_reports_next_morning", hours: standardWeek(),
+			now: ist("2026-08-28 21:30:00"), // Friday
+			wantStatus: "closed", wantNext: "2026-08-29T10:00:00+05:30", wantReason: repository.ReasonOutsideHours,
+		},
+		{
+			name: "A2_next_morning_reopens", hours: standardWeek(),
+			now: ist("2026-08-29 10:01:00"), // Saturday — the exact regression
+			wantStatus: "open", wantNext: "2026-08-31T10:00:00+05:30", wantReason: "",
+		},
+		{
+			name: "A1b_before_opening_today", hours: standardWeek(),
+			now: ist("2026-08-29 09:00:00"),
+			wantStatus: "closed", wantNext: "2026-08-29T10:00:00+05:30", wantReason: repository.ReasonOutsideHours,
+		},
+		{
+			name: "closed_day_today_opens_tomorrow", hours: standardWeek(),
+			now: ist("2026-08-30 12:00:00"), // Sunday
+			wantStatus: "closed", wantNext: "2026-08-31T10:00:00+05:30", wantReason: repository.ReasonClosedToday,
+		},
+		{
+			name: "A3_closed_sunday_and_monday_evaluated_saturday_night",
+			hours: []hoursSpec{
+				{dow: 0, isOpen: false}, {dow: 1, isOpen: false},
+				{dow: 2, isOpen: true, opens: "10:00:00", closes: "21:00:00"},
+				{dow: 3, isOpen: true, opens: "10:00:00", closes: "21:00:00"},
+				{dow: 4, isOpen: true, opens: "10:00:00", closes: "21:00:00"},
+				{dow: 5, isOpen: true, opens: "10:00:00", closes: "21:00:00"},
+				{dow: 6, isOpen: true, opens: "10:00:00", closes: "21:00:00"},
+			},
+			now: ist("2026-08-29 22:00:00"), // Saturday night
+			wantStatus: "closed", wantNext: "2026-09-01T10:00:00+05:30", wantReason: repository.ReasonOutsideHours,
+		},
+		{
+			name: "A4_zero_open_days_terminates",
+			hours: []hoursSpec{
+				{dow: 0, isOpen: false}, {dow: 1, isOpen: false}, {dow: 2, isOpen: false},
+				{dow: 3, isOpen: false}, {dow: 4, isOpen: false}, {dow: 5, isOpen: false},
+				{dow: 6, isOpen: false},
+			},
+			now: ist("2026-08-28 12:00:00"),
+			wantStatus: "closed", wantNext: "", wantReason: repository.ReasonNoOpenDays,
+		},
+		{
+			name: "A4b_no_hours_rows_at_all", hours: nil,
+			now: ist("2026-08-28 12:00:00"),
+			wantStatus: "closed", wantNext: "", wantReason: repository.ReasonNoOpenDays,
+		},
+		{
+			name: "lookahead_reaches_same_weekday_next_week",
+			hours: []hoursSpec{{dow: 6, isOpen: true, opens: "10:00:00", closes: "21:00:00"}},
+			now:   ist("2026-08-29 21:30:00"), // Saturday, just closed
+			wantStatus: "closed", wantNext: "2026-09-05T10:00:00+05:30", wantReason: repository.ReasonOutsideHours,
+		},
+		{
+			name: "A5_unexpired_override_beats_hours", hours: standardWeek(),
+			override:   &overrideSpec{status: "temporarily_closed", startsIn: -time.Hour, expiresIn: dur(time.Hour)},
+			now:        ist("2026-08-28 12:00:00"), // Friday, inside opening hours
+			wantStatus: "temporarily_closed", wantNext: "2026-08-29T10:00:00+05:30",
+			wantReason: repository.ReasonManualOverride,
+		},
+		{
+			name: "A5b_expired_override_lets_hours_resume", hours: standardWeek(),
+			override:   &overrideSpec{status: "temporarily_closed", startsIn: -2 * time.Hour, expiresIn: dur(-time.Hour)},
+			now:        ist("2026-08-28 12:00:00"),
+			wantStatus: "open", wantNext: "2026-08-29T10:00:00+05:30", wantReason: "",
+		},
+		{
+			name: "A6_24x7_stays_open_at_last_second", hours: allDayEveryDay(),
+			now: ist("2026-08-29 23:59:59.500"),
+			wantStatus: "open", wantNext: "2026-08-30T00:00:00+05:30", wantReason: "",
+		},
+		{
+			name: "A6b_24x7_stays_open_across_midnight", hours: allDayEveryDay(),
+			now: ist("2026-08-30 00:00:00"),
+			wantStatus: "open", wantNext: "2026-08-31T00:00:00+05:30", wantReason: "",
+		},
+		{
+			name: "A8_never_derives_closing_soon_right_before_close", hours: standardWeek(),
+			now: ist("2026-08-28 20:59:59"),
+			wantStatus: "open", wantNext: "2026-08-29T10:00:00+05:30", wantReason: "",
+		},
+		{
+			name: "A8b_manual_closing_soon_override_passes_through", hours: standardWeek(),
+			override:   &overrideSpec{status: "closing_soon", startsIn: -time.Minute, expiresIn: nil},
+			now:        ist("2026-08-28 20:00:00"),
+			wantStatus: "closing_soon", wantNext: "2026-08-29T10:00:00+05:30",
+			wantReason: repository.ReasonManualOverride,
+		},
+	}
+}
+
+// seedShopStatusLocation creates an isolated tenant + location (Asia/Kolkata) with
+// the case's hours and override. Rows are removed on cleanup.
+func seedShopStatusLocation(t *testing.T, pool *pgxpool.Pool, tc shopStatusCase) (uuid.UUID, uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	tenantID, locationID := uuid.New(), uuid.New()
+	suffix := uuid.New().String()[:8]
+
+	_, err := pool.Exec(ctx, `INSERT INTO tenants (id, name, slug, owner_phone_number)
+		VALUES ($1, 'B3 Tenant', $2, '+919999999999')`, tenantID, "b3-"+suffix)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO locations (id, tenant_id, slug, name, timezone)
+		VALUES ($1, $2, $3, 'B3 Location', 'Asia/Kolkata')`, locationID, tenantID, "b3loc-"+suffix)
+	require.NoError(t, err)
+
+	for _, sp := range tc.hours {
+		var opens, closes *string
+		if sp.isOpen {
+			o, c := sp.opens, sp.closes
+			opens, closes = &o, &c
+		}
+		_, err = pool.Exec(ctx, `INSERT INTO location_hours
+			(tenant_id, location_id, day_of_week, is_open, opens_at, closes_at)
+			VALUES ($1, $2, $3, $4, $5::time, $6::time)`,
+			tenantID, locationID, sp.dow, sp.isOpen, opens, closes)
+		require.NoError(t, err)
+	}
+
+	if tc.override != nil {
+		var expires *time.Time
+		if tc.override.expiresIn != nil {
+			e := tc.now.Add(*tc.override.expiresIn)
+			expires = &e
+		}
+		_, err = pool.Exec(ctx, `INSERT INTO location_status_overrides
+			(tenant_id, location_id, status, starts_at, expires_at)
+			VALUES ($1, $2, $3, $4, $5)`,
+			tenantID, locationID, tc.override.status, tc.now.Add(tc.override.startsIn), expires)
+		require.NoError(t, err)
+	}
+
+	t.Cleanup(func() {
+		c := context.Background()
+		_, _ = pool.Exec(c, `DELETE FROM location_status_overrides WHERE location_id = $1`, locationID)
+		_, _ = pool.Exec(c, `DELETE FROM location_hours WHERE location_id = $1`, locationID)
+		_, _ = pool.Exec(c, `DELETE FROM locations WHERE id = $1`, locationID)
+		_, _ = pool.Exec(c, `DELETE FROM tenants WHERE id = $1`, tenantID)
+	})
+	return tenantID, locationID
+}
+
+func nextOpenString(v *time.Time) string {
+	if v == nil {
+		return ""
+	}
+	return v.In(istZone).Format(time.RFC3339)
+}
+
+func shopStatusPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("DATABASE_URL not set")
+	}
+	pool, err := pgxpool.New(context.Background(), dbURL)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+// TestShopStatusParity is A1–A6, A8 and A9. Every case runs through both
+// resolvers and both must agree with each other and with the expectation.
+func TestShopStatusParity(t *testing.T) {
+	pool := shopStatusPool(t)
+	ctx := context.Background()
+
+	for _, tc := range shopStatusCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			// Resolver 1: pure, in memory. now is tz-localised, as all three
+			// public handlers do before calling.
+			var activeOverride *repository.LocationOverrideRow
+			if tc.override != nil && tc.override.activeAt() {
+				activeOverride = &repository.LocationOverrideRow{Status: tc.override.status}
+			}
+			mem := computeShopStatus(activeOverride, buildWeek(tc.hours), tc.now.In(istZone))
+
+			require.Equal(t, tc.wantStatus, mem.Status, "computeShopStatus status")
+			require.Equal(t, tc.wantNext, nextOpenString(mem.NextOpenAt), "computeShopStatus next_open_at")
+			require.Equal(t, tc.wantReason, mem.Reason, "computeShopStatus reason")
+
+			// Resolver 2: real Postgres, real rows, same instant.
+			tenantID, locationID := seedShopStatusLocation(t, pool, tc)
+			db, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID, tc.now)
+			require.NoError(t, err)
+
+			require.Equal(t, tc.wantStatus, db.Status, "GetEffectiveShopStatus status")
+			require.Equal(t, tc.wantNext, nextOpenString(db.NextOpenAt), "GetEffectiveShopStatus next_open_at")
+			require.Equal(t, tc.wantReason, db.Reason, "GetEffectiveShopStatus reason")
+
+			// A9 parity: the two implementations must not diverge.
+			require.Equal(t, mem.Status, db.Status, "A9: status diverged")
+			require.Equal(t, nextOpenString(mem.NextOpenAt), nextOpenString(db.NextOpenAt), "A9: next_open_at diverged")
+			require.Equal(t, mem.Reason, db.Reason, "A9: reason diverged")
+			require.Equal(t, mem.ManualOverrideActive, db.ManualOverrideActive, "A9: override flag diverged")
+		})
+	}
+}
+
+// TestShopStatusTimezoneIndependence is A7. The same instant expressed in UTC,
+// IST and a third zone must resolve identically — the resolver reads the
+// location's timezone, never the server's.
+func TestShopStatusTimezoneIndependence(t *testing.T) {
+	pool := shopStatusPool(t)
+	ctx := context.Background()
+
+	// Saturday 10:01 IST — open. Expressed as UTC this is Saturday 04:31, and as
+	// New York time it is still Friday, so a resolver that used the server zone
+	// or the raw wall clock would get all three wrong in different ways.
+	instant := ist("2026-08-29 10:01:00")
+	nyc, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+
+	tc := shopStatusCase{name: "A7", hours: standardWeek(), now: instant}
+	tenantID, locationID := seedShopStatusLocation(t, pool, tc)
+
+	var results []repository.ShopStatusResult
+	for _, zoned := range []time.Time{instant, instant.In(time.UTC), instant.In(nyc)} {
+		res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID, zoned)
+		require.NoError(t, err)
+		results = append(results, res)
+	}
+	for i, res := range results {
+		require.Equal(t, "open", res.Status, "representation %d must resolve open", i)
+		require.Equal(t, "2026-08-31T10:00:00+05:30", nextOpenString(res.NextOpenAt), "representation %d", i)
+		require.Equal(t, results[0].Status, res.Status, "A7: zone representation changed the answer")
+		require.Equal(t, nextOpenString(results[0].NextOpenAt), nextOpenString(res.NextOpenAt), "A7")
+	}
+
+	// computeShopStatus has no location of its own: it requires a tz-localised
+	// now, which is exactly why the handlers localise. Pin that the contract is
+	// load-bearing — a UTC-expressed now lands on the previous day here.
+	week := buildWeek(standardWeek())
+	require.Equal(t, "open", computeShopStatus(nil, week, instant.In(istZone)).Status)
+	require.Equal(t, "closed", computeShopStatus(nil, week, instant.In(time.UTC)).Status,
+		"a non-localised now must visibly differ, proving callers must localise")
+}

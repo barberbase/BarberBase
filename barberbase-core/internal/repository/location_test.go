@@ -52,7 +52,7 @@ func TestGetEffectiveShopStatus_ExpiredOverride(t *testing.T) {
 	`, tenantID, locationID, staffID, expiresAt)
 	require.NoError(t, err)
 
-	res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID)
+	res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID, time.Now())
 	require.NoError(t, err)
 
 	assert.Equal(t, "open", res.Status)
@@ -76,14 +76,14 @@ func TestGetEffectiveShopStatus_HoursFallback(t *testing.T) {
 	require.NoError(t, err)
 
 	// No hours row at all → closed.
-	res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID)
+	res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID, time.Now())
 	require.NoError(t, err)
 	assert.Equal(t, "closed", res.Status)
 	assert.False(t, res.ManualOverrideActive)
 
 	// Inside today's window → open.
 	seedHours(t, pool, tenantID, locationID, "00:00:00", "23:59:59")
-	res, err = repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID)
+	res, err = repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID, time.Now())
 	require.NoError(t, err)
 	assert.Equal(t, "open", res.Status)
 
@@ -96,7 +96,7 @@ func TestGetEffectiveShopStatus_HoursFallback(t *testing.T) {
 		opens, closes = "23:58:00", "23:59:00"
 	}
 	seedHours(t, pool, tenantID, locationID, opens, closes)
-	res, err = repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID)
+	res, err = repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID, time.Now())
 	require.NoError(t, err)
 	assert.Equal(t, "closed", res.Status)
 }
@@ -119,7 +119,7 @@ func TestSetShopStatus_TemporarilyClosed(t *testing.T) {
 	_, err := repository.SetShopStatus(ctx, pool, params)
 	require.NoError(t, err)
 
-	res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID)
+	res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID, time.Now())
 	require.NoError(t, err)
 	assert.Equal(t, "temporarily_closed", res.Status)
 	assert.True(t, res.ManualOverrideActive)
@@ -145,7 +145,7 @@ func TestSetShopStatus_TemporarilyClosed_Indefinite(t *testing.T) {
 	_, err := repository.SetShopStatus(ctx, pool, params)
 	require.NoError(t, err)
 
-	res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID)
+	res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID, time.Now())
 	require.NoError(t, err)
 	assert.Equal(t, "temporarily_closed", res.Status)
 	assert.Nil(t, res.OverrideExpiresAt)
@@ -265,7 +265,7 @@ func TestSetShopStatus_OpenClearsOverrides(t *testing.T) {
 	_, err = repository.SetShopStatus(ctx, pool, params)
 	require.NoError(t, err)
 
-	res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID)
+	res, err := repository.GetEffectiveShopStatus(ctx, pool, tenantID, locationID, time.Now())
 	require.NoError(t, err)
 	assert.Equal(t, "open", res.Status)
 

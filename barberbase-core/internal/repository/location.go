@@ -212,11 +212,31 @@ func GetQueueStats(ctx context.Context, pool *pgxpool.Pool, locationID string, b
 var ErrActiveEntriesExist = errors.New("active_entries_require_action")
 
 // ShopStatusResult is the shared effective-status type.
+//
+// NextOpenAt and Reason are INTERNAL: both resolvers compute them and the parity
+// table asserts on them, but no handler serialises them. Putting them on the wire
+// needs a LocationStatus change in the frozen openapi.yaml — see the wiring
+// handoff in the B3 report.
 type ShopStatusResult struct {
 	Status               string     // "open" | "closing_soon" | "temporarily_closed" | "closed"
 	ManualOverrideActive bool
 	OverrideExpiresAt    *time.Time // nil when no active override or expires_at IS NULL
+	NextOpenAt           *time.Time // instant the shop next opens, in the location's zone; nil = never
+	Reason               string     // "" | manual_override | outside_hours | closed_today | no_open_days
 }
+
+// Reasons carried on ShopStatusResult. Internal — never serialised.
+const (
+	ReasonManualOverride = "manual_override" // an unexpired override decided the status
+	ReasonOutsideHours   = "outside_hours"   // open day, but now is outside opens_at..closes_at
+	ReasonClosedToday    = "closed_today"    // today has no hours row, or is_open = false
+	ReasonNoOpenDays     = "no_open_days"    // no open day within the lookahead; NextOpenAt is nil
+)
+
+// nextOpenLookaheadDays bounds the search: today plus seven, so a shop open only
+// on today's weekday resolves to next week. A shop with no open days terminates
+// at the bound instead of looping.
+const NextOpenLookaheadDays = 8
 
 // StaffShopStatus is the full response payload for GET /staff/shop/status.
 type StaffShopStatus struct {
@@ -238,61 +258,156 @@ type SetShopStatusParams struct {
 	ModalAction    *string     // "finish_remaining" | "expire_remaining" | nil
 }
 
-func GetEffectiveShopStatus(ctx context.Context, db *pgxpool.Pool, tenantID, locationID uuid.UUID) (ShopStatusResult, error) {
-	query := `
+// GetLocationHoursWeek returns all seven days indexed by day_of_week (0=Sun..6=Sat),
+// nil where the location has no row for that day. One round trip: the index behind
+// UNIQUE(location_id, day_of_week) leads on location_id, so this is a single range scan.
+func GetLocationHoursWeek(ctx context.Context, db *pgxpool.Pool, locationID string) ([7]*LocationHoursRow, error) {
+	var week [7]*LocationHoursRow
+	rows, err := db.Query(ctx, `
+		SELECT day_of_week, is_open, opens_at, closes_at
+		FROM location_hours
+		WHERE location_id = $1::UUID
+		ORDER BY day_of_week
+	`, locationID)
+	if err != nil {
+		return week, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var dow int
+		var h LocationHoursRow
+		if err := rows.Scan(&dow, &h.IsOpen, &h.OpensAt, &h.ClosesAt); err != nil {
+			return week, err
+		}
+		if dow >= 0 && dow < 7 {
+			week[dow] = &h
+		}
+	}
+	return week, rows.Err()
+}
+
+// WithinHours reports whether local falls inside the day's opens_at..closes_at.
+// closes_at is inclusive for its whole second, so a 23:59:59 close covers the last
+// second of the day rather than shutting the shop 999ms early.
+func WithinHours(h *LocationHoursRow, local time.Time, tz *time.Location) bool {
+	y, m, d := local.Date()
+	if h.OpensAt != nil {
+		op := time.Date(y, m, d, h.OpensAt.Hour(), h.OpensAt.Minute(), h.OpensAt.Second(), 0, tz)
+		if local.Before(op) {
+			return false
+		}
+	}
+	if h.ClosesAt != nil {
+		ca := time.Date(y, m, d, h.ClosesAt.Hour(), h.ClosesAt.Minute(), h.ClosesAt.Second(), 0, tz)
+		if !local.Before(ca.Add(time.Second)) {
+			return false
+		}
+	}
+	return true
+}
+
+// GetEffectiveShopStatus resolves the staff-side effective status at now.
+//
+// Resolution order, never a hardcoded terminal closed:
+//  1. unexpired manual override
+//  2. today's location_hours in the location's timezone
+//  3. the next open day's opens_at, reported as NextOpenAt
+//
+// now may be expressed in any zone; it is converted to the location's zone here,
+// so a caller cannot get it wrong. Computed on read — nothing is written.
+//
+// This is deliberately a second implementation of the same contract as the public
+// computeShopStatus. They are held together by the shared parity table (A9) rather
+// than by shared code; collapsing them is its own unit.
+func GetEffectiveShopStatus(ctx context.Context, db *pgxpool.Pool, tenantID, locationID uuid.UUID, now time.Time) (ShopStatusResult, error) {
+	var tzName string
+	if err := db.QueryRow(ctx,
+		`SELECT timezone FROM locations WHERE id = $1 AND tenant_id = $2`, locationID, tenantID,
+	).Scan(&tzName); err != nil {
+		if err == pgx.ErrNoRows {
+			return ShopStatusResult{Status: "closed", Reason: ReasonNoOpenDays}, nil
+		}
+		return ShopStatusResult{}, err
+	}
+	tz, err := time.LoadLocation(tzName)
+	if err != nil {
+		tz, _ = time.LoadLocation("Asia/Kolkata")
+	}
+	local := now.In(tz)
+
+	week, err := GetLocationHoursWeek(ctx, db, locationID.String())
+	if err != nil {
+		return ShopStatusResult{}, err
+	}
+
+	// Next open day, bounded lookahead. A nil opens_at on an open day means the day
+	// starts at midnight, matching how WithinHours treats it.
+	var nextOpen *time.Time
+	for d := 0; d < NextOpenLookaheadDays; d++ {
+		day := local.AddDate(0, 0, d)
+		h := week[int(day.Weekday())]
+		if h == nil || !h.IsOpen {
+			continue
+		}
+		hh, mm, ss := 0, 0, 0
+		if h.OpensAt != nil {
+			hh, mm, ss = h.OpensAt.Hour(), h.OpensAt.Minute(), h.OpensAt.Second()
+		}
+		at := time.Date(day.Year(), day.Month(), day.Day(), hh, mm, ss, 0, tz)
+		if !local.Before(at) {
+			continue // that opening has already passed
+		}
+		nextOpen = &at
+		break
+	}
+
+	// 1. An unexpired manual override wins outright.
+	var o LocationOverrideRow
+	err = db.QueryRow(ctx, `
 		SELECT status, expires_at
 		FROM location_status_overrides
 		WHERE tenant_id = $1
 		  AND location_id = $2
 		  AND cleared_at IS NULL
-		  AND starts_at <= NOW()
-		  AND (expires_at IS NULL OR expires_at > NOW())
+		  AND starts_at <= $3
+		  AND (expires_at IS NULL OR expires_at > $3)
 		ORDER BY starts_at DESC
 		LIMIT 1
-	`
-	row := db.QueryRow(ctx, query, tenantID, locationID)
-	var o LocationOverrideRow
-	err := row.Scan(&o.Status, &o.ExpiresAt)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			// No active override: fall back to scheduled hours for today's DOW,
-			// all clock math in the location's timezone (schema:175 contract —
-			// manual_override > scheduled_hours; no hours row = closed).
-			var open bool
-			err = db.QueryRow(ctx, `
-				SELECT COALESCE(
-					lh.is_open
-					AND (lh.opens_at  IS NULL OR (NOW() AT TIME ZONE l.timezone)::time >= lh.opens_at)
-					AND (lh.closes_at IS NULL OR (NOW() AT TIME ZONE l.timezone)::time <= lh.closes_at)
-				, false)
-				FROM locations l
-				LEFT JOIN location_hours lh ON lh.location_id = l.id
-				  AND lh.day_of_week = EXTRACT(DOW FROM (NOW() AT TIME ZONE l.timezone))::SMALLINT
-				WHERE l.id = $2 AND l.tenant_id = $1
-			`, tenantID, locationID).Scan(&open)
-			if err != nil {
-				if err == pgx.ErrNoRows {
-					return ShopStatusResult{Status: "closed", ManualOverrideActive: false}, nil
-				}
-				return ShopStatusResult{}, err
-			}
-			status := "closed"
-			if open {
-				status = "open"
-			}
-			return ShopStatusResult{Status: status, ManualOverrideActive: false}, nil
-		}
+	`, tenantID, locationID, now).Scan(&o.Status, &o.ExpiresAt)
+	if err == nil {
+		return ShopStatusResult{
+			Status:               o.Status,
+			ManualOverrideActive: true,
+			OverrideExpiresAt:    o.ExpiresAt,
+			NextOpenAt:           nextOpen,
+			Reason:               ReasonManualOverride,
+		}, nil
+	}
+	if err != pgx.ErrNoRows {
 		return ShopStatusResult{}, err
 	}
-	return ShopStatusResult{
-		Status:               o.Status,
-		ManualOverrideActive: true,
-		OverrideExpiresAt:    o.ExpiresAt,
-	}, nil
+
+	// 2. Today's scheduled hours (schema:175 contract — manual_override > scheduled_hours).
+	res := ShopStatusResult{Status: "closed", NextOpenAt: nextOpen}
+	today := week[int(local.Weekday())]
+	switch {
+	case today == nil || !today.IsOpen:
+		res.Reason = ReasonClosedToday
+	case !WithinHours(today, local, tz):
+		res.Reason = ReasonOutsideHours
+	default:
+		res.Status = "open"
+	}
+	// 3. Nothing open anywhere in the lookahead is its own, louder reason.
+	if res.Status != "open" && nextOpen == nil {
+		res.Reason = ReasonNoOpenDays
+	}
+	return res, nil
 }
 
 func GetStaffShopStatus(ctx context.Context, db *pgxpool.Pool, tenantID, locationID uuid.UUID) (StaffShopStatus, error) {
-	effStatus, err := GetEffectiveShopStatus(ctx, db, tenantID, locationID)
+	effStatus, err := GetEffectiveShopStatus(ctx, db, tenantID, locationID, time.Now())
 	if err != nil {
 		return StaffShopStatus{}, err
 	}

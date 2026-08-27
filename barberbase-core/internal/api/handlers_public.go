@@ -38,35 +38,83 @@ func getCheckinIntentLimiter(ip string) *rate.Limiter {
 	return v.(*rate.Limiter)
 }
 
+// nextOpenAt returns the instant the shop next opens, or nil when no day in the
+// lookahead is open. All arithmetic is in now's location, so now must already be
+// tz-localised (see computeShopStatus). An open day with a nil opens_at starts at
+// midnight, matching repository.WithinHours.
+//
+// The lookahead is bounded, so a shop that never opens terminates instead of
+// looping. An opening that has already passed today is skipped, so a shop that is
+// open right now reports its *next* opening, not the current one.
+func nextOpenAt(week [7]*repository.LocationHoursRow, now time.Time) *time.Time {
+	for d := 0; d < repository.NextOpenLookaheadDays; d++ {
+		day := now.AddDate(0, 0, d)
+		h := week[int(day.Weekday())]
+		if h == nil || !h.IsOpen {
+			continue
+		}
+		hh, mm, ss := 0, 0, 0
+		if h.OpensAt != nil {
+			hh, mm, ss = h.OpensAt.Hour(), h.OpensAt.Minute(), h.OpensAt.Second()
+		}
+		at := time.Date(day.Year(), day.Month(), day.Day(), hh, mm, ss, 0, now.Location())
+		if !now.Before(at) {
+			continue
+		}
+		return &at
+	}
+	return nil
+}
+
 // computeShopStatus derives the effective shop status from override + hours.
-// Priority: active override > scheduled hours.
-// Returns one of: "open", "closing_soon", "temporarily_closed", "closed".
+//
+// Resolution order, never a hardcoded terminal closed:
+//  1. unexpired manual override
+//  2. today's location_hours
+//  3. the next open day's opens_at, reported as NextOpenAt
+//
+// Status is one of "open", "closing_soon", "temporarily_closed", "closed" — but
+// closing_soon is only ever reached through a manual override; nothing here
+// derives it from the clock. See the B3 report on the 04_queue_state_machine.md
+// conflict.
+//
+// now MUST already be in the location's timezone; every boundary is built with
+// now.Location(). All three callers localise before calling.
+//
+// This is deliberately a second implementation of the contract in
+// repository.GetEffectiveShopStatus, held together by the shared parity table
+// rather than by shared code.
 func computeShopStatus(
 	override *repository.LocationOverrideRow,
-	hours *repository.LocationHoursRow,
+	week [7]*repository.LocationHoursRow,
 	now time.Time,
-) string {
+) repository.ShopStatusResult {
+	next := nextOpenAt(week, now)
+
 	if override != nil {
-		return override.Status
-	}
-	if hours == nil || !hours.IsOpen {
-		return "closed"
-	}
-	if hours.OpensAt != nil {
-		op := *hours.OpensAt
-		opDate := time.Date(now.Year(), now.Month(), now.Day(), op.Hour(), op.Minute(), op.Second(), 0, now.Location())
-		if now.Before(opDate) {
-			return "closed"
+		return repository.ShopStatusResult{
+			Status:               override.Status,
+			ManualOverrideActive: true,
+			OverrideExpiresAt:    override.ExpiresAt,
+			NextOpenAt:           next,
+			Reason:               repository.ReasonManualOverride,
 		}
 	}
-	if hours.ClosesAt != nil {
-		ca := *hours.ClosesAt
-		caDate := time.Date(now.Year(), now.Month(), now.Day(), ca.Hour(), ca.Minute(), ca.Second(), 0, now.Location())
-		if now.After(caDate) {
-			return "closed"
-		}
+
+	res := repository.ShopStatusResult{Status: "closed", NextOpenAt: next}
+	today := week[int(now.Weekday())]
+	switch {
+	case today == nil || !today.IsOpen:
+		res.Reason = repository.ReasonClosedToday
+	case !repository.WithinHours(today, now, now.Location()):
+		res.Reason = repository.ReasonOutsideHours
+	default:
+		res.Status = "open"
 	}
-	return "open"
+	if res.Status != "open" && next == nil {
+		res.Reason = repository.ReasonNoOpenDays
+	}
+	return res
 }
 
 // hhmm formats a Postgres time-of-day value as "HH:MM" for JSON.
@@ -699,7 +747,7 @@ func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locat
 	now := time.Now().In(tz)
 	dayOfWeek := int(now.Weekday())
 
-	hours, err := repository.GetLocationHoursForDay(ctx, s.Pool, location.ID, dayOfWeek)
+	week, err := repository.GetLocationHoursWeek(ctx, s.Pool, location.ID)
 	if err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
@@ -711,7 +759,8 @@ func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locat
 		return
 	}
 
-	shopStatus := computeShopStatus(override, hours, now)
+	hours := week[dayOfWeek]
+	shopStatus := computeShopStatus(override, week, now).Status
 	businessDate := now.Format("2006-01-02")
 
 	stats, err := repository.GetQueueStats(ctx, s.Pool, location.ID, businessDate)
@@ -974,7 +1023,7 @@ func (s *Server) ResolveBookingOptions(w http.ResponseWriter, r *http.Request, l
 		return
 	}
 
-	hours, err := repository.GetLocationHoursForDay(ctx, s.Pool, location.ID, dayOfWeek)
+	week, err := repository.GetLocationHoursWeek(ctx, s.Pool, location.ID)
 	if err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
@@ -986,7 +1035,8 @@ func (s *Server) ResolveBookingOptions(w http.ResponseWriter, r *http.Request, l
 		return
 	}
 
-	shopStatus := computeShopStatus(override, hours, now)
+	hours := week[dayOfWeek]
+	shopStatus := computeShopStatus(override, week, now).Status
 	// isOpenToday derives from the effective status (override > hours) so that a
 	// manual "open" override on a no-hours Phase 1 shop still allows walk_in.
 	isOpenToday := shopStatus == "open" || shopStatus == "closing_soon"
@@ -1133,7 +1183,7 @@ func (s *Server) CreateCheckinIntent(w http.ResponseWriter, r *http.Request, loc
 		return
 	}
 
-	hours, err := repository.GetLocationHoursForDay(ctx, s.Pool, location.ID, dayOfWeek)
+	week, err := repository.GetLocationHoursWeek(ctx, s.Pool, location.ID)
 	if err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
@@ -1145,7 +1195,8 @@ func (s *Server) CreateCheckinIntent(w http.ResponseWriter, r *http.Request, loc
 		return
 	}
 
-	shopStatus := computeShopStatus(override, hours, now)
+	hours := week[dayOfWeek]
+	shopStatus := computeShopStatus(override, week, now).Status
 	// isOpenToday derives from the effective status (override > hours) so that a
 	// manual "open" override on a no-hours Phase 1 shop still allows walk_in.
 	isOpenToday := shopStatus == "open" || shopStatus == "closing_soon"
