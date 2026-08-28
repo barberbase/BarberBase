@@ -17,6 +17,7 @@ import (
 	"barberbase-core/internal/domain/presence"
 	"barberbase-core/internal/jobs"
 	"barberbase-core/internal/outbox"
+	"barberbase-core/internal/r2"
 	"barberbase-core/internal/realtime"
 	"barberbase-core/internal/repository"
 	"barberbase-core/internal/webhook"
@@ -105,6 +106,13 @@ func main() {
 	go watchdog.Start(ctx)
 	go eod.Start(ctx)
 	go weekly.Start(ctx)
+
+	// [M2] Orphaned-upload reaper. Its own goroutine and its own advisory lock
+	// (0xBBC404) deliberately: it talks to R2, and an R2 outage must never be
+	// able to stall the watchdog, which is what drives auto-snooze and near-turn.
+	mediaStore := r2.New(cfg.R2AccountID, cfg.R2MediaBucket,
+		cfg.R2MediaAccessKeyID, cfg.R2MediaSecretAccessKey, cfg.R2MediaPublicBaseURL)
+	go jobs.NewMediaReaper(pool, mediaStore, cfg.MediaReapBatch).Start(ctx)
 
 	apiServer := &api.Server{
 		Pool:    pool,

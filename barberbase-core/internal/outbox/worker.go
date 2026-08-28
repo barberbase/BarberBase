@@ -7,11 +7,12 @@ import (
 	"log"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/config"
 	notification "barberbase-core/internal/outbox/handlers"
+	"barberbase-core/internal/r2"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // OutboxEvent mirrors the columns returned by the claim-or-reclaim RETURNING *.
@@ -43,6 +44,8 @@ func NewWorker(pool *pgxpool.Pool, bhejna bhejna.Client) *Worker {
 		}
 	}
 	fs := notification.NewFeedbackScheduler(pool, cfg)
+	mediaStore := r2.New(cfg.R2AccountID, cfg.R2MediaBucket,
+		cfg.R2MediaAccessKeyID, cfg.R2MediaSecretAccessKey, cfg.R2MediaPublicBaseURL)
 	pushHandler := &notification.PushHandler{Pool: pool, Config: cfg}
 	return &Worker{
 		pool: pool,
@@ -52,6 +55,10 @@ func NewWorker(pool *pgxpool.Pool, bhejna bhejna.Client) *Worker {
 			"weekly_summary.send":       n,
 			"feedback_request.schedule": fs,
 			"web_push.send":             &stubHandler{}, // C6.5 replaces
+			// [M2] Deletes the R2 object behind an archived media asset once its
+			// grace window elapses. Nil Store when R2 is unconfigured — Handle
+			// then fails terminal rather than retrying forever against nothing.
+			"media.purge": &notification.MediaPurgeHandler{Pool: pool, Store: mediaStore},
 		},
 		pushHandler: pushHandler,
 	}

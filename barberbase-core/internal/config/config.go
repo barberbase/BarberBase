@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 )
 
 type Config struct {
@@ -23,6 +24,37 @@ type Config struct {
 	VAPIDPublicKey  string // VAPID_PUBLIC_KEY env — base64url EC P-256 public key
 	VAPIDPrivateKey string `json:"-"` // VAPID_PRIVATE_KEY env — base64url EC P-256 private key; NEVER log, NEVER return in any response
 	VAPIDSubject    string // VAPID_SUBJECT env — contact URI e.g. mailto:ops@barberbase.in
+
+	// Cloudflare R2 — MEDIA bucket. Deliberately separate from the R2_* backup
+	// bucket credentials: a token that can write customer media must not also be
+	// able to read or delete database dumps.
+	//
+	// All optional, on the same reasoning as VAPID above (Law 21): media is a
+	// convenience layer over the queue. A deployment with no R2 credentials must
+	// boot and run every queue workflow, with presign returning 503 instead.
+	R2AccountID            string
+	R2MediaBucket          string
+	R2MediaAccessKeyID     string
+	R2MediaSecretAccessKey string `json:"-"` // NEVER log, NEVER return in any response
+	R2MediaPublicBaseURL   string
+
+	// Media caps. Env-overridable; the defaults are the operating values.
+	MediaMaxBytes      int // MEDIA_MAX_BYTES — headroom over the ~120KB the client resizes to
+	MediaMaxPerVariant int // MEDIA_MAX_PER_VARIANT
+	MediaReapBatch     int // MEDIA_REAP_BATCH — bounds one reaper tick on a 1GB droplet
+}
+
+// envInt reads a positive integer env var, falling back to def. A malformed or
+// non-positive value takes the default rather than failing the boot: these are
+// operational tuning knobs, not credentials.
+func envInt(name string, def int) int {
+	if v := os.Getenv(name); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+		log.Printf("[Config] %s=%q is not a positive integer — using %d", name, v, def)
+	}
+	return def
 }
 
 func Load() (*Config, error) {
@@ -90,6 +122,16 @@ func Load() (*Config, error) {
 		log.Printf("[Config] VAPID keys not fully configured — web push disabled (Law 21: queue correctness unaffected)")
 	}
 
+	// Media storage. Absent credentials disable media, never the server.
+	r2AccountID := os.Getenv("R2_ACCOUNT_ID")
+	r2MediaBucket := os.Getenv("R2_MEDIA_BUCKET_NAME")
+	r2MediaKeyID := os.Getenv("R2_MEDIA_ACCESS_KEY_ID")
+	r2MediaSecret := os.Getenv("R2_MEDIA_SECRET_ACCESS_KEY")
+	if r2AccountID == "" || r2MediaBucket == "" || r2MediaKeyID == "" || r2MediaSecret == "" {
+		log.Printf("[Config] R2 media credentials not fully configured — image upload disabled " +
+			"(queue correctness unaffected)")
+	}
+
 	return &Config{
 		DatabaseURL:      dbURL,
 		JWTSecret:        jwtSecret,
@@ -103,5 +145,15 @@ func Load() (*Config, error) {
 		VAPIDPublicKey:   vapidPublicKey,
 		VAPIDPrivateKey:  vapidPrivateKey,
 		VAPIDSubject:     vapidSubject,
+
+		R2AccountID:            r2AccountID,
+		R2MediaBucket:          r2MediaBucket,
+		R2MediaAccessKeyID:     r2MediaKeyID,
+		R2MediaSecretAccessKey: r2MediaSecret,
+		R2MediaPublicBaseURL:   os.Getenv("R2_MEDIA_PUBLIC_BASE_URL"),
+
+		MediaMaxBytes:      envInt("MEDIA_MAX_BYTES", 300*1024),
+		MediaMaxPerVariant: envInt("MEDIA_MAX_PER_VARIANT", 6),
+		MediaReapBatch:     envInt("MEDIA_REAP_BATCH", 100),
 	}, nil
 }

@@ -50,6 +50,35 @@ here until 2026-08-28 and was deleted because it had recorded 002 as *pending on
 prod* when prod had been running it since July. `schema_migrations` is the ledger;
 a second one that can disagree with it is worse than none.
 
+## `media_assets.content_hash` is client-asserted
+
+The value in `content_hash` is supplied by the browser and **cannot be verified**.
+Verifying it would mean reading the object's bytes, and the media pipeline's
+central constraint is that object bytes never touch the droplet — one decoded
+12MP JPEG costs ~48MB against a 250MiB `GOMEMLIMIT`.
+
+So treat it as a cache key and a dedup key, never an integrity proof. Its
+*shape* is validated at presign (exactly 64 lowercase hex, else 400), because a
+malformed hash yields a malformed R2 key. Its *value* is trusted only insofar as
+the blast radius allows: keys are scoped to `location_id`, and below that to
+`service_variant_id` or `staff_member_id`, so a forged or colliding hash can only
+collide with objects that same shop already owns. **Nothing security-relevant may
+ever depend on this column.**
+
+Two consequences worth knowing. The key embeds only the first 16 hex characters —
+64 bits, ample against accidental collision inside one location's keyspace, which
+is the only scope in which a collision is reachable. And because keys are
+content-addressed, objects are immutable and served with
+`Cache-Control: max-age=31536000, immutable`; a shop that PUTs *different* bytes
+under a hash it has already used overwrites its own object and sees stale CDN
+content for up to a year. That is the price of immutable caching and it is the
+right trade, but it is a real behaviour, not a theoretical one.
+
+R2 returns an ETag on the commit-time HEAD. It is logged, not stored:
+`media_assets` has no column for it and 003 is frozen. It would be useful for
+detecting an object replaced under an existing key — a candidate for the next
+migration, not a reason to open one.
+
 ## Adopting an existing database (`ADOPT_BASELINE`)
 
 A database created before the ledger existed has the 001 schema but no
