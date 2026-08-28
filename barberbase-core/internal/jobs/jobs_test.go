@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/require"
 )
 
 func setupTestDB(t *testing.T) *pgxpool.Pool {
@@ -759,5 +760,269 @@ func TestWatchdog_WebChannelMarkAndSnooze(t *testing.T) {
 	_ = pool.QueryRow(ctx, "SELECT COUNT(*) FROM outbox_events WHERE tenant_id = $1", tenantID).Scan(&outboxCount)
 	if outboxCount != 0 {
 		t.Errorf("Web-channel auto-snooze must insert ZERO outbox rows, got %d", outboxCount)
+	}
+}
+
+// ─── T3: tier-aware auto-snooze and gone-dark detection ─────────────────────
+
+type tierShop struct {
+	tenantID, locationID, sessionID uuid.UUID
+	watchdog                        *Watchdog
+	manager                         *realtime.Manager
+	session                         session
+}
+
+// seedTierShop builds one active shop with a queue session and returns the
+// watchdog wired to it. notify_when_people_ahead is set to -1 so checkNearTurn
+// never fires in these tests: this file's T3 cases are about snooze and tier
+// availability, and a stray near-turn would bump queue_version underneath them.
+func seedTierShop(t *testing.T, pool *pgxpool.Pool) tierShop {
+	t.Helper()
+	ctx := context.Background()
+	s := tierShop{tenantID: uuid.New(), locationID: uuid.New(), sessionID: uuid.New()}
+
+	_, err := pool.Exec(ctx, `
+		INSERT INTO tenants (id, name, slug, owner_phone_number)
+		VALUES ($1, 'T3 Tenant', $2, '+919876500000')`, s.tenantID, "t3-"+uuid.NewString()[:8])
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO locations (id, tenant_id, name, slug, timezone, is_active,
+		                       notify_when_people_ahead, notify_when_wait_minutes)
+		VALUES ($1, $2, 'T3 Loc', $3, 'Asia/Kolkata', true, -1, -1)`,
+		s.locationID, s.tenantID, "t3loc-"+uuid.NewString()[:8])
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO queue_sessions (id, tenant_id, location_id, business_date, status)
+		VALUES ($1, $2, $3, (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE, 'active')`,
+		s.sessionID, s.tenantID, s.locationID)
+	require.NoError(t, err)
+
+	s.manager = realtime.NewManager()
+	s.watchdog = NewWatchdog(pool, s.manager, &config.Config{
+		HMACSecret:      "test-hmac-secret-123456789012345",
+		BhejnaFromPhone: "+912200000001",
+	})
+	s.session = session{ID: s.sessionID, TenantID: s.tenantID, LocationID: s.locationID,
+		NotifyPeopleAhead: -1, NotifyWaitMinutes: -1, LocationName: "T3 Loc"}
+	return s
+}
+
+func seedTierRow(t *testing.T, pool *pgxpool.Pool, s tierShop, name string, rank int) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	require.NoError(t, pool.QueryRow(context.Background(), `
+		INSERT INTO staff_tiers (tenant_id, location_id, name, rank)
+		VALUES ($1, $2, $3, $4) RETURNING id`, s.tenantID, s.locationID, name, rank).Scan(&id))
+	return id
+}
+
+func seedTierBarber(t *testing.T, pool *pgxpool.Pool, s tierShop, name, status string, tierID *uuid.UUID) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	require.NoError(t, pool.QueryRow(context.Background(), `
+		INSERT INTO staff_members (tenant_id, location_id, name, phone_number, role, status, tier_id)
+		VALUES ($1, $2, $3, $4, 'barber', $5, $6) RETURNING id`,
+		s.tenantID, s.locationID, name, "+9197"+uuid.NewString()[:9], status, tierID).Scan(&id))
+	return id
+}
+
+// seedSnoozeCandidate creates a waiting entry already past the snooze grace
+// period: presence 'notified', near_turn_notified_at well in the past. Anything
+// that is still not snoozed after a tick was spared on purpose.
+func seedSnoozeCandidate(t *testing.T, pool *pgxpool.Pool, s tierShop, token, sortKey int, tierID *uuid.UUID) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	var visitID, entryID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO visits (tenant_id, location_id, entry_type, status, total_duration_minutes, magic_link_expires_at)
+		VALUES ($1, $2, 'walk_in', 'active', 30, NOW() + INTERVAL '23 hours') RETURNING id`,
+		s.tenantID, s.locationID).Scan(&visitID))
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO queue_entries
+			(visit_id, queue_session_id, token_number, state, presence_state, is_dispatchable,
+			 session_channel, priority_group, sort_key, required_tier_id, near_turn_notified_at)
+		VALUES ($1, $2, $3, 'waiting', 'notified', true, 'web', 100, $4, $5,
+		        NOW() - INTERVAL '30 minutes') RETURNING id`,
+		visitID, s.sessionID, token, int64(sortKey), tierID).Scan(&entryID))
+	return entryID
+}
+
+func entrySnapshot(t *testing.T, pool *pgxpool.Pool, entryID uuid.UUID) (state, presence string, dispatchable bool, warning *string) {
+	t.Helper()
+	require.NoError(t, pool.QueryRow(context.Background(), `
+		SELECT state, presence_state, is_dispatchable, stale_warning
+		FROM queue_entries WHERE id = $1`, entryID).Scan(&state, &presence, &dispatchable, &warning))
+	return
+}
+
+func queueVersion(t *testing.T, pool *pgxpool.Pool, sessionID uuid.UUID) int {
+	t.Helper()
+	var v int
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT queue_version FROM queue_sessions WHERE id = $1`, sessionID).Scan(&v))
+	return v
+}
+
+// A4 (snooze half) + A5 (first half) — head-of-line token 14 requires Senior,
+// the only Senior is mid-cut, two Juniors are idle. The queue moves around 14,
+// and 14 is NOT snoozed, NOT skipped: it stays waiting and dispatchable, with
+// its presence untouched.
+//
+// Before T3 this was the harm: the entry is head-of-line, the grace has elapsed,
+// so it got snoozed and is_dispatchable=false — punished for a constraint the
+// shop sold it.
+func TestWatchdog_T3_HeadOfLineWaitingOnBusyTierIsNotSnoozed(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+	shop := seedTierShop(t, pool)
+
+	junior := seedTierRow(t, pool, shop, "Junior", 10)
+	senior := seedTierRow(t, pool, shop, "Senior", 20)
+	seedTierBarber(t, pool, shop, "The Senior", "cutting", &senior)
+	seedTierBarber(t, pool, shop, "Junior One", "idle", &junior)
+	seedTierBarber(t, pool, shop, "Junior Two", "idle", &junior)
+
+	token14 := seedSnoozeCandidate(t, pool, shop, 14, 100, &senior)
+	token15 := seedSnoozeCandidate(t, pool, shop, 15, 200, nil)
+
+	shop.watchdog.runJob(ctx)
+
+	state, presence, dispatchable, _ := entrySnapshot(t, pool, token14)
+	require.Equal(t, "waiting", state, "A4: token 14 must stay waiting")
+	require.Equal(t, "notified", presence, "A4: token 14 must not be snoozed")
+	require.True(t, dispatchable, "A4/A9: is_dispatchable must be untouched by tier logic")
+
+	// The next eligible entry is the one the tick acts on instead.
+	_, presence15, dispatchable15, _ := entrySnapshot(t, pool, token15)
+	require.Equal(t, "snoozed", presence15, "A5: an unconstrained entry whose turn genuinely came is still snoozed")
+	require.False(t, dispatchable15)
+}
+
+// A5 (second half) — the gate must not become a blanket "never snooze". An
+// unconstrained head-of-line entry past its grace period is still snoozed, and
+// a tier-constrained one whose barber IS idle is snoozed too.
+func TestWatchdog_T3_SnoozeStillFiresWhenABarberIsFree(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+	shop := seedTierShop(t, pool)
+
+	senior := seedTierRow(t, pool, shop, "Senior", 20)
+	seedTierBarber(t, pool, shop, "The Senior", "idle", &senior)
+
+	tiered := seedSnoozeCandidate(t, pool, shop, 20, 100, &senior)
+	shop.watchdog.runJob(ctx)
+
+	_, presence, dispatchable, _ := entrySnapshot(t, pool, tiered)
+	require.Equal(t, "snoozed", presence,
+		"A5: an idle eligible barber means the customer's turn really has come")
+	require.False(t, dispatchable)
+}
+
+// A8 — zero on-shift barbers for a required tier is detected and surfaced on the
+// entry. No notification is sent: bb_tier_unavailable is a Meta template that
+// must be submitted manually, and that is T4's scope.
+func TestWatchdog_T3_TierGoneDarkIsSurfacedWithoutNotifying(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+	shop := seedTierShop(t, pool)
+
+	senior := seedTierRow(t, pool, shop, "Senior", 20)
+	offlineSenior := seedTierBarber(t, pool, shop, "The Senior", "offline", &senior)
+	seedTierBarber(t, pool, shop, "A Junior", "idle", nil) // on shift, wrong tier
+
+	entryID := seedSnoozeCandidate(t, pool, shop, 30, 100, &senior)
+	plain := seedSnoozeCandidate(t, pool, shop, 31, 200, nil)
+
+	before := queueVersion(t, pool, shop.sessionID)
+	shop.watchdog.checkTierAvailability(ctx, shop.session)
+
+	_, _, _, warning := entrySnapshot(t, pool, entryID)
+	require.NotNil(t, warning)
+	require.Equal(t, "tier_unavailable", *warning, "A8: the shop must be able to see the entry is unservable")
+
+	_, _, _, plainWarning := entrySnapshot(t, pool, plain)
+	require.Nil(t, plainWarning, "A8: an unconstrained entry is always servable")
+
+	var outbox int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT COUNT(*) FROM outbox_events`).Scan(&outbox))
+	require.Zero(t, outbox, "A8: no notification in this unit — bb_tier_unavailable is T4")
+
+	require.Equal(t, before+1, queueVersion(t, pool, shop.sessionID), "A8: a real change bumps the version")
+
+	// And it clears itself the moment that barber comes back on shift — via a
+	// break, not just idle, since a break still counts as on shift.
+	_, err := pool.Exec(ctx, `UPDATE staff_members SET status = 'break' WHERE id = $1`, offlineSenior)
+	require.NoError(t, err)
+	shop.watchdog.checkTierAvailability(ctx, shop.session)
+	_, _, _, warning = entrySnapshot(t, pool, entryID)
+	require.Nil(t, warning, "A8: the warning must clear when the tier is staffed again")
+}
+
+// A8b — this unit clears only the value it sets. A waiting-state warning written
+// by anything else survives a full tick, in both the tier-available and
+// tier-unavailable branches. Nothing else writes stale_warning for waiting rows
+// today, which makes a blanket CASE ... ELSE NULL safe by coincidence; this test
+// is what keeps it safe by construction.
+func TestWatchdog_T3_ForeignStaleWarningSurvivesTick(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+	shop := seedTierShop(t, pool)
+
+	senior := seedTierRow(t, pool, shop, "Senior", 20)
+	staffedTier := seedTierRow(t, pool, shop, "Staffed", 30)
+	seedTierBarber(t, pool, shop, "Staffed Barber", "idle", &staffedTier)
+	// Nobody in Senior at all → that tier is dark.
+
+	dark := seedSnoozeCandidate(t, pool, shop, 40, 100, &senior)
+	lit := seedSnoozeCandidate(t, pool, shop, 41, 200, &staffedTier)
+	for _, id := range []uuid.UUID{dark, lit} {
+		_, err := pool.Exec(ctx,
+			`UPDATE queue_entries SET stale_warning = 'someone_elses_warning' WHERE id = $1`, id)
+		require.NoError(t, err)
+	}
+
+	shop.watchdog.runJob(ctx)
+
+	_, _, _, darkWarning := entrySnapshot(t, pool, dark)
+	require.NotNil(t, darkWarning)
+	require.Equal(t, "someone_elses_warning", *darkWarning,
+		"A8b: the tier-unavailable branch must not overwrite a warning it did not set")
+
+	_, _, _, litWarning := entrySnapshot(t, pool, lit)
+	require.NotNil(t, litWarning)
+	require.Equal(t, "someone_elses_warning", *litWarning,
+		"A8b: the clear branch must not wipe a warning it did not set")
+}
+
+// A8c — a tick that changes nothing must not bump queue_version and must not
+// broadcast. Otherwise every idle shop with a tiered queue forces a refetch from
+// every connected client once a minute, forever.
+func TestWatchdog_T3_NoOpTickDoesNotBumpVersionOrBroadcast(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+	shop := seedTierShop(t, pool)
+
+	senior := seedTierRow(t, pool, shop, "Senior", 20)
+	seedTierBarber(t, pool, shop, "The Senior", "idle", &senior)
+	seedSnoozeCandidate(t, pool, shop, 50, 100, &senior)
+
+	// First pass settles whatever there is to settle.
+	shop.watchdog.checkTierAvailability(ctx, shop.session)
+	settled := queueVersion(t, pool, shop.sessionID)
+
+	ch := shop.manager.Subscribe(shop.locationID.String())
+	shop.watchdog.checkTierAvailability(ctx, shop.session)
+
+	require.Equal(t, settled, queueVersion(t, pool, shop.sessionID),
+		"A8c: an unchanged tick must not bump queue_version")
+	select {
+	case ev := <-ch:
+		t.Fatalf("A8c: an unchanged tick must not broadcast, got %+v", ev)
+	default:
 	}
 }

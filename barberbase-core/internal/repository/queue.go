@@ -198,6 +198,25 @@ func GetLocationRoutingMode(ctx context.Context, pool *pgxpool.Pool, locationID 
 	return routingMode, timezone, err
 }
 
+// tierEligible is the [T3] tier filter appended to every dispatch and
+// waiting-remote-count query. $2 is always the calling barber's staff_members.id,
+// resolved from the JWT or the station_devices row — never from the request body
+// (Law 11). The tier itself is looked up inside the query as an InitPlan: one PK
+// lookup evaluated once, no extra round trip on the hottest path in the product.
+//
+// "= NULL" is never true, so a barber whose tier_id IS NULL — and uuid.Nil from a
+// pooled device button, which matches no staff row at all — falls through to
+// required_tier_id IS NULL only. That is the pre-tier default and it must not
+// silently widen.
+//
+// This is a query-time predicate. It is never folded into is_dispatchable:
+// that column is a stored boolean, and eligibility depends on which barber is
+// asking. is_dispatchable remains the dispatch gate; tier is an extra filter on
+// top of it, never a replacement (Law 12).
+const tierEligible = `
+			  AND (required_tier_id IS NULL
+			       OR required_tier_id = (SELECT tier_id FROM staff_members WHERE id = $2))`
+
 func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMode, businessDate string) (sessionID, entryID, visitID uuid.UUID, newVersion int, err error) {
 	// Step 4: [Law 1] Lock queue_session FOR UPDATE
 	const lockQuery = `
@@ -228,11 +247,11 @@ func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMo
 			WHERE queue_session_id = $1
 			  AND state = 'waiting'
 			  AND is_dispatchable = true
-			  AND presence_state = 'arrived'
+			  AND presence_state = 'arrived'` + tierEligible + `
 			ORDER BY priority_group ASC, sort_key ASC, token_number ASC
 			LIMIT 1
 			FOR UPDATE`
-		selectErr = tx.QueryRow(ctx, q, sessionID).Scan(&entryID, &visitID, &customerID, &sessionChannel, &tokenNumber)
+		selectErr = tx.QueryRow(ctx, q, sessionID, params.StaffMemberID).Scan(&entryID, &visitID, &customerID, &sessionChannel, &tokenNumber)
 	case "hybrid":
 		const q = `
 			SELECT id, visit_id, customer_id, session_channel, token_number
@@ -241,7 +260,7 @@ func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMo
 			  AND state = 'waiting'
 			  AND is_dispatchable = true
 			  AND presence_state = 'arrived'
-			  AND (requested_barber_id = $2 OR requested_barber_id IS NULL)
+			  AND (requested_barber_id = $2 OR requested_barber_id IS NULL)` + tierEligible + `
 			ORDER BY priority_group ASC, sort_key ASC, token_number ASC
 			LIMIT 1
 			FOR UPDATE`
@@ -254,7 +273,7 @@ func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMo
 			  AND state = 'waiting'
 			  AND is_dispatchable = true
 			  AND presence_state = 'arrived'
-			  AND requested_barber_id = $2
+			  AND requested_barber_id = $2` + tierEligible + `
 			ORDER BY priority_group ASC, sort_key ASC, token_number ASC
 			LIMIT 1
 			FOR UPDATE`
@@ -272,21 +291,21 @@ func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMo
 			const q = `
 				SELECT COUNT(*) FROM queue_entries
 				WHERE queue_session_id = $1 AND state = 'waiting'
-				  AND is_dispatchable = true AND presence_state != 'arrived'`
-			countErr = tx.QueryRow(ctx, q, sessionID).Scan(&count)
+				  AND is_dispatchable = true AND presence_state != 'arrived'` + tierEligible
+			countErr = tx.QueryRow(ctx, q, sessionID, params.StaffMemberID).Scan(&count)
 		case "hybrid":
 			const q = `
 				SELECT COUNT(*) FROM queue_entries
 				WHERE queue_session_id = $1 AND state = 'waiting'
 				  AND is_dispatchable = true AND presence_state != 'arrived'
-				  AND (requested_barber_id = $2 OR requested_barber_id IS NULL)`
+				  AND (requested_barber_id = $2 OR requested_barber_id IS NULL)` + tierEligible
 			countErr = tx.QueryRow(ctx, q, sessionID, params.StaffMemberID).Scan(&count)
 		case "barber_specific":
 			const q = `
 				SELECT COUNT(*) FROM queue_entries
 				WHERE queue_session_id = $1 AND state = 'waiting'
 				  AND is_dispatchable = true AND presence_state != 'arrived'
-				  AND requested_barber_id = $2`
+				  AND requested_barber_id = $2` + tierEligible
 			countErr = tx.QueryRow(ctx, q, sessionID, params.StaffMemberID).Scan(&count)
 		}
 		if countErr != nil {

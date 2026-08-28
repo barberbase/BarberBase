@@ -127,6 +127,7 @@ func (w *Watchdog) runJob(ctx context.Context) {
 	for _, s := range sessions {
 		w.checkNearTurn(ctx, s)
 		w.checkAutoSnooze(ctx, s)
+		w.checkTierAvailability(ctx, s)
 		w.updateStaleWarnings(ctx, s)
 	}
 }
@@ -153,14 +154,25 @@ func (w *Watchdog) checkNearTurn(ctx context.Context, s session) {
 		    qe.token_number,
 		    v.magic_link_expires_at,
 		    COALESCE(c.phone_number, '') AS customer_phone,
-		    -- Count how many dispatchable waiting entries are ordered ahead of this one
+		    -- Count how many dispatchable waiting entries are ordered ahead of this
+		    -- one AND compete for the same barbers. [T3] The tier disjunct is true
+		    -- for every row when required_tier_id is NULL throughout, so a shop with
+		    -- no tiers counts exactly what it counted before.
 		    (SELECT COUNT(*) FROM queue_entries x
 		     WHERE x.queue_session_id = qe.queue_session_id
 		       AND x.state = 'waiting' AND x.is_dispatchable = true
 		       AND (x.priority_group < qe.priority_group
 		            OR (x.priority_group = qe.priority_group AND x.sort_key < qe.sort_key))
+		       AND (x.required_tier_id IS NULL
+		            OR qe.required_tier_id IS NULL
+		            OR x.required_tier_id = qe.required_tier_id)
 		    ) AS people_ahead,
-		    -- Estimated wait = sum of total_duration_minutes of entries ahead
+		    -- Estimated wait = sum of total_duration_minutes of competing entries ahead.
+		    -- Deliberately NOT divided by the eligible barber count: this number also
+		    -- gates when bb_near_turn fires, and introducing a divisor here would
+		    -- change that threshold for every existing shop, tiered or not. It
+		    -- therefore reads lower than the customer-facing estimate from
+		    -- repository.TierScopedWait. Flagged, not silently unified.
 		    COALESCE(
 		      (SELECT SUM(v2.total_duration_minutes)
 		       FROM queue_entries x2
@@ -169,6 +181,9 @@ func (w *Watchdog) checkNearTurn(ctx context.Context, s session) {
 		         AND x2.state = 'waiting' AND x2.is_dispatchable = true
 		         AND (x2.priority_group < qe.priority_group
 		              OR (x2.priority_group = qe.priority_group AND x2.sort_key < qe.sort_key))
+		         AND (x2.required_tier_id IS NULL
+		              OR qe.required_tier_id IS NULL
+		              OR x2.required_tier_id = qe.required_tier_id)
 		      ), 0
 		    ) AS estimated_wait_minutes
 		FROM queue_entries qe
@@ -334,6 +349,18 @@ func (w *Watchdog) checkAutoSnooze(ctx context.Context, s session) {
 	// Grace period uses DB wall-clock (NOW() vs near_turn_notified_at), so a
 	// notification set earlier in this same tick cannot satisfy it.
 	// near_turn_notified_at IS NULL (never notified) is never snooze-eligible.
+	// [T3] "Next in dispatch order" now means next among entries some barber can
+	// actually take. Without this an entry waiting on the shop's only Senior gets
+	// snoozed because a Junior went idle — punished for a constraint the shop
+	// sold them. An ineligible head is passed over as a snooze candidate, not
+	// snoozed; it stays waiting and dispatchable.
+	//
+	// 'idle', not "on shift": snooze means a barber is free and waiting on you.
+	// A barber mid-cut is not waiting on anyone. That is a deliberately stricter
+	// test than the ETA divisor's status <> 'offline'.
+	//
+	// required_tier_id IS NULL short-circuits, so a shop with no tiers never
+	// evaluates the EXISTS and behaves exactly as it did before T3.
 	err := w.db.QueryRow(ctx, `
 		SELECT id, presence_state, session_channel, visit_id, customer_id, token_number,
 		       (near_turn_notified_at IS NOT NULL
@@ -342,9 +369,15 @@ func (w *Watchdog) checkAutoSnooze(ctx context.Context, s session) {
 		WHERE queue_session_id = $1
 		  AND state = 'waiting'
 		  AND is_dispatchable = true
+		  AND (required_tier_id IS NULL
+		       OR EXISTS (SELECT 1 FROM staff_members sm
+		                  WHERE sm.location_id = $3
+		                    AND sm.is_active = true
+		                    AND sm.tier_id = queue_entries.required_tier_id
+		                    AND sm.status = 'idle'))
 		ORDER BY priority_group ASC, sort_key ASC
 		LIMIT 1
-	`, s.ID, snoozeGraceMinutes).Scan(&top.ID, &top.PresenceState, &top.SessionChannel, &top.VisitID, &top.CustomerID, &top.TokenNumber, &graceElapsed)
+	`, s.ID, snoozeGraceMinutes, s.LocationID).Scan(&top.ID, &top.PresenceState, &top.SessionChannel, &top.VisitID, &top.CustomerID, &top.TokenNumber, &graceElapsed)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return
@@ -469,6 +502,107 @@ func (w *Watchdog) triggerAutoSnooze(ctx context.Context, s session, top struct 
 		return
 	}
 
+	w.manager.Broadcast(s.LocationID.String(), realtime.SSEEvent{
+		Type:         "queue_changed",
+		LocationID:   s.LocationID.String(),
+		QueueVersion: newQueueVersion,
+	})
+}
+
+// tierUnavailableWarning marks a waiting entry whose required tier has nobody
+// on shift. It rides stale_warning, which is already a free-form nullable string
+// on the wire (QueueEntryStaff) with no enum in the spec and no CHECK on the
+// column — so the shop sees the condition today without a schema or spec change.
+const tierUnavailableWarning = "tier_unavailable"
+
+// checkTierAvailability implements [T3] D4. An entry whose required tier has zero
+// on-shift barbers is unservable and, before this, nobody noticed: it simply sat
+// there while the queue moved around it.
+//
+// On-shift is status <> 'offline', so a barber on break still counts — a break
+// ends, going offline does not. Only the shop sees this; no WhatsApp template is
+// sent, because bb_tier_unavailable needs manual Meta submission and belongs to T4.
+//
+// The set and clear are two narrow statements rather than one CASE. A CASE that
+// writes NULL in its ELSE branch would clear every waiting entry's stale_warning
+// on every 60-second tick. Nothing else writes that column for waiting rows today,
+// which makes such a statement safe by coincidence rather than by construction —
+// and the day a unit adds a waiting-state warning, it would be silently wiped
+// once a minute.
+//
+// So the set requires stale_warning IS NULL, not merely "not already ours".
+// stale_warning holds one value, so somebody has to win; first writer wins, and
+// this unit is never the one that clobbers. The clear touches only rows whose
+// value is exactly the one we wrote. In both directions a warning this unit did
+// not set comes out of a tick unchanged.
+func (w *Watchdog) checkTierAvailability(ctx context.Context, s session) {
+	var changed bool
+	var newQueueVersion int
+
+	err := repository.WithTx(ctx, w.db, func(tx pgx.Tx) error {
+		// Law 1: lock session first.
+		var sessionLockID uuid.UUID
+		if err := tx.QueryRow(ctx, "SELECT id FROM queue_sessions WHERE id = $1 FOR UPDATE", s.ID).
+			Scan(&sessionLockID); err != nil {
+			return err
+		}
+
+		set, err := tx.Exec(ctx, `
+			UPDATE queue_entries qe SET stale_warning = $3
+			WHERE qe.queue_session_id = $1
+			  AND qe.state = 'waiting'
+			  AND qe.required_tier_id IS NOT NULL
+			  AND qe.stale_warning IS NULL
+			  AND NOT EXISTS (SELECT 1 FROM staff_members sm
+			                  WHERE sm.location_id = $2
+			                    AND sm.is_active = true
+			                    AND sm.tier_id = qe.required_tier_id
+			                    AND sm.status <> 'offline')
+		`, s.ID, s.LocationID, tierUnavailableWarning)
+		if err != nil {
+			return err
+		}
+
+		cleared, err := tx.Exec(ctx, `
+			UPDATE queue_entries qe SET stale_warning = NULL
+			WHERE qe.queue_session_id = $1
+			  AND qe.state = 'waiting'
+			  AND qe.stale_warning = $3
+			  AND EXISTS (SELECT 1 FROM staff_members sm
+			              WHERE sm.location_id = $2
+			                AND sm.is_active = true
+			                AND sm.tier_id = qe.required_tier_id
+			                AND sm.status <> 'offline')
+		`, s.ID, s.LocationID, tierUnavailableWarning)
+		if err != nil {
+			return err
+		}
+
+		// Both statements are no-ops when nothing transitions. Bumping the
+		// version unconditionally would make a 60-second tick force a refetch
+		// from every connected client of every idle shop, forever.
+		changed = set.RowsAffected() > 0 || cleared.RowsAffected() > 0
+		if !changed {
+			return nil
+		}
+
+		return tx.QueryRow(ctx, `
+			UPDATE queue_sessions
+			SET queue_version = queue_version + 1
+			WHERE id = $1
+			RETURNING queue_version
+		`, s.ID).Scan(&newQueueVersion)
+	})
+
+	if err != nil {
+		log.Printf("Watchdog tier-availability check failed for session %s: %v", s.ID, err)
+		return
+	}
+	if !changed {
+		return
+	}
+
+	// Law 8: broadcast after commit.
 	w.manager.Broadcast(s.LocationID.String(), realtime.SSEEvent{
 		Type:         "queue_changed",
 		LocationID:   s.LocationID.String(),

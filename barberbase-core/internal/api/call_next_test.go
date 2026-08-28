@@ -404,3 +404,287 @@ func TestCallNext_SkipsSnoozedWebEntry_ReactivateRestores(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, "SELECT state FROM queue_entries WHERE id = $1", snoozedID).Scan(&state))
 	require.Equal(t, "called", state)
 }
+
+// ─── T3: tier-constrained dispatch ──────────────────────────────────────────
+//
+// All three transports (JWT, push, device) funnel into queue.CallNext →
+// repository.CallNextTx, so the tier filter is tested once at the domain
+// boundary and once through the device path (A11) to prove the funnel holds.
+
+func seedTier(t *testing.T, pool *pgxpool.Pool, tenantID, locationID uuid.UUID, name string, rank int) uuid.UUID {
+	t.Helper()
+	tierID := uuid.New()
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO staff_tiers (id, tenant_id, location_id, name, rank)
+		VALUES ($1, $2, $3, $4, $5)`, tierID, tenantID, locationID, name, rank)
+	require.NoError(t, err)
+	return tierID
+}
+
+func assignTier(t *testing.T, pool *pgxpool.Pool, staffID uuid.UUID, tierID *uuid.UUID) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(),
+		`UPDATE staff_members SET tier_id = $2 WHERE id = $1`, staffID, tierID)
+	require.NoError(t, err)
+}
+
+func requireTier(t *testing.T, pool *pgxpool.Pool, entryID uuid.UUID, tierID *uuid.UUID) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(),
+		`UPDATE queue_entries SET required_tier_id = $2 WHERE id = $1`, entryID, tierID)
+	require.NoError(t, err)
+}
+
+// entryState returns the fields every tier assertion below cares about.
+func entryState(t *testing.T, pool *pgxpool.Pool, entryID uuid.UUID) (state string, dispatchable bool, assigned *uuid.UUID, token int) {
+	t.Helper()
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT state, is_dispatchable, assigned_barber_id, token_number
+		 FROM queue_entries WHERE id = $1`, entryID).Scan(&state, &dispatchable, &assigned, &token))
+	return
+}
+
+func callNextAs(t *testing.T, s *Server, tenantID, locationID, staffID uuid.UUID) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.CallNextCustomer(rec, newStaffRequest(http.MethodPost, "/v1/staff/queue/call-next", tenantID, locationID, staffID))
+	return rec
+}
+
+// A1 — a Senior-required entry is not handed to a Junior, and the Junior gets
+// the next eligible entry instead. Both halves asserted.
+//
+// A9 rides along: is_dispatchable on the passed-over entry is untouched. Tier
+// is a query-time filter, never a write to the dispatch gate (Law 12).
+func TestCallNext_T3_SeniorEntryNotDispatchedToJunior(t *testing.T) {
+	s, pool, tenantID, locationID, juniorID, seniorID := setupCallNextTestServer(t)
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+
+	junior := seedTier(t, pool, tenantID, locationID, "Junior", 10)
+	senior := seedTier(t, pool, tenantID, locationID, "Senior", 20)
+	assignTier(t, pool, juniorID, &junior)
+	assignTier(t, pool, seniorID, &senior)
+
+	head, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+	next, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+	requireTier(t, pool, head, &senior)
+
+	require.Equal(t, http.StatusOK, callNextAs(t, s, tenantID, locationID, juniorID).Code)
+
+	// Half one: the Junior got the entry behind the constrained one.
+	gotState, _, gotAssigned, gotToken := entryState(t, pool, next)
+	require.Equal(t, "called", gotState)
+	require.NotNil(t, gotAssigned)
+	require.Equal(t, juniorID, *gotAssigned, "A1: the Junior must be assigned the eligible entry")
+	require.Equal(t, 2, gotToken)
+
+	// Half two: the Senior-required head was passed over, not consumed.
+	headState, headDispatchable, headAssigned, _ := entryState(t, pool, head)
+	require.Equal(t, "waiting", headState, "A1: a Senior-required entry must survive a Junior's call")
+	require.Nil(t, headAssigned)
+	require.True(t, headDispatchable, "A9: tier logic must never write is_dispatchable")
+
+	// And the Senior can still take it.
+	require.Equal(t, http.StatusOK, callNextAs(t, s, tenantID, locationID, seniorID).Code)
+	headState, _, headAssigned, _ = entryState(t, pool, head)
+	require.Equal(t, "called", headState)
+	require.NotNil(t, headAssigned)
+	require.Equal(t, seniorID, *headAssigned)
+}
+
+// A2 — a barber with tier_id IS NULL serves only required_tier_id IS NULL
+// entries. This is the pre-tier default and it must not silently widen: an
+// untiered barber is not a wildcard.
+func TestCallNext_T3_UntieredBarberServesOnlyUntieredEntries(t *testing.T) {
+	s, pool, tenantID, locationID, untieredID, _ := setupCallNextTestServer(t)
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+
+	senior := seedTier(t, pool, tenantID, locationID, "Senior", 20)
+	// untieredID keeps tier_id NULL on purpose — no assignTier call.
+
+	tiered, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+	plain, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+	requireTier(t, pool, tiered, &senior)
+
+	require.Equal(t, http.StatusOK, callNextAs(t, s, tenantID, locationID, untieredID).Code)
+	gotState, _, _, gotToken := entryState(t, pool, plain)
+	require.Equal(t, "called", gotState)
+	require.Equal(t, 2, gotToken)
+
+	// Only the Senior-required entry is left. The untiered barber must be told
+	// there is nobody to call, not handed it.
+	rec := callNextAs(t, s, tenantID, locationID, untieredID)
+	require.Equal(t, http.StatusNotFound, rec.Code, "A2: an untiered barber must not fall through to a tiered entry")
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, "NO_DISPATCHABLE_CUSTOMERS", body["code"])
+
+	stillWaiting, dispatchable, _, _ := entryState(t, pool, tiered)
+	require.Equal(t, "waiting", stillWaiting)
+	require.True(t, dispatchable)
+}
+
+// A3 — an unconstrained entry is dispatchable by any barber regardless of tier.
+func TestCallNext_T3_UnconstrainedEntryServedByAnyTier(t *testing.T) {
+	s, pool, tenantID, locationID, juniorID, seniorID := setupCallNextTestServer(t)
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+
+	junior := seedTier(t, pool, tenantID, locationID, "Junior", 10)
+	senior := seedTier(t, pool, tenantID, locationID, "Senior", 20)
+	assignTier(t, pool, juniorID, &junior)
+	assignTier(t, pool, seniorID, &senior)
+
+	// A third barber left deliberately untiered.
+	untieredID := uuid.New()
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO staff_members (id, tenant_id, location_id, name, phone_number, role, status, is_active)
+		VALUES ($1, $2, $3, 'Barber C', '+919000000003', 'barber', 'idle', true)`, untieredID, tenantID, locationID)
+	require.NoError(t, err)
+
+	e1, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+	e2, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+	e3, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+
+	for _, tc := range []struct {
+		name  string
+		staff uuid.UUID
+		entry uuid.UUID
+	}{
+		{"junior", juniorID, e1},
+		{"senior", seniorID, e2},
+		{"untiered", untieredID, e3},
+	} {
+		require.Equal(t, http.StatusOK, callNextAs(t, s, tenantID, locationID, tc.staff).Code, tc.name)
+		state, _, assigned, _ := entryState(t, pool, tc.entry)
+		require.Equal(t, "called", state, tc.name)
+		require.NotNil(t, assigned, tc.name)
+		require.Equal(t, tc.staff, *assigned, "A3: %s must be able to take an unconstrained entry", tc.name)
+	}
+}
+
+// A11 — the device call-next path shares repository.CallNextTx, so it honours
+// the same filter. Both button shapes are covered: a barber-bound button
+// resolves that barber's tier, and a pooled button (NULL staff → uuid.Nil,
+// which matches no staff row) resolves to a NULL tier and therefore serves
+// only unconstrained entries — the untiered-barber rule, with no special case
+// in the code.
+func TestDeviceCallNext_T3_HonoursTierFilter(t *testing.T) {
+	s, pool, tenantID, locationID, juniorID, _ := setupCallNextTestServer(t)
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+
+	junior := seedTier(t, pool, tenantID, locationID, "Junior", 10)
+	senior := seedTier(t, pool, tenantID, locationID, "Senior", 20)
+	assignTier(t, pool, juniorID, &junior)
+
+	head, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+	next, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+	requireTier(t, pool, head, &senior)
+
+	deviceID, secret := seedStationDevice(t, pool, tenantID, locationID, true)
+	seedStationButton(t, pool, deviceID, "B1", &juniorID)
+	// A second physical device for the pooled press: the rate limiter allows
+	// one press per 3s per device, and this test needs two in a row.
+	pooledDeviceID, pooledSecret := seedStationDevice(t, pool, tenantID, locationID, true)
+	seedStationButton(t, pool, pooledDeviceID, "B2", nil) // NULL staff = pooled
+
+	rec := httptest.NewRecorder()
+	s.DeviceCallNext(rec, deviceCallNextReq(secret, "B1", 0))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		Result string `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "advanced", resp.Result)
+
+	gotState, _, _, gotToken := entryState(t, pool, next)
+	require.Equal(t, "called", gotState)
+	require.Equal(t, 2, gotToken, "A11: the Junior's button must skip the Senior-required head")
+
+	headState, headDispatchable, _, _ := entryState(t, pool, head)
+	require.Equal(t, "waiting", headState)
+	require.True(t, headDispatchable)
+
+	// Pooled button, only the Senior-required entry left: no barber identity,
+	// so no tier, so nothing eligible.
+	rec = httptest.NewRecorder()
+	s.DeviceCallNext(rec, deviceCallNextReq(pooledSecret, "B2", 0))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "no_waiting", resp.Result, "A11: a pooled button has no tier and must not take a tiered entry")
+}
+
+// A12 — zero regression. A location with no tiers and every required_tier_id
+// NULL dispatches in exactly the order it did before T3. The rest of A12 is the
+// existing suite passing unchanged.
+func TestCallNext_T3_NoTiersDispatchesUnchanged(t *testing.T) {
+	s, pool, tenantID, locationID, barberAID, _ := setupCallNextTestServer(t)
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+
+	var entries []uuid.UUID
+	for i := 0; i < 3; i++ {
+		e, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+		entries = append(entries, e)
+	}
+
+	var tierCount int
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM staff_tiers`).Scan(&tierCount))
+	require.Zero(t, tierCount, "A12 fixture: this shop must have no tiers at all")
+
+	for i, e := range entries {
+		require.Equal(t, http.StatusOK, callNextAs(t, s, tenantID, locationID, barberAID).Code)
+		state, _, _, token := entryState(t, pool, e)
+		require.Equal(t, "called", state)
+		require.Equal(t, i+1, token, "A12: dispatch order must be untouched by T3")
+	}
+}
+
+// A1/A4 concurrency — several barbers of different tiers pressing at once must
+// not double-assign, and must not cross tier lines. CallNextTx serialises on
+// the queue_sessions FOR UPDATE lock (Law 1), so the interesting failure would
+// be a filter applied outside that lock.
+func TestCallNext_T3_ConcurrentBarbersRespectTiers(t *testing.T) {
+	s, pool, tenantID, locationID, juniorID, seniorID := setupCallNextTestServer(t)
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+
+	junior := seedTier(t, pool, tenantID, locationID, "Junior", 10)
+	senior := seedTier(t, pool, tenantID, locationID, "Senior", 20)
+	assignTier(t, pool, juniorID, &junior)
+	assignTier(t, pool, seniorID, &senior)
+
+	// Four entries, alternating: Senior-required, unconstrained, Senior, plain.
+	var seniorOnly []uuid.UUID
+	for i := 0; i < 4; i++ {
+		e, _ := seedQueueEntry(t, pool, tenantID, locationID, sessionID, nil, "arrived", nil)
+		if i%2 == 0 {
+			requireTier(t, pool, e, &senior)
+			seniorOnly = append(seniorOnly, e)
+		}
+	}
+
+	var wg sync.WaitGroup
+	for _, staff := range []uuid.UUID{juniorID, seniorID, juniorID, seniorID} {
+		wg.Add(1)
+		go func(id uuid.UUID) {
+			defer wg.Done()
+			callNextAs(t, s, tenantID, locationID, id)
+		}(staff)
+	}
+	wg.Wait()
+
+	// No entry called twice: assigned_barber_id is written once under the lock,
+	// so a double-assign shows up as fewer distinct called entries than calls.
+	var called, distinct int
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT COUNT(*), COUNT(DISTINCT id) FROM queue_entries
+		 WHERE queue_session_id = $1 AND state = 'called'`, sessionID).Scan(&called, &distinct))
+	require.Equal(t, called, distinct)
+
+	// No Senior-required entry went to the Junior.
+	for _, e := range seniorOnly {
+		_, _, assigned, token := entryState(t, pool, e)
+		if assigned != nil {
+			require.Equal(t, seniorID, *assigned,
+				"A1: token %d requires Senior and must never be assigned to the Junior", token)
+		}
+	}
+}

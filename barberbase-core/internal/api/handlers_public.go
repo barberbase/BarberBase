@@ -499,18 +499,19 @@ func (s *Server) GetMyQueueStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
-	// Count dispatchable entries ahead in the same session by dispatch order
-	var positionAhead, estimatedWait int
-	_ = s.Pool.QueryRow(ctx, `
-		SELECT COUNT(*), COALESCE(SUM(v2.total_duration_minutes), 0)
-		FROM queue_entries qe2
-		JOIN visits v2 ON v2.id = qe2.visit_id
-		WHERE qe2.queue_session_id = $1
-		  AND qe2.is_dispatchable = true
-		  AND qe2.state IN ('waiting', 'called', 'in_progress')
-		  AND (qe2.priority_group < $2 OR (qe2.priority_group = $2 AND qe2.sort_key < $3))
-		  AND qe2.id != $4`,
-		queueSessionID, priorityGroup, sortKey, id).Scan(&positionAhead, &estimatedWait)
+	// [T3] Ahead count and wait, scoped to the barbers who can actually serve
+	// this entry. For an entry with no required_tier_id — and for every entry in
+	// a shop with no tiers — this counts exactly what the pre-T3 global query
+	// counted. Both ends of the range are computed; only the high end is
+	// serialised, into the existing estimated_wait_minutes field.
+	//
+	// Best-effort, as before: a failure here leaves both at zero rather than
+	// failing a status page the customer is refreshing at the door.
+	est, errWait := repository.TierScopedWait(ctx, s.Pool, id)
+	if errWait != nil {
+		log.Printf("[Error] TierScopedWait for entry %s: %v", id, errWait)
+	}
+	positionAhead, estimatedWait := est.AheadCount, est.HiMinutes
 
 	pState := QueueEntryPublicPresenceState(presenceState)
 	sState := QueueEntryPublicState(normalizePublicState(state))
