@@ -512,6 +512,11 @@ func (s *Server) GetMyQueueStatus(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[Error] TierScopedWait for entry %s: %v", id, errWait)
 	}
 	positionAhead, estimatedWait := est.AheadCount, est.HiMinutes
+	// [O3] Both ends on the wire. This is the only producer of QueueEntryPublic
+	// that computes a queue-scoped wait, so it is the only one that may emit a
+	// range; the join and already-in-queue payloads report the entry's own
+	// service duration and omit both fields rather than fabricate one.
+	loMinutes, hiMinutes := est.LoMinutes, est.HiMinutes
 
 	pState := QueueEntryPublicPresenceState(presenceState)
 	sState := QueueEntryPublicState(normalizePublicState(state))
@@ -522,6 +527,8 @@ func (s *Server) GetMyQueueStatus(w http.ResponseWriter, r *http.Request) {
 		PresenceState:        pState,
 		PositionAhead:        positionAhead,
 		EstimatedWaitMinutes: estimatedWait,
+		EstWaitMinMinutes:    &loMinutes,
+		EstWaitMaxMinutes:    &hiMinutes,
 		Services:             services,
 		PartySize:            &partySize,
 		MagicLinkExpiresAt:   magicLinkExpiresAt,

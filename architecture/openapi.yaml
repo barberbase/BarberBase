@@ -368,6 +368,25 @@ components:
           description: Number of dispatchable arrived entries ahead
         estimated_wait_minutes:
           type: integer
+        est_wait_min_minutes:
+          type: integer
+          minimum: 0
+          description: >
+            Low end of the wait estimate, in minutes. Assumes every eligible
+            barber becomes free immediately. Always <= est_wait_max_minutes;
+            equal when at most one barber can serve this entry. Omitted on
+            responses whose producer does not compute a queue-scoped wait — the
+            join and already-in-queue payloads report the entry's own service
+            duration in estimated_wait_minutes and emit neither end of a range.
+        est_wait_max_minutes:
+          type: integer
+          minimum: 0
+          description: >
+            High end of the wait estimate, in minutes. Equals
+            estimated_wait_minutes. Prefer showing a range using both ends; if
+            showing one number, show this one — under-promising on wait is the
+            safe direction. Omitted wherever est_wait_min_minutes is omitted;
+            the two are always present or absent together.
         services:
           type: array
           items:
