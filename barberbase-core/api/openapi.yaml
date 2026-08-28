@@ -467,7 +467,28 @@ components:
         stale_warning:
           type: string
           nullable: true
-          description: Set by watchdog e.g. "called_10min" or "in_progress_overrun"
+          description: >
+            Operational warning set by the watchdog, null when the entry is
+            healthy. Holds exactly one value at a time; first writer wins.
+            Values written today:
+            `called_warning` and `called_critical` — a called customer has not
+            started service within the location's stale_called_warning_minutes /
+            stale_called_critical_minutes (defaults 5 / 10).
+            `in_progress_warning`, `in_progress_confirm` and
+            `in_progress_critical` — service is running past the visit's total
+            duration by in_progress_warning_minutes / _confirm_ / _critical_
+            (defaults 10 / 15 / 25).
+            `tier_unavailable` — a waiting entry requires a staff tier with no
+            barber on shift (any status other than offline), so nobody can be
+            dispatched to it and the queue moves around it until someone in that
+            tier comes on shift.
+            Cleared when the entry returns inside its thresholds, when a barber
+            in the required tier comes on shift, and by calling or starting the
+            entry. The called and in_progress values are re-derived every
+            watchdog tick and apply only in those states, so a waiting entry's
+            tier_unavailable is never overwritten by them. Treat this as a
+            free-form string, not an enum — values may be added without a spec
+            change.
 
     QueueSnapshot:
       type: object
