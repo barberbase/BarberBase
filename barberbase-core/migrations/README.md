@@ -28,6 +28,28 @@ The ledger stores the lowercase hex SHA-256 of the **unmodified file bytes**, so
 migration that has already been applied halts the runner with a mismatch error.
 Never edit an applied migration — add a new one.
 
+## The runner is the only thing that applies migrations
+
+Once the ledger exists, **never apply a migration by hand.** Not with `psql`, not
+"just this once on prod". Run the app; the runner applies what is pending.
+
+This is not style. `ADOPT_BASELINE` records **001 and nothing else**, so every
+migration between 001 and head is re-executed on the adopt run. That is survivable
+only where the migration is idempotent — 002 is, by construction, which is the
+only reason the 2026-08-28 prod adopt succeeded. 003 and 004 are plain
+`CREATE TABLE` / `ALTER TABLE ADD COLUMN` with no `IF NOT EXISTS`; re-running
+either raises `42P07` or `42701`.
+
+The runner sits on the boot path behind `log.Fatalf` (`cmd/server/main.go:76`),
+so that error is not a warning in a log — the process dies and the container never
+comes up. A hand-applied migration that never reached the ledger turns the next
+deploy into an outage.
+
+The same reasoning kills manual tracking files. A `MIGRATIONS_APPLIED.md` was kept
+here until 2026-08-28 and was deleted because it had recorded 002 as *pending on
+prod* when prod had been running it since July. `schema_migrations` is the ledger;
+a second one that can disagree with it is worse than none.
+
 ## Adopting an existing database (`ADOPT_BASELINE`)
 
 A database created before the ledger existed has the 001 schema but no
