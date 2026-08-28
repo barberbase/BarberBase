@@ -132,13 +132,21 @@ func (w *Watchdog) runJob(ctx context.Context) {
 	}
 }
 
+// [B7] MagicLinkExpiresAt is a pointer because visits.magic_link_expires_at
+// (001:703) is nullable, and is NULL for every anonymous walk-in — the link is
+// keyed to a customer, and an anonymous visit has none. Scanning it into a bare
+// time.Time failed the whole row, checkNearTurn logged and skipped it,
+// near_turn_notified_at stayed NULL, and checkAutoSnooze requires that column
+// non-NULL — so an anonymous walk-in could never be auto-snoozed and sat at the
+// head of the queue indefinitely. nil means "no magic link", which is the normal
+// case here, never an error.
 type candidate struct {
 	EntryID              uuid.UUID
 	VisitID              uuid.UUID
 	CustomerID           *uuid.UUID // nil for anonymous web entries
 	SessionChannel       string
 	TokenNumber          int
-	MagicLinkExpiresAt   time.Time
+	MagicLinkExpiresAt   *time.Time
 	CustomerPhone        string
 	PeopleAhead          int
 	EstimatedWaitMinutes int
@@ -265,11 +273,15 @@ func (w *Watchdog) triggerNearTurn(ctx context.Context, s session, cand candidat
 		// signal is the SSE/status page. The WhatsApp template only goes to
 		// whatsapp-channel entries with a resolvable customer (Law 7: the
 		// insert stays inside this transaction).
-		if cand.SessionChannel != "whatsapp" || cand.CustomerID == nil {
+		// [B7] A nil expiry joins that list: no magic link was ever issued for this
+		// visit, so there is no link to put in a template. The marking above has
+		// already happened, which is the whole point — the entry stays
+		// snooze-eligible either way.
+		if cand.SessionChannel != "whatsapp" || cand.CustomerID == nil || cand.MagicLinkExpiresAt == nil {
 			return nil
 		}
 
-		magicLinkToken := queue.GenerateMagicLinkToken(cand.CustomerID.String(), s.LocationID.String(), cand.VisitID.String(), cand.MagicLinkExpiresAt, []byte(w.cfg.HMACSecret))
+		magicLinkToken := queue.GenerateMagicLinkToken(cand.CustomerID.String(), s.LocationID.String(), cand.VisitID.String(), *cand.MagicLinkExpiresAt, []byte(w.cfg.HMACSecret))
 
 		outboxPayload := map[string]interface{}{
 			"template_code":       "bb_near_turn",
@@ -401,7 +413,7 @@ func (w *Watchdog) triggerAutoSnooze(ctx context.Context, s session, top struct 
 }) {
 	var newQueueVersion int
 	var customerPhone string
-	var magicLinkExpiresAt time.Time
+	var magicLinkExpiresAt *time.Time // [B7] nullable, same column as above
 
 	if top.SessionChannel == "whatsapp" && top.CustomerID != nil {
 		err := w.db.QueryRow(ctx, `
@@ -452,8 +464,8 @@ func (w *Watchdog) triggerAutoSnooze(ctx context.Context, s session, top struct 
 			return err
 		}
 
-		if top.SessionChannel == "whatsapp" && top.CustomerID != nil {
-			magicLinkToken := queue.GenerateMagicLinkToken(top.CustomerID.String(), s.LocationID.String(), top.VisitID.String(), magicLinkExpiresAt, []byte(w.cfg.HMACSecret))
+		if top.SessionChannel == "whatsapp" && top.CustomerID != nil && magicLinkExpiresAt != nil {
+			magicLinkToken := queue.GenerateMagicLinkToken(top.CustomerID.String(), s.LocationID.String(), top.VisitID.String(), *magicLinkExpiresAt, []byte(w.cfg.HMACSecret))
 
 			outboxPayload := map[string]interface{}{
 				"template_code":       "bb_queue_snoozed",

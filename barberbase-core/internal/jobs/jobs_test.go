@@ -1026,3 +1026,267 @@ func TestWatchdog_T3_NoOpTickDoesNotBumpVersionOrBroadcast(t *testing.T) {
 	default:
 	}
 }
+
+// ─── B7: nullable magic_link_expires_at ─────────────────────────────────────
+
+// seedAnonWalkin creates the shape that broke the watchdog: a visit with no
+// customer and therefore no magic link, joined from the web. Everything about
+// this row is ordinary — it is what a walk-in who never gives a phone number
+// looks like, which is the modal customer for a barbershop.
+func seedAnonWalkin(t *testing.T, pool *pgxpool.Pool, s tierShop, token, sortKey int) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	var visitID, entryID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO visits (tenant_id, location_id, entry_type, status, total_duration_minutes)
+		VALUES ($1, $2, 'walk_in', 'active', 30) RETURNING id`,
+		s.tenantID, s.locationID).Scan(&visitID))
+	var expiry *time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT magic_link_expires_at FROM visits WHERE id = $1`, visitID).Scan(&expiry))
+	require.Nil(t, expiry, "fixture precondition: an anonymous visit has no magic link")
+
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO queue_entries
+			(visit_id, queue_session_id, token_number, state, presence_state, is_dispatchable,
+			 session_channel, priority_group, sort_key)
+		VALUES ($1, $2, $3, 'waiting', 'remote', true, 'web', 100, $4) RETURNING id`,
+		visitID, s.sessionID, token, int64(sortKey)).Scan(&entryID))
+	return entryID
+}
+
+// seedWhatsAppCandidate is the control: a customer, a phone, and a live magic
+// link. A3 asserts this path is byte-for-byte what it was before B7.
+func seedWhatsAppCandidate(t *testing.T, pool *pgxpool.Pool, s tierShop, token, sortKey int, expiry time.Time) (entryID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	var customerID, visitID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO customers (tenant_id, phone_number, name)
+		VALUES ($1, $2, 'WA Customer') RETURNING id`,
+		s.tenantID, "+9196"+uuid.NewString()[:9]).Scan(&customerID))
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO visits (tenant_id, location_id, customer_id, entry_type, status,
+		                    total_duration_minutes, magic_link_token_hash, magic_link_expires_at)
+		VALUES ($1, $2, $3, 'walk_in', 'active', 30, 'hash', $4) RETURNING id`,
+		s.tenantID, s.locationID, customerID, expiry).Scan(&visitID))
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO queue_entries
+			(visit_id, queue_session_id, customer_id, token_number, state, presence_state,
+			 is_dispatchable, session_channel, priority_group, sort_key)
+		VALUES ($1, $2, $3, $4, 'waiting', 'remote', true, 'whatsapp', 100, $5) RETURNING id`,
+		visitID, s.sessionID, customerID, token, int64(sortKey)).Scan(&entryID))
+	return entryID
+}
+
+// seedNotifyingShop is seedTierShop with near-turn thresholds that fire, rather
+// than the -1 sentinels the T3 tests use to keep checkNearTurn out of the way.
+func seedNotifyingShop(t *testing.T, pool *pgxpool.Pool) tierShop {
+	t.Helper()
+	s := seedTierShop(t, pool)
+	_, err := pool.Exec(context.Background(), `
+		UPDATE locations SET notify_when_people_ahead = 5, notify_when_wait_minutes = 999
+		WHERE id = $1`, s.locationID)
+	require.NoError(t, err)
+	s.session.NotifyPeopleAhead = 5
+	s.session.NotifyWaitMinutes = 999
+	return s
+}
+
+// A1 — an anonymous walk-in is scanned without error and becomes a candidate.
+//
+// This is the assertion that fails on the pre-fix code with
+//
+//	Watchdog scan candidate failed: can't scan into dest[5]
+//	(col: magic_link_expires_at): cannot scan NULL into *time.Time
+//
+// which is A5's counter-check.
+func TestWatchdog_B7_AnonymousWalkinIsScannedAndNotified(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+	shop := seedNotifyingShop(t, pool)
+
+	entryID := seedAnonWalkin(t, pool, shop, 1, 100)
+	shop.watchdog.checkNearTurn(ctx, shop.session)
+
+	var presence string
+	var notifiedAt *time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT presence_state, near_turn_notified_at FROM queue_entries WHERE id = $1`,
+		entryID).Scan(&presence, &notifiedAt))
+	require.Equal(t, "notified", presence, "A1: an anonymous walk-in must survive the scan")
+	require.NotNil(t, notifiedAt, "A1: near_turn_notified_at is what makes it snooze-eligible")
+
+	// No customer means no template — the entry is marked, nothing is sent.
+	var outbox int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT COUNT(*) FROM outbox_events`).Scan(&outbox))
+	require.Zero(t, outbox, "A1: no magic link, no WhatsApp — but the marking still happened")
+}
+
+// A2 — the full chain the bug severed: scan -> notified -> snoozed.
+func TestWatchdog_B7_AnonymousWalkinBecomesSnoozeEligible(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+	shop := seedNotifyingShop(t, pool)
+
+	entryID := seedAnonWalkin(t, pool, shop, 1, 100)
+
+	// Tick one: near-turn marks it.
+	shop.watchdog.checkNearTurn(ctx, shop.session)
+	var notifiedAt *time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT near_turn_notified_at FROM queue_entries WHERE id = $1`, entryID).Scan(&notifiedAt))
+	require.NotNil(t, notifiedAt)
+
+	// The grace period is wall-clock, so age the mark rather than sleeping 5 min.
+	_, err := pool.Exec(ctx, `
+		UPDATE queue_entries SET near_turn_notified_at = NOW() - INTERVAL '30 minutes'
+		WHERE id = $1`, entryID)
+	require.NoError(t, err)
+
+	// Tick two: it is now snooze-eligible, which it never could have been before.
+	shop.watchdog.checkAutoSnooze(ctx, shop.session)
+	var presence string
+	var dispatchable bool
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT presence_state, is_dispatchable FROM queue_entries WHERE id = $1`,
+		entryID).Scan(&presence, &dispatchable))
+	require.Equal(t, "snoozed", presence, "A2: the whole point — it can finally be snoozed")
+	require.False(t, dispatchable)
+}
+
+// A3 — a WhatsApp entry with a live magic link is unchanged: still notified,
+// still sends bb_near_turn, still carries a magic-link button parameter.
+func TestWatchdog_B7_WhatsAppCandidateUnchanged(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+	shop := seedNotifyingShop(t, pool)
+
+	entryID := seedWhatsAppCandidate(t, pool, shop, 1, 100, time.Now().Add(23*time.Hour))
+	shop.watchdog.checkNearTurn(ctx, shop.session)
+
+	var presence string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT presence_state FROM queue_entries WHERE id = $1`, entryID).Scan(&presence))
+	require.Equal(t, "notified", presence)
+
+	var payloadBytes []byte
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT payload FROM outbox_events WHERE type = 'notification.send'`).Scan(&payloadBytes))
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(payloadBytes, &payload))
+	require.Equal(t, "bb_near_turn", payload["template_code"], "A3: no regression on the WhatsApp path")
+
+	// Assert on the parsed structure, not a substring: JSONB round-trips with
+	// whitespace of its own choosing and a raw-text match is a false negative
+	// waiting to happen.
+	var sawQuickReply, sawMagicLink bool
+	for _, c := range payload["components"].([]interface{}) {
+		comp := c.(map[string]interface{})
+		params, _ := comp["parameters"].([]interface{})
+		for _, pr := range params {
+			switch pr.(map[string]interface{})["type"] {
+			case "payload":
+				sawQuickReply = true
+			case "text":
+				if comp["sub_type"] == "url" {
+					sawMagicLink = true
+					require.NotEmpty(t, pr.(map[string]interface{})["text"],
+						"A3: the magic-link token must still be signed and present")
+				}
+			}
+		}
+	}
+	require.True(t, sawQuickReply, "A3: the ON_THE_WAY quick-reply button survives")
+	require.True(t, sawMagicLink, "A3: the magic-link URL button survives")
+}
+
+// A4 — nil and expired are different things and must stay different.
+//
+// generateMagicLinkToken (commands.go:173) signs expiresAt into the payload and
+// never validates it; expiry is checked at redemption. So an EXPIRED link is
+// still a link: the template goes out exactly as before, carrying a token the
+// status page will reject. A NIL expiry means no link was ever issued, so there
+// is nothing to sign and the template is skipped. Only nil short-circuits.
+func TestWatchdog_B7_ExpiredLinkStillSendsNilDoesNot(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	t.Run("expired_link_still_notifies_and_sends", func(t *testing.T) {
+		shop := seedNotifyingShop(t, pool)
+		entryID := seedWhatsAppCandidate(t, pool, shop, 1, 100, time.Now().Add(-2*time.Hour))
+		shop.watchdog.checkNearTurn(ctx, shop.session)
+
+		var presence string
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT presence_state FROM queue_entries WHERE id = $1`, entryID).Scan(&presence))
+		require.Equal(t, "notified", presence)
+
+		var n int
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM outbox_events WHERE tenant_id = $1`, shop.tenantID).Scan(&n))
+		require.Equal(t, 1, n, "A4: an expired link is still a link — B7 must not swallow it")
+	})
+
+	t.Run("nil_link_notifies_but_sends_nothing", func(t *testing.T) {
+		shop := seedNotifyingShop(t, pool)
+		entryID := seedAnonWalkin(t, pool, shop, 1, 100)
+		shop.watchdog.checkNearTurn(ctx, shop.session)
+
+		var presence string
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT presence_state FROM queue_entries WHERE id = $1`, entryID).Scan(&presence))
+		require.Equal(t, "notified", presence)
+
+		var n int
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM outbox_events WHERE tenant_id = $1`, shop.tenantID).Scan(&n))
+		require.Zero(t, n, "A4: nil means no link exists, so no template")
+	})
+}
+
+// A6 — the second instance of the same mismatch. triggerAutoSnooze reads the
+// same nullable column into its own local. It is guarded by whatsapp+customer
+// so prod has never hit it (0 such rows), but the guard does not make the column
+// non-NULL, so it was fixed alongside. This drives that path with a customer
+// whose visit has no magic link.
+func TestWatchdog_B7_SnoozePathHandlesNilExpiry(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+	shop := seedNotifyingShop(t, pool)
+
+	var customerID, visitID, entryID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO customers (tenant_id, phone_number, name)
+		VALUES ($1, $2, 'No Link') RETURNING id`,
+		shop.tenantID, "+9195"+uuid.NewString()[:9]).Scan(&customerID))
+	// whatsapp channel, a real customer, but magic_link_expires_at left NULL.
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO visits (tenant_id, location_id, customer_id, entry_type, status, total_duration_minutes)
+		VALUES ($1, $2, $3, 'walk_in', 'active', 30) RETURNING id`,
+		shop.tenantID, shop.locationID, customerID).Scan(&visitID))
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO queue_entries
+			(visit_id, queue_session_id, customer_id, token_number, state, presence_state,
+			 is_dispatchable, session_channel, priority_group, sort_key, near_turn_notified_at)
+		VALUES ($1, $2, $3, 1, 'waiting', 'notified', true, 'whatsapp', 100, 100,
+		        NOW() - INTERVAL '30 minutes') RETURNING id`,
+		visitID, shop.sessionID, customerID).Scan(&entryID))
+
+	shop.watchdog.checkAutoSnooze(ctx, shop.session)
+
+	var presence string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT presence_state FROM queue_entries WHERE id = $1`, entryID).Scan(&presence))
+	require.Equal(t, "snoozed", presence, "A6: the snooze read must survive a NULL expiry too")
+
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM outbox_events WHERE tenant_id = $1`, shop.tenantID).Scan(&n))
+	require.Zero(t, n, "A6: no link to send, so no bb_queue_snoozed template")
+}
