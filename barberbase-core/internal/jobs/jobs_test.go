@@ -1290,3 +1290,40 @@ func TestWatchdog_B7_SnoozePathHandlesNilExpiry(t *testing.T) {
 		`SELECT COUNT(*) FROM outbox_events WHERE tenant_id = $1`, shop.tenantID).Scan(&n))
 	require.Zero(t, n, "A6: no link to send, so no bb_queue_snoozed template")
 }
+
+// B9 site 5 — triggerAutoSnooze reads c.phone_number for bb_queue_snoozed. A
+// shadow profile (customers row with is_shadow_profile and no phone at all,
+// repository/customer.go:122) makes that NULL. Pre-fix the read failed and the
+// function returned early, so the entry was never snoozed at all — a silent
+// queue defect, same shape as B7.
+func TestWatchdog_B9_ShadowCustomerSnoozesWithoutPhone(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+	shop := seedTierShop(t, pool)
+
+	var customerID, visitID, entryID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO customers (tenant_id, is_shadow_profile) VALUES ($1, true) RETURNING id`,
+		shop.tenantID).Scan(&customerID))
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO visits (tenant_id, location_id, customer_id, entry_type, status,
+		                    total_duration_minutes, magic_link_expires_at)
+		VALUES ($1,$2,$3,'walk_in','active',30, NOW() + INTERVAL '23 hours') RETURNING id`,
+		shop.tenantID, shop.locationID, customerID).Scan(&visitID))
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO queue_entries
+			(visit_id, queue_session_id, customer_id, token_number, state, presence_state,
+			 is_dispatchable, session_channel, priority_group, sort_key, near_turn_notified_at)
+		VALUES ($1,$2,$3,1,'waiting','notified',true,'whatsapp',100,100,
+		        NOW() - INTERVAL '30 minutes') RETURNING id`,
+		visitID, shop.sessionID, customerID).Scan(&entryID))
+
+	shop.watchdog.checkAutoSnooze(ctx, shop.session)
+
+	var presence string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT presence_state FROM queue_entries WHERE id=$1`, entryID).Scan(&presence))
+	require.Equal(t, "snoozed", presence,
+		"B9: a shadow customer's missing phone must not prevent the snooze itself")
+}

@@ -688,3 +688,39 @@ func TestCallNext_T3_ConcurrentBarbersRespectTiers(t *testing.T) {
 		}
 	}
 }
+
+// B9 site 3 — GetQueueSnapshot scans qe.remote_joined_at into scannedEntry.joinedAt
+// (time.Time). The column is nullable, so a NULL 500s the entire dashboard —
+// not one entry, the whole snapshot, because the scan error aborts the handler.
+// Fixed by COALESCE to visits.created_at rather than a pointer, because
+// joined_at is a required non-null field on QueueEntryStaff and openapi.yaml is
+// frozen.
+func TestGetQueueSnapshot_B9_NullRemoteJoinedAt(t *testing.T) {
+	s, pool, tenantID, locationID, barberAID, _ := setupCallNextTestServer(t)
+	sessionID := seedQueueSession(t, pool, tenantID, locationID)
+	ctx := context.Background()
+
+	var visitID, entryID uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO visits (tenant_id, location_id, entry_type, status, party_size, total_duration_minutes)
+		VALUES ($1,$2,'walk_in','active',1,30) RETURNING id`,
+		tenantID, locationID).Scan(&visitID))
+	// remote_joined_at deliberately omitted.
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO queue_entries
+			(visit_id, queue_session_id, token_number, state, presence_state,
+			 is_dispatchable, priority_group, sort_key)
+		VALUES ($1,$2,1,'waiting','arrived',true,100,1) RETURNING id`,
+		visitID, sessionID).Scan(&entryID))
+
+	rec := httptest.NewRecorder()
+	s.GetQueueSnapshot(rec, newStaffRequest(http.MethodGet, "/v1/staff/queue/snapshot", tenantID, locationID, barberAID))
+	require.Equal(t, http.StatusOK, rec.Code,
+		"B9: one NULL joined_at must not 500 the whole dashboard")
+
+	var snap QueueSnapshot
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &snap))
+	require.Len(t, snap.Entries, 1)
+	require.False(t, snap.Entries[0].JoinedAt.IsZero(),
+		"B9: COALESCE must supply the visit's created_at, never a zero time")
+}

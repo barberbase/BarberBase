@@ -42,7 +42,12 @@ type QueueEntryRow struct {
 	RequestedBarberID *uuid.UUID
 	PriorityGroup     int
 	SortKey           int64
-	RemoteJoinedAt    time.Time
+	// [B9] Nullable: queue_entries.remote_joined_at (001:822) has no NOT NULL and
+	// no default. Every production insert sets it, so a NULL is unreachable today
+	// — which is exactly the shape of the three bugs this sweep was opened for.
+	// This struct is internal, so a pointer is the honest type; the two sites that
+	// feed the frozen joined_at API contract COALESCE instead.
+	RemoteJoinedAt    *time.Time
 }
 
 // EnsureAndLockQueueSession is the mandatory first call inside every queue mutation tx.
@@ -353,7 +358,7 @@ func CallNextTx(ctx context.Context, tx pgx.Tx, params CallNextParams, routingMo
 	if sessionChannel == "whatsapp" && customerID != nil {
 		var customerPhone, mlToken, locName, waMode, bizPhone string
 		notifErr := tx.QueryRow(ctx, `
-			SELECT c.phone_number,
+			SELECT COALESCE(c.phone_number, ''),
 			       COALESCE(v.magic_link_token_hash, ''),
 			       l.name,
 			       l.whatsapp_mode,
@@ -441,7 +446,7 @@ func GetEntryStaffView(ctx context.Context, pool *pgxpool.Pool, entryID uuid.UUI
 		SELECT qe.id, qe.token_number, qe.state, qe.presence_state, qe.is_dispatchable,
 		       qe.customer_id, c.name, c.phone_number, c.visit_count,
 		       v.total_duration_minutes, v.party_size, qe.requested_barber_id, qe.assigned_barber_id,
-		       qe.remote_joined_at, qe.called_at, qe.started_at, qe.stale_warning, v.id AS visit_id
+		       COALESCE(qe.remote_joined_at, v.created_at), qe.called_at, qe.started_at, qe.stale_warning, v.id AS visit_id
 		FROM queue_entries qe
 		JOIN visits v ON qe.visit_id = v.id
 		LEFT JOIN customers c ON qe.customer_id = c.id

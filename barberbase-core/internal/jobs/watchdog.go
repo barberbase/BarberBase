@@ -417,7 +417,7 @@ func (w *Watchdog) triggerAutoSnooze(ctx context.Context, s session, top struct 
 
 	if top.SessionChannel == "whatsapp" && top.CustomerID != nil {
 		err := w.db.QueryRow(ctx, `
-			SELECT c.phone_number, v.magic_link_expires_at
+			SELECT COALESCE(c.phone_number, ''), v.magic_link_expires_at
 			FROM customers c
 			JOIN visits v ON v.id = $1
 			WHERE c.id = $2

@@ -429,10 +429,15 @@ func requireDispatchStillWorks(t *testing.T, f fixture) {
 		VALUES ($1, $2, 'walk_in', 'active', 30) RETURNING id`,
 		f.tenantID, f.locationID).Scan(&visitID))
 	require.NoError(t, f.pool.QueryRow(ctx, `
+		-- [B9/A3] remote_joined_at is deliberately left NULL. This fixture is what
+		-- originally tripped GetEntryStaffView during M2, and it was changed to set
+		-- the column so M2 could proceed. B9 fixed the scan, so it is reverted here:
+		-- the assertion below now passes because of the fix, not because the fixture
+		-- avoids the shape.
 		INSERT INTO queue_entries
 			(visit_id, queue_session_id, token_number, state, presence_state,
-			 is_dispatchable, priority_group, sort_key, remote_joined_at)
-		VALUES ($1, $2, 1, 'waiting', 'arrived', true, 100, 1, NOW()) RETURNING id`,
+			 is_dispatchable, priority_group, sort_key)
+		VALUES ($1, $2, 1, 'waiting', 'arrived', true, 100, 1) RETURNING id`,
 		visitID, sessionID).Scan(&entryID))
 
 	// R2 is down for the duration of this call — assert that, so the test cannot

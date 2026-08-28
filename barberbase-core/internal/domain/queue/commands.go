@@ -514,6 +514,7 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 		}
 	}
 
+	joinedAt := time.Now()
 	err = repository.InsertQueueEntry(ctx, tx, &repository.QueueEntryRow{
 		ID:                entryID,
 		VisitID:           visitID,
@@ -527,7 +528,7 @@ func JoinQueue(ctx context.Context, tx pgx.Tx, params JoinQueueParams) (*JoinQue
 		RequestedBarberID: params.RequestedBarberID,
 		PriorityGroup:     100,
 		SortKey:           sortKey,
-		RemoteJoinedAt:    time.Now(),
+		RemoteJoinedAt:    &joinedAt,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError

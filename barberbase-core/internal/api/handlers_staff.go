@@ -2063,7 +2063,11 @@ func (s *Server) GetQueueSnapshot(w http.ResponseWriter, r *http.Request) {
 			qe.is_dispatchable,
 			qe.requested_barber_id,
 			qe.assigned_barber_id,
-			qe.remote_joined_at  AS joined_at,
+			-- [B9] COALESCE, not a pointer: joined_at is a required non-null field on
+			-- QueueEntryStaff and openapi.yaml is frozen. visits.created_at is NOT NULL
+			-- and is semantically the same instant — when the visit was created is when
+			-- they joined.
+			COALESCE(qe.remote_joined_at, v.created_at) AS joined_at,
 			qe.called_at,
 			qe.started_at,
 			qe.stale_warning,
