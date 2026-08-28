@@ -190,6 +190,15 @@ components:
           type: string
           format: date-time
           nullable: true
+        next_open_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            Instant the shop next opens, RFC3339 with the location's UTC offset
+            (e.g. 2026-08-29T10:00:00+05:30). null when no open day exists within
+            eight days. Present whether the shop is open or closed; when open it is
+            the next opening, not the current one.
         queue_routing_mode:
           type: string
           enum: [pooled, hybrid, barber_specific]

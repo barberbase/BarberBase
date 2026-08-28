@@ -761,7 +761,8 @@ func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locat
 	}
 
 	hours := week[dayOfWeek]
-	shopStatus := computeShopStatus(override, week, now).Status
+	status := computeShopStatus(override, week, now)
+	shopStatus := status.Status
 	businessDate := now.Format("2006-01-02")
 
 	stats, err := repository.GetQueueStats(ctx, s.Pool, location.ID, businessDate)
@@ -802,6 +803,10 @@ func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locat
 		"queue_length":           stats.QueueLength,
 		"estimated_wait_minutes": stats.EstimatedWaitMinutes,
 		"queue_routing_mode":     routingMode,
+		// Unconditional: a nil *time.Time marshals to null. Omitting the key
+		// instead would make "no open day in eight days" indistinguishable from
+		// an older server that never sent the field.
+		"next_open_at": status.NextOpenAt,
 	}
 
 	// Public-safe barber roster — only when a picker is meaningful (Law 21-adjacent:

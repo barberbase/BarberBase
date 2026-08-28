@@ -213,10 +213,9 @@ var ErrActiveEntriesExist = errors.New("active_entries_require_action")
 
 // ShopStatusResult is the shared effective-status type.
 //
-// NextOpenAt and Reason are INTERNAL: both resolvers compute them and the parity
-// table asserts on them, but no handler serialises them. Putting them on the wire
-// needs a LocationStatus change in the frozen openapi.yaml — see the wiring
-// handoff in the B3 report.
+// NextOpenAt is on the wire as LocationStatus.next_open_at (API1), serialised by
+// GetLocationStatus. Reason stays INTERNAL: both resolvers compute it and the
+// parity table asserts on it, but nothing serialises it.
 type ShopStatusResult struct {
 	Status               string     // "open" | "closing_soon" | "temporarily_closed" | "closed"
 	ManualOverrideActive bool
