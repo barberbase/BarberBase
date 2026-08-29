@@ -131,6 +131,7 @@ func main() {
 		Config:  cfg,
 		Manager: mgr,
 		Media:   mediaService,
+		Tiers:   &repository.TierRepository{Pool: pool},
 	}
 
 	broadcast := func(locationID uuid.UUID, version int64) {

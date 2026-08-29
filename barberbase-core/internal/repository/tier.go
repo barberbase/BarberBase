@@ -228,6 +228,47 @@ func (r *TierRepository) GetVariantsForPricing(ctx context.Context, tenantID, lo
 	return out, rows.Err()
 }
 
+// ListVariantsForPricing loads every ACTIVE variant at a location with its base
+// pricing. GetVariantsForPricing answers "these ids"; this answers "all of
+// them", which is what both bulk apply and the resolved-matrix read need.
+//
+// [O4] Lifted out of BulkApplyTierPrices, which ran this query inline. One
+// definition, so the matrix read and the bulk write can never disagree about
+// which variants are in scope.
+func (r *TierRepository) ListVariantsForPricing(ctx context.Context, tenantID, locationID uuid.UUID) ([]pricing.Variant, error) {
+	rows, err := r.Pool.Query(ctx, `
+		SELECT id, name, price_paise, duration_minutes
+		FROM service_variants
+		WHERE tenant_id = $1 AND location_id = $2 AND is_active
+		ORDER BY name`, tenantID, locationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []pricing.Variant
+	for rows.Next() {
+		var v pricing.Variant
+		if err := rows.Scan(&v.ID, &v.Name, &v.PricePaise, &v.DurationMinutes); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// TierExists reports whether an ACTIVE tier belongs to this tenant and location.
+// [O4] UpsertOverride validates the variant but not the tier, so the handler
+// checks the tier before calling it; this is that check.
+func (r *TierRepository) TierExists(ctx context.Context, tenantID, locationID, tierID uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.Pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM staff_tiers
+		WHERE id = $3 AND tenant_id = $1 AND location_id = $2 AND is_active)`,
+		tenantID, locationID, tierID).Scan(&exists)
+	return exists, err
+}
+
 // GetOverrides loads the sparse matrix entries for the given variants at one
 // tier. Only rows that exist are returned; a missing key means inherit.
 func (r *TierRepository) GetOverrides(ctx context.Context, tenantID, locationID, tierID uuid.UUID,
@@ -335,38 +376,25 @@ func (r *TierRepository) BulkApplyTierPrices(ctx context.Context, tenantID, loca
 			return ErrTierNotFound
 		}
 
-		rows, err := tx.Query(ctx, `
-			SELECT id, price_paise FROM service_variants
-			WHERE tenant_id = $1 AND location_id = $2 AND is_active`, tenantID, locationID)
+		variants, err := r.ListVariantsForPricing(ctx, tenantID, locationID)
 		if err != nil {
 			return err
 		}
 		var ids []uuid.UUID
 		var prices []int
-		for rows.Next() {
-			var id uuid.UUID
-			var base int
-			if err := rows.Scan(&id, &base); err != nil {
-				rows.Close()
-				return err
-			}
+		for _, v := range variants {
 			// Rounding lives in the pure resolver, not in SQL.
 			var out int
 			if adj.DeltaPaise != nil {
-				out, err = pricing.ApplyDelta(base, *adj.DeltaPaise)
+				out, err = pricing.ApplyDelta(v.PricePaise, *adj.DeltaPaise)
 			} else {
-				out, err = pricing.ApplyPercent(base, *adj.Percent)
+				out, err = pricing.ApplyPercent(v.PricePaise, *adj.Percent)
 			}
 			if err != nil {
-				rows.Close()
 				return err
 			}
-			ids = append(ids, id)
+			ids = append(ids, v.ID)
 			prices = append(prices, out)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return err
 		}
 		if len(ids) == 0 {
 			return nil

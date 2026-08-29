@@ -530,6 +530,99 @@ components:
           items:
             $ref: '#/components/schemas/QueueEntryStaff'
 
+    # ── Staff tiers ──────────────────────────────────────────────────────────
+    Tier:
+      type: object
+      description: >
+        A staff tier (Junior, Senior, Master). Tiers order by rank and carry
+        per-service price overrides; a barber with no tier is priced at the
+        service's base price.
+      required: [id, name, rank, is_default, is_active, sort_order]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDv7'
+        name:
+          type: string
+          maxLength: 50
+          example: "Senior"
+        rank:
+          type: integer
+          description: >
+            Orders tiers against each other. Spaced 10/20/30 by convention so a
+            tier can be slotted in later without renumbering. Unique per location.
+        description:
+          type: string
+          maxLength: 160
+          nullable: true
+        is_default:
+          type: boolean
+          description: >
+            At most one live default per location, enforced by a partial unique
+            index. Setting a new default clears the old one in one transaction.
+        is_active:
+          type: boolean
+          description: >
+            false for a retired tier. Deactivation is the only delete: barbers
+            and queue entries reference tiers with no ON DELETE clause.
+        sort_order:
+          type: integer
+
+    ResolvedTierPrice:
+      type: object
+      description: >
+        One service priced at one tier, with the base it was resolved from. This
+        is the read side of the sparse override matrix.
+      required:
+        [service_variant_id, variant_name, base_price_paise, price_paise,
+         base_duration_minutes, duration_minutes, is_offered, inherited]
+      properties:
+        service_variant_id:
+          type: string
+          format: uuid
+        variant_name:
+          type: string
+        base_price_paise:
+          type: integer
+          description: The service's own price, before any tier override (paise).
+        price_paise:
+          type: integer
+          description: Effective price at this tier (paise). Equals base_price_paise when inherited.
+        base_duration_minutes:
+          type: integer
+        duration_minutes:
+          type: integer
+          description: Effective duration at this tier. Equals base_duration_minutes when the override leaves it null.
+        is_offered:
+          type: boolean
+          description: false means this tier does not perform this service at all.
+        inherited:
+          type: boolean
+          description: >
+            true when NO override row exists for this (variant, tier) — the
+            values shown are the service's own. This flag is load-bearing: the
+            matrix is sparse and an override equal to base is deleted, so
+            without it a client cannot tell "inherited from base" from
+            "explicitly set to the same value". An is_offered=false row is
+            never redundant, so it reports inherited=false even at base price.
+
+    TierInUseError:
+      type: object
+      description: Returned when deactivating a tier that active barbers still sit in.
+      required: [code, message, blocking_barbers]
+      properties:
+        code:
+          type: string
+          example: "TIER_IN_USE"
+        message:
+          type: string
+        blocking_barbers:
+          type: array
+          description: >
+            Names of the active barbers still in this tier. Reassign them and
+            retry — an owner needs to know who is blocking the delete.
+          items:
+            type: string
+
     # ── Media ────────────────────────────────────────────────────────────────
     MediaAsset:
       type: object
@@ -2996,6 +3089,362 @@ paths:
           description: Unknown button_code for this device
         '429':
           description: Rate limited (1 per 3s per device)
+
+  /admin/tiers:
+    get:
+      tags: [Admin - Tiers]
+      summary: List this location's staff tiers, in rank order
+      operationId: listTiers
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: include_inactive
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: When true, retired (is_active=false) tiers are included. Pickers want false; the admin screen wants true.
+      responses:
+        '200':
+          description: Tiers in rank order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tier'
+        '403':
+          description: Role is not owner or manager
+    post:
+      tags: [Admin - Tiers]
+      summary: Create a staff tier
+      operationId: createTier
+      security:
+        - StaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, rank]
+              properties:
+                name:
+                  type: string
+                  maxLength: 50
+                rank:
+                  type: integer
+                description:
+                  type: string
+                  maxLength: 160
+      responses:
+        '201':
+          description: Tier created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tier'
+        '403':
+          description: Role is not owner or manager
+        '409':
+          description: A tier at this location already uses that name, or that rank
+
+  /admin/tiers/{tier_id}:
+    patch:
+      tags: [Admin - Tiers]
+      summary: Rename or re-rank a tier
+      description: Omitted fields are left unchanged.
+      operationId: updateTier
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: tier_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 50
+                rank:
+                  type: integer
+                description:
+                  type: string
+                  maxLength: 160
+      responses:
+        '200':
+          description: Updated tier
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tier'
+        '403':
+          description: Role is not owner or manager
+        '404':
+          description: No such tier at the caller's location
+        '409':
+          description: Another tier at this location already uses that name, or that rank
+    delete:
+      tags: [Admin - Tiers]
+      summary: Retire a tier (SOFT delete)
+      description: |
+        Sets is_active=false and clears is_default. The row is never removed:
+        staff_members.tier_id and queue_entries.required_tier_id reference
+        staff_tiers with no ON DELETE clause, so a hard delete would surface a
+        raw foreign-key violation and would rewrite the history of queue entries
+        that recorded which tier they asked for.
+
+        Refused with 409 while active barbers still sit in the tier; the body
+        names them. Reassign them first.
+      operationId: deactivateTier
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: tier_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      responses:
+        '204':
+          description: Tier retired
+        '403':
+          description: Role is not owner or manager
+        '404':
+          description: No such tier at the caller's location
+        '409':
+          description: Active barbers are still in this tier
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TierInUseError'
+
+  /admin/tiers/{tier_id}/default:
+    post:
+      tags: [Admin - Tiers]
+      summary: Make this tier the location's default
+      description: >
+        Clears the previous default in the same transaction — a partial unique
+        index permits only one live default per location, so this is the only
+        safe ordering. Concurrent calls serialise rather than colliding.
+      operationId: setDefaultTier
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: tier_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      responses:
+        '204':
+          description: Default set
+        '403':
+          description: Role is not owner or manager
+        '404':
+          description: No such active tier at the caller's location
+
+  /admin/staff/{staff_member_id}/tier:
+    put:
+      tags: [Admin - Tiers]
+      summary: Set or clear a barber's tier
+      operationId: assignStaffTier
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: staff_member_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tier_id]
+              properties:
+                tier_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: >
+                    null clears the tier, putting the barber back on base
+                    pricing. Must name an active tier at the caller's location.
+      responses:
+        '204':
+          description: Assigned
+        '403':
+          description: Role is not owner or manager
+        '404':
+          description: No such barber, or no such active tier, at the caller's location
+
+  /admin/tiers/{tier_id}/prices:
+    get:
+      tags: [Admin - Tiers]
+      summary: Read the resolved price matrix for one tier
+      description: |
+        One row per ACTIVE service variant at the location, including variants
+        with no override row — that is what makes this renderable as a grid.
+
+        `inherited` is the field to read carefully. The override matrix is
+        sparse: an override equal to the base values is deleted rather than
+        stored, so an absent row and a redundant one are the same thing on the
+        wire. inherited=true means no row exists and the values shown are the
+        service's own.
+      operationId: listResolvedPrices
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: tier_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      responses:
+        '200':
+          description: Every active variant priced at this tier
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ResolvedTierPrice'
+        '403':
+          description: Role is not owner or manager
+        '404':
+          description: No such tier at the caller's location
+
+  /admin/tiers/{tier_id}/prices/{service_variant_id}:
+    put:
+      tags: [Admin - Tiers]
+      summary: Set one service's price at one tier
+      description: |
+        Writes one entry in the sparse matrix — or REMOVES it. Submitting values
+        that equal the variant's own price and duration with is_offered=true
+        stores nothing, because such a row carries no information; a client that
+        PUTs base values and then reads the matrix will see inherited=true, and
+        that is correct rather than a lost write.
+
+        An is_offered=false row is never redundant and is always stored, even at
+        base price.
+      operationId: upsertTierPrice
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: tier_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+        - name: service_variant_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [price_paise]
+              properties:
+                price_paise:
+                  type: integer
+                  minimum: 0
+                duration_minutes:
+                  type: integer
+                  minimum: 1
+                  nullable: true
+                  description: null inherits the service's own duration. That is the whole reason the column is nullable.
+                is_offered:
+                  type: boolean
+                  default: true
+                  description: false is how a tier is excluded from a service — juniors do not do colour.
+      responses:
+        '204':
+          description: Override stored, or deleted because it was redundant
+        '400':
+          description: Negative price
+        '403':
+          description: Role is not owner or manager
+        '404':
+          description: No such tier or service variant at the caller's location
+
+  /admin/tiers/{tier_id}/prices/bulk:
+    post:
+      tags: [Admin - Tiers]
+      summary: Adjust every service's price at one tier
+      description: |
+        "Seniors are ₹100 more" or "juniors are 10% less", without editing forty
+        rows by hand. Exactly one of delta_paise or percent — both, or neither,
+        is 400.
+
+        Rules, all deliberate:
+
+        - Every price is computed from the service's BASE price, never from the
+          current override. That is what makes a repeated apply idempotent:
+          "+₹100 at Senior" run twice still means base+₹100, not base+₹200.
+        - delta_paise is exact integer arithmetic and is never rounded.
+        - percent rounds HALF-UP to the nearest whole rupee: x.50 rounds up. No
+          floating point at any step.
+        - A result below zero is refused outright, not clamped to zero.
+        - Only price_paise is touched. duration_minutes and is_offered on
+          existing rows are preserved — a price change must never silently
+          re-enable a service a junior is not allowed to perform.
+        - Rows that end up saying nothing the service does not already say are
+          deleted, keeping the matrix sparse. That is why affected can be lower
+          than the number of variants.
+      operationId: bulkApplyTierPrices
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: tier_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                delta_paise:
+                  type: integer
+                  description: Fixed amount added to every base price, in paise. May be negative.
+                percent:
+                  type: integer
+                  description: Whole-number percentage adjustment. May be negative.
+      responses:
+        '200':
+          description: Applied
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [affected]
+                properties:
+                  affected:
+                    type: integer
+                    description: Override rows left in place, after redundant ones were swept.
+        '400':
+          description: Not exactly one of delta_paise and percent, or the result would be negative
+        '403':
+          description: Role is not owner or manager
+        '404':
+          description: No such active tier at the caller's location
 
   /admin/media/presign:
     post:

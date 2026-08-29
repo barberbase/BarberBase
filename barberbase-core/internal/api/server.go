@@ -6,6 +6,7 @@ import (
 	"barberbase-core/internal/domain/media"
 	"barberbase-core/internal/domain/presence"
 	"barberbase-core/internal/realtime"
+	"barberbase-core/internal/repository"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -21,4 +22,5 @@ type Server struct {
 	Arrival *presence.Service
 	Manager *realtime.Manager // nil-safe; SSE disabled if nil
 	Media   *media.Service    // nil-safe; every media route 503s if nil or unconfigured
+	Tiers   *repository.TierRepository
 }
