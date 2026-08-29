@@ -530,6 +530,99 @@ components:
           items:
             $ref: '#/components/schemas/QueueEntryStaff'
 
+    # ── Media ────────────────────────────────────────────────────────────────
+    MediaAsset:
+      type: object
+      description: >
+        One row of media_assets. Reading an image is NOT an API call: build the
+        URL as R2_MEDIA_PUBLIC_BASE_URL + r2_key and let Cloudflare serve it
+        directly from R2. Image bytes never pass through this server in either
+        direction — uploads go straight to R2 via a presigned PUT.
+      required: [id, purpose, r2_key, content_hash, sort_order, is_primary, status, created_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/UUIDv7'
+        purpose:
+          type: string
+          enum: [service_ref, location_logo, location_cover, staff_avatar]
+        service_variant_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            Set when and only when purpose is service_ref; null otherwise.
+            Inlined rather than $ref'd to UUIDv7 on purpose — oapi-codegen drops
+            nullable and description when they sit beside a $ref.
+        staff_member_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set when and only when purpose is staff_avatar; null otherwise.
+        r2_key:
+          type: string
+          description: >
+            Content-hashed object key, e.g. svc/{location_id}/{variant_id}/{16
+            hex}.webp. Immutable and cacheable forever; re-uploading identical
+            bytes reuses the key rather than creating a second object.
+        content_hash:
+          type: string
+          description: >
+            SHA-256 the client asserts over the bytes, 64 lowercase hex. A cache
+            and dedup key, NEVER an integrity proof — the server never reads
+            object bytes, so it cannot verify this value. Nothing
+            security-relevant may depend on it.
+        bytes:
+          type: integer
+          nullable: true
+          description: Object size, read by HEAD at commit. null while status is pending.
+        alt_text:
+          type: string
+          nullable: true
+          maxLength: 160
+        sort_order:
+          type: integer
+        is_primary:
+          type: boolean
+        status:
+          type: string
+          enum: [pending, ready, archived]
+          description: >
+            pending — presigned, upload not yet confirmed; the reaper collects
+            these after an hour. ready — committed and live. archived — soft
+            deleted, R2 object purged after the grace window.
+        created_at:
+          type: string
+          format: date-time
+        committed_at:
+          type: string
+          format: date-time
+          nullable: true
+        public_url:
+          type: string
+          description: >
+            Convenience join of R2_MEDIA_PUBLIC_BASE_URL and r2_key. Omitted
+            entirely when no public base URL is configured — never emit a bare
+            key as if it were a URL.
+
+    MediaPresignResponse:
+      type: object
+      required: [media_asset_id, r2_key, upload_url, expires_at]
+      properties:
+        media_asset_id:
+          $ref: '#/components/schemas/UUIDv7'
+        r2_key:
+          type: string
+        upload_url:
+          type: string
+          format: uri
+          description: >
+            Presigned PUT. Upload the bytes here with Content-Type image/webp,
+            then POST the commit route. An upload that is never committed is
+            reaped.
+        expires_at:
+          type: string
+          format: date-time
+
     # ── Appointment ──────────────────────────────────────────────────────────
     AppointmentSlot:
       type: object
@@ -2903,6 +2996,186 @@ paths:
           description: Unknown button_code for this device
         '429':
           description: Rate limited (1 per 3s per device)
+
+  /admin/media/presign:
+    post:
+      tags: [Admin - Media]
+      summary: Presign a direct-to-R2 image upload
+      description: |
+        Returns a presigned PUT the browser uploads to directly — the image
+        bytes never touch the API server. Upload, then call the commit route.
+
+        Rate limited per staff member; a 429 carries Retry-After. Presigning the
+        same bytes twice for the same variant is idempotent and returns the same
+        asset with a fresh URL.
+      operationId: presignMedia
+      security:
+        - StaffJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purpose, content_hash]
+              properties:
+                purpose:
+                  type: string
+                  enum: [service_ref, location_logo, location_cover, staff_avatar]
+                content_hash:
+                  type: string
+                  pattern: '^[0-9a-f]{64}$'
+                  description: SHA-256 of the bytes, 64 lowercase hex. Client-asserted; see MediaAsset.content_hash.
+                service_variant_id:
+                  type: string
+                  format: uuid
+                  description: Required when purpose is service_ref. Must belong to the caller's location.
+                staff_member_id:
+                  type: string
+                  format: uuid
+                  description: Required when purpose is staff_avatar. Must belong to the caller's location.
+      responses:
+        '200':
+          description: Upload URL issued; a pending asset row now exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaPresignResponse'
+        '400':
+          description: Unknown purpose, missing id for the purpose, or malformed content_hash
+        '403':
+          description: Role is not owner or manager
+        '404':
+          description: The referenced service variant or staff member is not in the caller's location
+        '429':
+          description: Presign rate limit exceeded; Retry-After carries the delay
+        '503':
+          description: Media storage is not configured on this deployment
+
+  /admin/media/{media_asset_id}/commit:
+    post:
+      tags: [Admin - Media]
+      summary: Confirm an uploaded object and publish the asset
+      description: |
+        Verifies the object exists in R2 by HEAD, checks its size and
+        content-type, and flips the row to ready. Idempotent: committing an
+        already-ready asset returns it unchanged.
+      operationId: commitMedia
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: media_asset_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                alt_text:
+                  type: string
+                  maxLength: 160
+      responses:
+        '200':
+          description: Asset committed and live
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaAsset'
+        '403':
+          description: Role is not owner or manager
+        '404':
+          description: No such asset in the caller's tenant and location
+        '409':
+          description: Object not uploaded yet, or the variant already holds its maximum images
+        '413':
+          description: Object exceeds the maximum allowed size
+        '415':
+          description: Object content-type is not image/webp
+        '503':
+          description: Media storage is not configured, or R2 is unreachable
+
+  /admin/media/{media_asset_id}:
+    delete:
+      tags: [Admin - Media]
+      summary: Archive an asset and schedule its R2 purge
+      description: |
+        Soft delete. The row goes to archived and the object is scheduled for
+        removal after a grace window, so a mistaken delete stays recoverable
+        until then.
+      operationId: archiveMedia
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: media_asset_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/UUIDv7'
+      responses:
+        '204':
+          description: Archived; purge scheduled
+        '403':
+          description: Role is not owner or manager
+        '404':
+          description: No such asset in the caller's tenant and location
+        '503':
+          description: Media storage is not configured on this deployment
+
+  /admin/media:
+    get:
+      tags: [Admin - Media]
+      summary: List this location's media assets
+      description: |
+        Always scoped to the tenant and location in the JWT (Law 11). Returns
+        ready and pending assets by default; archived ones only when
+        include_archived is true.
+      operationId: listMedia
+      security:
+        - StaffJWT: []
+      parameters:
+        - name: purpose
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [service_ref, location_logo, location_cover, staff_avatar]
+        - name: service_variant_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: staff_member_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: include_archived
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: When true, archived assets are included alongside ready and pending.
+      responses:
+        '200':
+          description: Assets in sort_order, newest first within a tie
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MediaAsset'
+        '403':
+          description: Role is not owner or manager
+        '503':
+          description: Media storage is not configured on this deployment
 
   /admin/devices:
     post:

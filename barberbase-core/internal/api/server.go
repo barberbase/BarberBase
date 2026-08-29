@@ -3,6 +3,7 @@ package api
 import (
 	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/config"
+	"barberbase-core/internal/domain/media"
 	"barberbase-core/internal/domain/presence"
 	"barberbase-core/internal/realtime"
 
@@ -19,4 +20,5 @@ type Server struct {
 	Config  *config.Config
 	Arrival *presence.Service
 	Manager *realtime.Manager // nil-safe; SSE disabled if nil
+	Media   *media.Service    // nil-safe; every media route 503s if nil or unconfigured
 }

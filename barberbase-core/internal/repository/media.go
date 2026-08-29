@@ -260,3 +260,63 @@ func (r *MediaRepository) DeleteRow(ctx context.Context, id uuid.UUID) error {
 	_, err := r.Pool.Exec(ctx, `DELETE FROM media_assets WHERE id = $1 AND status = 'pending'`, id)
 	return err
 }
+
+// MediaListFilters narrows ListAssets. A nil pointer means "do not filter on
+// this"; tenant and location are NOT here because they are never optional.
+type MediaListFilters struct {
+	Purpose          *string
+	ServiceVariantID *uuid.UUID
+	StaffMemberID    *uuid.UUID
+	IncludeArchived  bool // false: ready + pending only
+}
+
+// ListAssets returns one location's assets, newest first within a sort_order.
+//
+// tenant_id AND location_id are always in the WHERE clause and come from the
+// caller's JWT, never from a query string (Law 11). Archived rows are excluded
+// unless asked for: the admin hub's default question is "what is live or
+// pending", and a shop that has replaced a logo ten times should not have to
+// scroll past ten tombstones.
+//
+// ponytail: one statement with NULL-guarded filters rather than a query
+// builder. Three optional filters do not justify string concatenation, and the
+// planner short-circuits `$n IS NULL OR col = $n` fine at this table's size.
+//
+// NOT INDEXED for the common case: no index leads on (tenant_id, location_id),
+// so filtering by location alone — the admin hub's default call — is a
+// sequential scan. Harmless at current row counts; the fix is
+// CREATE INDEX ON media_assets(location_id, purpose, sort_order), which is a
+// migration and therefore its own unit.
+func (r *MediaRepository) ListAssets(ctx context.Context, tenantID, locationID uuid.UUID,
+	f MediaListFilters) ([]MediaAsset, error) {
+
+	rows, err := r.Pool.Query(ctx, `
+		SELECT id, tenant_id, location_id, purpose, service_variant_id, staff_member_id,
+		       r2_key, content_hash, bytes, alt_text, sort_order, is_primary, status,
+		       created_at, committed_at
+		FROM media_assets
+		WHERE tenant_id = $1
+		  AND location_id = $2
+		  AND ($3::TEXT IS NULL OR purpose = $3)
+		  AND ($4::UUID IS NULL OR service_variant_id = $4)
+		  AND ($5::UUID IS NULL OR staff_member_id = $5)
+		  AND ($6 OR status <> 'archived')
+		ORDER BY sort_order, created_at DESC`,
+		tenantID, locationID, f.Purpose, f.ServiceVariantID, f.StaffMemberID, f.IncludeArchived)
+	if err != nil {
+		return nil, fmt.Errorf("list media assets: %w", err)
+	}
+	defer rows.Close()
+
+	assets := []MediaAsset{}
+	for rows.Next() {
+		var a MediaAsset
+		if err := rows.Scan(&a.ID, &a.TenantID, &a.LocationID, &a.Purpose, &a.ServiceVariantID,
+			&a.StaffMemberID, &a.R2Key, &a.ContentHash, &a.Bytes, &a.AltText, &a.SortOrder,
+			&a.IsPrimary, &a.Status, &a.CreatedAt, &a.CommittedAt); err != nil {
+			return nil, fmt.Errorf("scan media asset: %w", err)
+		}
+		assets = append(assets, a)
+	}
+	return assets, rows.Err()
+}

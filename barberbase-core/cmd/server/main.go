@@ -14,6 +14,7 @@ import (
 	"barberbase-core/internal/api"
 	"barberbase-core/internal/bhejna"
 	"barberbase-core/internal/config"
+	"barberbase-core/internal/domain/media"
 	"barberbase-core/internal/domain/presence"
 	"barberbase-core/internal/jobs"
 	"barberbase-core/internal/outbox"
@@ -101,8 +102,8 @@ func main() {
 	go webhook.NewProcessor(pool, webhookBroadcaster{m: mgr}).Run(ctx)
 
 	watchdog := jobs.NewWatchdog(pool, mgr, cfg)
-	eod      := jobs.NewEndOfDay(pool, mgr, cfg)
-	weekly   := jobs.NewWeeklySummary(pool, cfg)
+	eod := jobs.NewEndOfDay(pool, mgr, cfg)
+	weekly := jobs.NewWeeklySummary(pool, cfg)
 	go watchdog.Start(ctx)
 	go eod.Start(ctx)
 	go weekly.Start(ctx)
@@ -114,11 +115,22 @@ func main() {
 		cfg.R2MediaAccessKeyID, cfg.R2MediaSecretAccessKey, cfg.R2MediaPublicBaseURL)
 	go jobs.NewMediaReaper(pool, mediaStore, cfg.MediaReapBatch).Start(ctx)
 
+	// [O5] The same store now backs the admin media routes. Constructed even when
+	// R2 is unconfigured: the routes answer 503 rather than 404, so a deployment
+	// without media is a disabled feature, not a missing one.
+	mediaService := &media.Service{
+		Repo:          &repository.MediaRepository{Pool: pool},
+		Store:         mediaStore,
+		MaxBytes:      cfg.MediaMaxBytes,
+		MaxPerVariant: cfg.MediaMaxPerVariant,
+	}
+
 	apiServer := &api.Server{
 		Pool:    pool,
 		Bhejna:  bhejnaClient,
 		Config:  cfg,
 		Manager: mgr,
+		Media:   mediaService,
 	}
 
 	broadcast := func(locationID uuid.UUID, version int64) {

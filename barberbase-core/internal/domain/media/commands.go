@@ -23,11 +23,13 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// Errors callers map to responses. See the HTTP Handoff for the status codes.
+// Errors callers map to responses. The status code each one maps to is the
+// table in internal/api/handlers_media.go, above mediaErrorStatus — which is
+// also the only implementation of that mapping.
 var (
-	// ErrRateLimited carries its own retry delay so the eventual handler can set
-	// Retry-After without re-deriving it. There is no HTTP layer in this unit —
-	// openapi.yaml has no media surface — so the limiter is asserted here.
+	// ErrRateLimited carries its own retry delay so the handler can set
+	// Retry-After without re-deriving it. O5 added that handler; the limiter is
+	// still asserted here as well, because it is domain behaviour.
 	ErrRateLimited = errors.New("too many presign requests")
 	// ErrNotUploaded means commit was called before the object existed.
 	ErrNotUploaded = errors.New("object has not been uploaded yet")
