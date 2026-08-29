@@ -38,6 +38,22 @@ func getCheckinIntentLimiter(ip string) *rate.Limiter {
 	return v.(*rate.Limiter)
 }
 
+// customerAppointmentsEnabled reports whether a CUSTOMER can reach appointment
+// booking. It is a constant because the gate is a constant: POST
+// /appointments/book declares `security: - StaffJWT: []` in openapi.yaml, so the
+// generated wrapper stamps the staff scope and BookAppointment independently
+// 401s on an empty tenant claim. Nothing in config knows about that, and
+// inferring it at runtime would mean parsing our own spec.
+//
+// Staff-initiated booking works today; it is the customer path that is dark
+// (Phase 1.5). When Phase 2 opens it, this flips to true in the same commit that
+// changes the security block — one line, one place, and the landing page's CTA
+// follows.
+//
+// ponytail: a constant, not config. A deployment cannot turn this on, because
+// turning it on is a spec change, not an env var.
+const customerAppointmentsEnabled = false
+
 // nextOpenAt returns the instant the shop next opens, or nil when no day in the
 // lookahead is open. All arithmetic is in now's location, so now must already be
 // tz-localised (see computeShopStatus). An open day with a nil opens_at starts at
@@ -788,15 +804,47 @@ func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locat
 	// Tenant name is the customer-recognizable identity ("Star Salon"); the
 	// location row often holds just an area name ("bhayander"). The count lets
 	// the page hide the location name for single-location shops.
+	//
+	// [P1] The landing page's booking mode and audience chips ride along as
+	// scalar subqueries rather than two more round trips. This is the most-hit
+	// public endpoint in the product, so the query COUNT must not grow. Both
+	// subqueries filter tenant_id AND location_id so they use
+	// idx_service_variants_group and idx_service_categories_location, each of
+	// which leads on that pair and is partial over is_active.
 	var routingMode, tenantName string
 	var tenantLocationCount int
+	var allowsWalkIn, allowsAppointment bool
+	var audiences []string
 	if err := s.Pool.QueryRow(ctx, `
 		SELECT l.queue_routing_mode, t.name,
-		       (SELECT COUNT(*) FROM locations WHERE tenant_id = t.id AND is_active = true)
+		       (SELECT COUNT(*) FROM locations WHERE tenant_id = t.id AND is_active = true),
+		       COALESCE((SELECT bool_or(allow_walk_in) FROM service_variants
+		                 WHERE tenant_id = l.tenant_id AND location_id = l.id AND is_active), false),
+		       COALESCE((SELECT bool_or(allow_appointment) FROM service_variants
+		                 WHERE tenant_id = l.tenant_id AND location_id = l.id AND is_active), false),
+		       COALESCE((SELECT array_agg(DISTINCT gender ORDER BY gender) FROM service_categories
+		                 WHERE tenant_id = l.tenant_id AND location_id = l.id AND is_active), '{}')
 		FROM locations l JOIN tenants t ON t.id = l.tenant_id
-		WHERE l.id = $1`, location.ID).Scan(&routingMode, &tenantName, &tenantLocationCount); err != nil {
+		WHERE l.id = $1`, location.ID).Scan(&routingMode, &tenantName, &tenantLocationCount,
+		&allowsWalkIn, &allowsAppointment, &audiences); err != nil {
 		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
+	}
+
+	// Fixed order, not whatever the DB felt like: a client rendering two CTAs
+	// should not see them swap places between requests. Both slices start
+	// non-nil so an unconfigured shop marshals [] rather than null — "no
+	// bookable service yet" and "this server does not send the field" are
+	// different answers and must look different.
+	availableModes := []string{}
+	if allowsWalkIn {
+		availableModes = append(availableModes, "walk_in")
+	}
+	if allowsAppointment {
+		availableModes = append(availableModes, "appointment")
+	}
+	if audiences == nil {
+		audiences = []string{}
 	}
 
 	response := map[string]interface{}{
@@ -810,6 +858,11 @@ func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locat
 		"queue_length":           stats.QueueLength,
 		"estimated_wait_minutes": stats.EstimatedWaitMinutes,
 		"queue_routing_mode":     routingMode,
+		"available_modes":        availableModes,
+		"audiences":              audiences,
+		// [P1] Schema capability (available_modes) and endpoint reachability are
+		// different questions with different answers. See the constant.
+		"appointments_enabled": customerAppointmentsEnabled,
 		// Unconditional: a nil *time.Time marshals to null. Omitting the key
 		// instead would make "no open day in eight days" indistinguishable from
 		// an older server that never sent the field.

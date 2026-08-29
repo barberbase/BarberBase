@@ -129,10 +129,15 @@ func assertUnchangedShape(t *testing.T, body map[string]any) {
 		got = append(got, k)
 	}
 	sort.Strings(got)
-	// Pre-API1 key set for a pooled location with no active override, plus
-	// next_open_at. barbers is absent under pooled; temporary_closure_ends_at
-	// only appears while temporarily_closed.
+	// The full key set for a pooled location with no active override: pre-API1,
+	// plus next_open_at (API1), plus the three landing fields (P1). barbers is
+	// absent under pooled; temporary_closure_ends_at only appears while
+	// temporarily_closed.
+	//
+	// This list is the contract guard for the whole response, so a unit that
+	// adds a key must come here and say so deliberately.
 	require.Equal(t, []string{
+		"appointments_enabled", "audiences", "available_modes",
 		"business_hours_today", "estimated_wait_minutes", "id", "name",
 		"next_open_at", "queue_length", "queue_open", "queue_routing_mode",
 		"shop_status", "slug", "tenant_location_count", "tenant_name",

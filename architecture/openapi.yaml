@@ -220,6 +220,44 @@ components:
               presence_state:
                 type: string
                 enum: [idle, cutting, break, offline]
+        available_modes:
+          type: array
+          description: >
+            Booking modes this location accepts, before any service is chosen.
+            Derived from the location's ACTIVE service_variants: walk_in appears
+            if any allows walk-ins, appointment if any allows appointments. An
+            empty array is valid and means no bookable service is configured yet
+            — it is not an error and not the same as the key being absent.
+
+            This describes SCHEMA CAPABILITY. Whether a customer can actually
+            book an appointment right now is appointments_enabled, which can
+            disagree; show a "book for later" CTA only when both agree.
+          items:
+            type: string
+            enum: [walk_in, appointment]
+        appointments_enabled:
+          type: boolean
+          description: >
+            Whether the customer-facing appointment booking endpoint is
+            REACHABLE, as opposed to whether the catalogue permits appointments.
+            False while POST /appointments/book is gated to staff, which is a
+            deliberate product decision, not a misconfiguration of this shop.
+
+            It exists because the two questions have different answers: a shop
+            can have appointment-capable services (available_modes contains
+            appointment) while the customer path to book one is closed. A client
+            that keys its CTA off available_modes alone will render a button
+            that 401s.
+        audiences:
+          type: array
+          description: >
+            Distinct genders across the location's ACTIVE service_categories.
+            Render a chip row from this, and hide the row entirely when there is
+            one element — a men-only shop should not cost every customer a tap.
+            Alphabetical, so the order is stable across requests.
+          items:
+            type: string
+            enum: [men, women, unisex]
 
     LocationSettings:
       type: object
