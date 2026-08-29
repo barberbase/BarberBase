@@ -872,6 +872,10 @@ func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locat
 	// Public-safe barber roster — only when a picker is meaningful (Law 21-adjacent:
 	// no PII beyond display name). Off-shift barbers excluded: requesting an
 	// offline barber is a dead end.
+	//
+	// [P2] presence_state carries the MASKED value, never staff_members.status.
+	// This field shipped raw, so the landing page could tell a customer that a
+	// named barber was on a tea break — see repository.PublicAvailability.
 	if routingMode != "pooled" {
 		rows, err := s.Pool.Query(ctx, `
 			SELECT id, name, status
@@ -893,7 +897,8 @@ func (s *Server) GetLocationStatus(w http.ResponseWriter, r *http.Request, locat
 				return
 			}
 			barbers = append(barbers, map[string]interface{}{
-				"id": id, "display_name": name, "presence_state": status,
+				"id": id, "display_name": name,
+				"presence_state": repository.PublicAvailability(status),
 			})
 		}
 		rows.Close()

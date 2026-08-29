@@ -219,7 +219,15 @@ components:
                 type: string
               presence_state:
                 type: string
-                enum: [idle, cutting, break, offline]
+                enum: [available, busy]
+                description: >
+                  PUBLIC-SAFE availability, not the internal staff status.
+                  available = idle; busy = cutting OR on break. An offline
+                  barber is omitted from this array entirely rather than
+                  reported. A customer needs to know whether someone can cut
+                  their hair now; that a named barber is on a tea break is
+                  nobody else's business, least of all the customer standing
+                  in front of them.
         available_modes:
           type: array
           description: >
@@ -567,6 +575,72 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/QueueEntryStaff'
+
+    PublicBarber:
+      type: object
+      description: >
+        One barber as a customer sees them. Deliberately thin: no phone number,
+        no performance data, no rating, and no internal status. Price and wait
+        appear only when the request named the services being priced.
+      required: [staff_member_id, display_name, availability]
+      properties:
+        staff_member_id:
+          $ref: '#/components/schemas/UUIDv7'
+        display_name:
+          type: string
+        availability:
+          type: string
+          enum: [available, busy]
+          description: >
+            available = free now; busy = mid-service or on a break. The two are
+            deliberately indistinguishable. Offline barbers are omitted.
+        tier:
+          type: object
+          nullable: true
+          description: >
+            The barber's tier, or null for an untiered barber priced at the
+            service's base rate. name and rank are what a customer reads
+            ("Senior"), and they are the only seniority signal offered — there
+            is no years-of-experience field in the schema and this unit does not
+            invent one.
+          properties:
+            id:
+              $ref: '#/components/schemas/UUIDv7'
+            name:
+              type: string
+            rank:
+              type: integer
+        est_wait_minutes:
+          type: integer
+          minimum: 0
+          description: >
+            Minutes before this barber could start the requested services.
+            OMITTED, not zero, when variant_ids was not supplied — a wait with
+            nothing to wait for is not a number worth inventing.
+        price_paise:
+          type: integer
+          minimum: 0
+          description: Total for the requested services at this barber's tier. Omitted without variant_ids.
+        price_delta_paise:
+          type: integer
+          description: >
+            Difference from the location's DEFAULT tier for the same services.
+            Negative means cheaper than the default, and that is the point: a
+            customer who arrived willing to pay the default price and takes a
+            junior for less, sooner, is revenue the shop was not capturing.
+            Anchoring to the cheapest barber instead would make every other
+            barber read as an upsell.
+
+            Omitted when the location has no default tier configured, which the
+            schema permits — the partial unique index allows zero defaults.
+        avatar_url:
+          type: string
+          nullable: true
+          description: >
+            Public image URL, or null when the barber has no avatar or media is
+            not configured on this deployment. Never a placeholder: the fallback
+            monogram is the client's to render, and a URL that 404s is worse
+            than an honest null.
 
     # ── Staff tiers ──────────────────────────────────────────────────────────
     Tier:
@@ -974,6 +1048,52 @@ paths:
   # ════════════════════════════════════════════════════════════════════════════
   # PUBLIC — No auth. Customers and AI agent. Rate-limited by IP.
   # ════════════════════════════════════════════════════════════════════════════
+
+  /public/locations/{location_slug}/barbers:
+    get:
+      tags: [Public]
+      summary: Public barber list with per-barber price and wait
+      description: |
+        The barber picker. Lets a customer trade money against time: a junior
+        who is free now versus a senior with two people ahead.
+
+        No auth. Offline barbers are omitted, and the availability value is a
+        public-safe mask over the internal staff status — a customer never sees
+        that someone is on a break.
+
+        Supply variant_ids to get price and wait. Without it the barber list
+        still returns, but price_paise, price_delta_paise and est_wait_minutes
+        are omitted rather than guessed at — they are meaningless before the
+        customer has chosen what they want done.
+      operationId: listPublicBarbers
+      parameters:
+        - name: location_slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: variant_ids
+          in: query
+          required: false
+          style: form
+          explode: false
+          description: Comma-separated service variant ids to price and time. Unknown or inactive ids are ignored.
+          schema:
+            type: array
+            items:
+              type: string
+              format: uuid
+      responses:
+        '200':
+          description: Barbers who could serve a customer now, in name order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PublicBarber'
+        '404':
+          description: No such location
 
   /public/locations/{location_slug}/status:
     get:

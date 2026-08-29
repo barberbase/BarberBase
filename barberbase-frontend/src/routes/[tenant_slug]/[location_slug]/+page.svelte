@@ -592,7 +592,7 @@
 											{/if}
 											{#each barbers as barber}
 												<option value={barber.id}>
-													{barber.display_name}{barber.presence_state === 'break' ? ' (on break)' : ''}
+													{barber.display_name}{barber.presence_state === 'busy' ? ' (busy)' : ''}
 												</option>
 											{/each}
 										</select>
